@@ -8,6 +8,8 @@
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <juce_audio_basics/juce_audio_basics.h>
 
+#include "analysis/TrackAnalysis.h"
+
 #include <atomic>
 #include <memory>
 #include <vector>
@@ -52,6 +54,11 @@ public:
 
     juce::File getLoadedFile() const;
     juce::String getTrackTitle() const;
+
+    /** Waveform peaks and the beat grid for the loaded track, or null when
+        nothing is loaded. Safe to call from the interface: the returned object
+        is immutable and keeps itself alive for as long as the caller holds it. */
+    std::shared_ptr<const TrackAnalysis> getAnalysis() const;
 
     //==========================================================================
     // Transport, callable from any thread
@@ -119,6 +126,7 @@ private:
     juce::AudioFormatManager& formatManager;
 
     std::atomic<Track*> activeTrack { nullptr };
+    std::atomic<std::shared_ptr<const TrackAnalysis>> analysisData;
     std::unique_ptr<Track> owned;                       // the live track
     std::vector<std::unique_ptr<Track>> retired;        // message thread only
 

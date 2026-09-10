@@ -5,6 +5,8 @@
 
 #include "core/Deck.h"
 
+#include "analysis/TrackAnalyser.h"
+
 #include <algorithm>
 #include <cmath>
 
@@ -87,7 +89,12 @@ bool Deck::loadFile (const juce::File& file)
     if (reader->numChannels == 1)
         track->audio.copyFrom (1, 0, track->audio, 0, 0, track->audio.getNumSamples());
 
+    // Waveform peaks and the beat grid are built here, on whichever thread is
+    // doing the loading, so the track is fully described the moment it appears.
+    auto analysis = TrackAnalyser::analyse (track->audio, track->sampleRate);
+
     publish (std::move (track));
+    analysisData.store (std::move (analysis));
     return true;
 }
 
@@ -120,6 +127,12 @@ void Deck::publish (std::unique_ptr<Track> newTrack)
 void Deck::unload()
 {
     publish (nullptr);
+    analysisData.store (nullptr);
+}
+
+std::shared_ptr<const TrackAnalysis> Deck::getAnalysis() const
+{
+    return analysisData.load();
 }
 
 void Deck::cleanUp()

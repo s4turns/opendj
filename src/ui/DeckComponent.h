@@ -7,7 +7,8 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
-#include "core/Deck.h"
+#include "core/AudioEngine.h"
+#include "ui/WaveformComponent.h"
 
 #include <memory>
 
@@ -41,20 +42,19 @@ public:
     }
 };
 
-/** One deck: load, transport, tempo and a seek strip.
-
-    The waveform view replaces the seek strip once analysis lands; until then the
-    strip gives the same click-to-seek behaviour in a fraction of the code.
-*/
+/** One deck: the two waveform views, transport, tempo and sync. */
 class DeckComponent final : public juce::Component
 {
 public:
-    DeckComponent (Deck& deckToControl, const juce::String& deckName);
+    DeckComponent (AudioEngine& engineToUse, int deckIndex, const juce::String& deckName);
     ~DeckComponent() override;
 
-    /** Pulls transport state from the deck. Called from the shell's timer
-        rather than each deck running its own. */
+    /** Pulls transport state from the deck. Driven by the shell's timer rather
+        than each deck running one of its own. */
     void refresh();
+
+    /** Starts a background load and analysis of the given file. */
+    void load (const juce::File& file);
 
     void paint (juce::Graphics& g) override;
     void resized() override;
@@ -62,28 +62,31 @@ public:
 private:
     void loadButtonClicked();
     void applyTempoFromSlider();
-    void seekFromMouse (const juce::MouseEvent& e);
+    void updateTempoReadout();
 
-    void mouseDown (const juce::MouseEvent& e) override;
-    void mouseDrag (const juce::MouseEvent& e) override;
+    AudioEngine& engine;
+    const int index;
+    juce::String name;
 
     Deck& deck;
-    juce::String name;
 
     juce::Label titleLabel;
     juce::Label timeLabel;
+    juce::Label bpmLabel;
     juce::TextButton loadButton { "Load" };
     juce::TextButton playButton { "Play" };
+    juce::TextButton syncButton { "Sync" };
     MomentaryButton cueButton { "Cue" };
     juce::Slider tempoSlider;
     juce::Label tempoLabel;
     juce::ComboBox tempoRangeBox;
 
-    juce::Rectangle<int> seekStripBounds;
-    std::unique_ptr<juce::FileChooser> fileChooser;
+    WaveformComponent scrollingWave { WaveformComponent::Mode::scrolling };
+    WaveformComponent overviewWave { WaveformComponent::Mode::overview };
 
-    double positionProportion = 0.0;
-    double cueProportion = 0.0;
+    std::unique_ptr<juce::FileChooser> fileChooser;
+    std::shared_ptr<const TrackAnalysis> shownAnalysis;
+    bool wasLoading = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (DeckComponent)
 };

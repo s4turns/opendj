@@ -48,7 +48,10 @@ target_sources(OpenDJ PRIVATE
     src/core/AudioEngine.cpp
     src/core/Deck.cpp
     src/core/Mixer.cpp
+    src/analysis/TrackAnalysis.cpp
+    src/analysis/TrackAnalyser.cpp
     src/ui/DeckComponent.cpp
+    src/ui/WaveformComponent.cpp
     src/ui/MixerComponent.cpp)
 
 target_include_directories(OpenDJ PRIVATE src)

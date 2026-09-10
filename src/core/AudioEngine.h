@@ -12,6 +12,8 @@
 #include "core/Mixer.h"
 
 #include <array>
+#include <atomic>
+#include <functional>
 #include <memory>
 
 namespace opendj
@@ -42,6 +44,27 @@ public:
     Deck& getDeck (int deckIndex) noexcept { return *decks[(size_t) deckIndex]; }
     Mixer& getMixer() noexcept { return mixer; }
 
+    /** Decodes and analyses a file on a background thread, then swaps it onto
+        the deck. Decoding a long track and finding its beat grid takes a second
+        or two, which is far too long to spend on the message thread. The
+        callback runs on the message thread. */
+    void loadTrackAsync (int deckIndex, const juce::File& file,
+                         std::function<void (bool)> onComplete = {});
+
+    /** Matches one deck's tempo and beat phase to the other. Returns false when
+        either deck has no usable beat grid, which is the honest answer for
+        material the analyser could not read. */
+    bool syncDeck (int followerIndex, int leaderIndex);
+
+    /** The deck's analysed tempo scaled by its tempo fader, or 0 with no grid. */
+    double getEffectiveBpm (int deckIndex) const;
+
+    bool isDeckLoading (int deckIndex) const noexcept
+    {
+        return juce::isPositiveAndBelow (deckIndex, numDecks)
+            && loading[(size_t) deckIndex].load (std::memory_order_relaxed);
+    }
+
     /** True when the open device has a second output pair for the cue bus. */
     bool hasCueOutput() const noexcept { return cueOutputAvailable.load (std::memory_order_relaxed); }
 
@@ -65,6 +88,9 @@ private:
 
     std::array<std::unique_ptr<Deck>, numDecks> decks;
     Mixer mixer;
+
+    juce::ThreadPool loaderPool { juce::ThreadPoolOptions{}.withNumberOfThreads (numDecks) };
+    std::array<std::atomic<bool>, numDecks> loading {};
 
     std::array<juce::AudioBuffer<float>, numDecks> deckBuffers;
     juce::AudioBuffer<float> masterBuffer;

@@ -5,6 +5,8 @@
 
 #include "core/AudioEngine.h"
 
+#include <cmath>
+
 namespace opendj
 {
 
@@ -25,6 +27,10 @@ AudioEngine::AudioEngine()
 AudioEngine::~AudioEngine()
 {
     stopTimer();
+
+    // Let any decode in flight finish before the decks go away.
+    loaderPool.removeAllJobs (true, 5000);
+
     deviceManager.removeAudioCallback (this);
     deviceManager.closeAudioDevice();
 }
@@ -39,6 +45,81 @@ juce::String AudioEngine::initialise()
     deviceManager.addAudioCallback (this);
     startTimer (retirementSweepMs);
     return {};
+}
+
+void AudioEngine::loadTrackAsync (int deckIndex, const juce::File& file,
+                                  std::function<void (bool)> onComplete)
+{
+    if (! juce::isPositiveAndBelow (deckIndex, numDecks))
+        return;
+
+    // Ignore a second request for the same deck rather than queueing it; the
+    // user pressing load twice should not analyse the same file twice.
+    if (loading[(size_t) deckIndex].exchange (true, std::memory_order_relaxed))
+        return;
+
+    loaderPool.addJob ([this, deckIndex, file, onComplete = std::move (onComplete)]
+    {
+        const auto succeeded = decks[(size_t) deckIndex]->loadFile (file);
+        loading[(size_t) deckIndex].store (false, std::memory_order_relaxed);
+
+        if (onComplete != nullptr)
+            juce::MessageManager::callAsync ([onComplete, succeeded] { onComplete (succeeded); });
+    });
+}
+
+double AudioEngine::getEffectiveBpm (int deckIndex) const
+{
+    if (! juce::isPositiveAndBelow (deckIndex, numDecks))
+        return 0.0;
+
+    const auto& deck = *decks[(size_t) deckIndex];
+    const auto analysis = deck.getAnalysis();
+
+    if (analysis == nullptr || ! analysis->hasTempo())
+        return 0.0;
+
+    return analysis->bpm * deck.getTempoRatio();
+}
+
+bool AudioEngine::syncDeck (int followerIndex, int leaderIndex)
+{
+    if (! juce::isPositiveAndBelow (followerIndex, numDecks)
+        || ! juce::isPositiveAndBelow (leaderIndex, numDecks)
+        || followerIndex == leaderIndex)
+        return false;
+
+    auto& follower = *decks[(size_t) followerIndex];
+    auto& leader = *decks[(size_t) leaderIndex];
+
+    const auto followerAnalysis = follower.getAnalysis();
+    const auto leaderAnalysis = leader.getAnalysis();
+
+    if (followerAnalysis == nullptr || ! followerAnalysis->hasTempo()
+        || leaderAnalysis == nullptr || ! leaderAnalysis->hasTempo())
+        return false;
+
+    const auto leaderBpm = leaderAnalysis->bpm * leader.getTempoRatio();
+    follower.setTempoRatio (leaderBpm / followerAnalysis->bpm);
+
+    // Match phase as well as tempo: work out how far through its beat the leader
+    // is, then put the follower the same distance through one of its own.
+    const auto leaderBeat = leaderAnalysis->secondsPerBeat();
+    const auto followerBeat = followerAnalysis->secondsPerBeat();
+
+    if (leaderBeat <= 0.0 || followerBeat <= 0.0)
+        return true;
+
+    auto phase = std::fmod (leader.getPositionSeconds() - leaderAnalysis->firstBeatSeconds, leaderBeat);
+
+    if (phase < 0.0)
+        phase += leaderBeat;
+
+    const auto proportion = phase / leaderBeat;
+    const auto nearestBeat = followerAnalysis->nearestBeatSeconds (follower.getPositionSeconds());
+
+    follower.seekToSeconds (nearestBeat + proportion * followerBeat);
+    return true;
 }
 
 juce::String AudioEngine::getDeviceDescription() const

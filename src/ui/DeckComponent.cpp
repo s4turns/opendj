@@ -27,18 +27,21 @@ namespace
     const juce::Colour cueColour     { 0xffe8a33d };
 }
 
-DeckComponent::DeckComponent (Deck& deckToControl, const juce::String& deckName)
-    : deck (deckToControl), name (deckName)
+DeckComponent::DeckComponent (AudioEngine& engineToUse, int deckIndex, const juce::String& deckName)
+    : engine (engineToUse), index (deckIndex), name (deckName), deck (engineToUse.getDeck (deckIndex))
 {
-    titleLabel.setText ("Deck " + name + "  |  empty", juce::dontSendNotification);
     titleLabel.setColour (juce::Label::textColourId, juce::Colours::white);
     titleLabel.setFont (juce::FontOptions (16.0f, juce::Font::bold));
     addAndMakeVisible (titleLabel);
 
-    timeLabel.setText ("0:00.0 / 0:00.0", juce::dontSendNotification);
     timeLabel.setColour (juce::Label::textColourId, juce::Colours::grey);
     timeLabel.setJustificationType (juce::Justification::centredRight);
     addAndMakeVisible (timeLabel);
+
+    bpmLabel.setColour (juce::Label::textColourId, accentColour);
+    bpmLabel.setFont (juce::FontOptions (15.0f, juce::Font::bold));
+    bpmLabel.setJustificationType (juce::Justification::centred);
+    addAndMakeVisible (bpmLabel);
 
     loadButton.onClick = [this] { loadButtonClicked(); };
     addAndMakeVisible (loadButton);
@@ -50,6 +53,14 @@ DeckComponent::DeckComponent (Deck& deckToControl, const juce::String& deckName)
     cueButton.onPress = [this] { deck.cuePressed(); refresh(); };
     cueButton.onRelease = [this] { deck.cueReleased(); refresh(); };
     addAndMakeVisible (cueButton);
+
+    syncButton.onClick = [this]
+    {
+        // With two decks the other one is always the leader.
+        if (engine.syncDeck (index, 1 - index))
+            updateTempoReadout();
+    };
+    addAndMakeVisible (syncButton);
 
     tempoSlider.setSliderStyle (juce::Slider::LinearVertical);
     tempoSlider.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
@@ -64,13 +75,40 @@ DeckComponent::DeckComponent (Deck& deckToControl, const juce::String& deckName)
     tempoRangeBox.onChange = [this] { applyTempoFromSlider(); };
     addAndMakeVisible (tempoRangeBox);
 
-    tempoLabel.setText ("0.0%", juce::dontSendNotification);
     tempoLabel.setJustificationType (juce::Justification::centred);
     tempoLabel.setColour (juce::Label::textColourId, juce::Colours::grey);
     addAndMakeVisible (tempoLabel);
+
+    addAndMakeVisible (scrollingWave);
+
+    overviewWave.onSeek = [this] (double seconds) { deck.seekToSeconds (seconds); refresh(); };
+    addAndMakeVisible (overviewWave);
+
+    refresh();
 }
 
 DeckComponent::~DeckComponent() = default;
+
+void DeckComponent::load (const juce::File& file)
+{
+    engine.loadTrackAsync (index, file, [safe = juce::Component::SafePointer<DeckComponent> (this),
+                                         file] (bool succeeded)
+    {
+        if (safe == nullptr)
+            return;
+
+        if (! succeeded)
+            juce::NativeMessageBox::showMessageBoxAsync (
+                juce::MessageBoxIconType::WarningIcon,
+                "Could not load track",
+                "OpenDJ could not decode " + file.getFileName()
+                    + ".\n\nIt may be an unsupported format, longer than 30 minutes, or damaged.");
+
+        safe->refresh();
+    });
+
+    refresh();
+}
 
 void DeckComponent::loadButtonClicked()
 {
@@ -85,20 +123,8 @@ void DeckComponent::loadButtonClicked()
     {
         const auto file = chooser.getResult();
 
-        if (file == juce::File())
-            return;
-
-        if (! deck.loadFile (file))
-        {
-            juce::NativeMessageBox::showMessageBoxAsync (
-                juce::MessageBoxIconType::WarningIcon,
-                "Could not load track",
-                "OpenDJ could not decode " + file.getFileName()
-                    + ".\n\nIt may be an unsupported format, longer than 30 minutes, or damaged.");
-            return;
-        }
-
-        refresh();
+        if (file != juce::File())
+            load (file);
     });
 }
 
@@ -115,80 +141,64 @@ void DeckComponent::applyTempoFromSlider()
     }();
 
     // The fader reads the way a DJ expects: up is faster.
-    const auto percent = tempoSlider.getValue() * rangePercent;
-    deck.setTempoRatio (1.0 + percent / 100.0);
+    deck.setTempoRatio (1.0 + tempoSlider.getValue() * rangePercent / 100.0);
+    updateTempoReadout();
+}
 
+void DeckComponent::updateTempoReadout()
+{
+    const auto percent = (deck.getTempoRatio() - 1.0) * 100.0;
     tempoLabel.setText (juce::String (percent, 1) + "%", juce::dontSendNotification);
+
+    const auto bpm = engine.getEffectiveBpm (index);
+    bpmLabel.setText (bpm > 0.0 ? juce::String (bpm, 1) + " BPM" : juce::String ("-- BPM"),
+                      juce::dontSendNotification);
 }
 
 void DeckComponent::refresh()
 {
+    const auto loading = engine.isDeckLoading (index);
     const auto length = deck.getLengthSeconds();
     const auto position = deck.getPositionSeconds();
 
-    positionProportion = length > 0.0 ? position / length : 0.0;
-    cueProportion = length > 0.0 ? deck.getCueSeconds() / length : 0.0;
+    if (auto analysis = deck.getAnalysis(); analysis != shownAnalysis)
+    {
+        shownAnalysis = std::move (analysis);
+        scrollingWave.setAnalysis (shownAnalysis);
+        overviewWave.setAnalysis (shownAnalysis);
+    }
 
-    const auto title = deck.isLoaded() ? deck.getTrackTitle() : juce::String ("empty");
+    scrollingWave.setPosition (position, length);
+    overviewWave.setPosition (position, length);
+    scrollingWave.setCuePoint (deck.getCueSeconds());
+    overviewWave.setCuePoint (deck.getCueSeconds());
+
+    const auto title = loading ? juce::String ("analysing...")
+                               : (deck.isLoaded() ? deck.getTrackTitle() : juce::String ("empty"));
+
     titleLabel.setText ("Deck " + name + "  |  " + title, juce::dontSendNotification);
-
-    timeLabel.setText (formatTime (position) + " / " + formatTime (length),
-                       juce::dontSendNotification);
+    timeLabel.setText (formatTime (position) + " / " + formatTime (length), juce::dontSendNotification);
 
     playButton.setButtonText (deck.isPlaying() ? "Pause" : "Play");
     playButton.setColour (juce::TextButton::buttonColourId,
-                          deck.isPlaying() ? accentColour.darker (0.4f)
-                                           : juce::Colour (0xff2c2c34));
+                          deck.isPlaying() ? accentColour.darker (0.4f) : juce::Colour (0xff2c2c34));
 
-    repaint (seekStripBounds);
+    syncButton.setEnabled (engine.getEffectiveBpm (index) > 0.0
+                           && engine.getEffectiveBpm (1 - index) > 0.0);
+
+    updateTempoReadout();
+
+    if (loading != wasLoading)
+    {
+        wasLoading = loading;
+        loadButton.setEnabled (! loading);
+    }
 }
 
 void DeckComponent::paint (juce::Graphics& g)
 {
     g.setColour (panelColour);
     g.fillRoundedRectangle (getLocalBounds().toFloat(), 6.0f);
-
-    // Seek strip: the waveform view takes this over once analysis lands.
-    auto strip = seekStripBounds.toFloat();
-    g.setColour (juce::Colour (0xff101014));
-    g.fillRoundedRectangle (strip, 3.0f);
-
-    if (deck.isLoaded())
-    {
-        auto played = strip.withWidth (strip.getWidth() * static_cast<float> (positionProportion));
-        g.setColour (accentColour.withAlpha (0.55f));
-        g.fillRoundedRectangle (played, 3.0f);
-
-        const auto cueX = strip.getX() + strip.getWidth() * static_cast<float> (cueProportion);
-        g.setColour (cueColour);
-        g.fillRect (cueX - 1.0f, strip.getY(), 2.0f, strip.getHeight());
-    }
-    else
-    {
-        g.setColour (juce::Colours::darkgrey);
-        g.setFont (juce::FontOptions (12.0f));
-        g.drawText ("Drop a track here or press Load", strip, juce::Justification::centred);
-    }
-}
-
-void DeckComponent::mouseDown (const juce::MouseEvent& e)
-{
-    seekFromMouse (e);
-}
-
-void DeckComponent::mouseDrag (const juce::MouseEvent& e)
-{
-    seekFromMouse (e);
-}
-
-void DeckComponent::seekFromMouse (const juce::MouseEvent& e)
-{
-    if (! deck.isLoaded() || ! seekStripBounds.contains (e.getPosition()))
-        return;
-
-    const auto proportion = (e.position.x - seekStripBounds.getX()) / seekStripBounds.getWidth();
-    deck.seekToFraction (proportion);
-    refresh();
 }
 
 void DeckComponent::resized()
@@ -196,11 +206,14 @@ void DeckComponent::resized()
     auto area = getLocalBounds().reduced (10);
 
     auto header = area.removeFromTop (24);
-    timeLabel.setBounds (header.removeFromRight (150));
+    timeLabel.setBounds (header.removeFromRight (130));
+    bpmLabel.setBounds (header.removeFromRight (90));
     titleLabel.setBounds (header);
 
     area.removeFromTop (8);
-    seekStripBounds = area.removeFromTop (54);
+    scrollingWave.setBounds (area.removeFromTop (96));
+    area.removeFromTop (4);
+    overviewWave.setBounds (area.removeFromTop (34));
 
     area.removeFromTop (10);
 
@@ -212,11 +225,13 @@ void DeckComponent::resized()
     area.removeFromRight (10);
 
     auto transport = area.removeFromTop (40);
-    loadButton.setBounds (transport.removeFromLeft (70).reduced (0, 2));
-    transport.removeFromLeft (8);
-    cueButton.setBounds (transport.removeFromLeft (70).reduced (0, 2));
-    transport.removeFromLeft (8);
-    playButton.setBounds (transport.removeFromLeft (90).reduced (0, 2));
+    loadButton.setBounds (transport.removeFromLeft (66).reduced (0, 2));
+    transport.removeFromLeft (6);
+    cueButton.setBounds (transport.removeFromLeft (66).reduced (0, 2));
+    transport.removeFromLeft (6);
+    playButton.setBounds (transport.removeFromLeft (82).reduced (0, 2));
+    transport.removeFromLeft (6);
+    syncButton.setBounds (transport.removeFromLeft (66).reduced (0, 2));
 }
 
 } // namespace opendj

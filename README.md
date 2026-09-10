@@ -6,8 +6,8 @@ The goal is an application a VirtualDJ user can sit down at and already know how
 the same deck layout, the same workflow, the same muscle memory. The artwork, the naming
 and the code are entirely original and entirely open.
 
-**Status: early development.** Two decks play, the mixer works, and you can beatmatch by
-ear with the tempo faders. There is no waveform, no BPM analysis and no controller support yet.
+**Status: early development.** Two decks play with waveforms, beat grids, automatic BPM
+detection and sync. The mixer works. There is no track browser and no controller support yet.
 
 ## Design goals
 
@@ -34,8 +34,13 @@ streaming services and recording.
 
 ## Using it
 
-Load a track with the Load button on either deck, or drag an audio file onto a deck. Click
-the seek strip to move through the track.
+Load a track with the Load button on either deck, or drag an audio file onto a deck. Decoding
+and analysis run in the background, so the interface stays responsive on a long file. Click the
+overview waveform to move through the track.
+
+Each deck shows a scrolling waveform with the beat grid drawn over it, bar lines brighter than
+beats, and the detected tempo next to the title. Sync matches this deck's tempo and beat phase
+to the other one.
 
 | Key | Action |
 | --- | --- |

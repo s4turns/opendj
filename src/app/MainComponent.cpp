@@ -36,8 +36,8 @@ MainComponent::MainComponent()
 
     for (int i = 0; i < AudioEngine::numDecks; ++i)
     {
-        deckViews[(size_t) i] = std::make_unique<DeckComponent> (engine.getDeck (i),
-                                                                 juce::String::charToString ('A' + (juce::juce_wchar) i));
+        deckViews[(size_t) i] = std::make_unique<DeckComponent> (
+            engine, i, juce::String::charToString ('A' + (juce::juce_wchar) i));
         addAndMakeVisible (*deckViews[(size_t) i]);
     }
 
@@ -118,9 +118,7 @@ void MainComponent::filesDropped (const juce::StringArray& files, int x, int y)
         if (! deckViews[(size_t) i]->getBounds().contains (dropPoint))
             continue;
 
-        if (engine.getDeck (i).loadFile (juce::File (files[0])))
-            deckViews[(size_t) i]->refresh();
-
+        deckViews[(size_t) i]->load (juce::File (files[0]));
         return;
     }
 }
