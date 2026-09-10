@@ -39,6 +39,10 @@ check behind it, not just code that compiles.
 | Arch | ⬜ | ⬜ | `scripts/build.sh` knows the packages, untested |
 | macOS | ⬜ | ⬜ | JUCE supports it; nothing has been tried |
 
+## FX
+
+Real-time stem separation using the same algorithm as Virtual DJ.
+
 ## Item 13: DJ-202, as measured on the hardware
 
 | Check | Status | What was found |
