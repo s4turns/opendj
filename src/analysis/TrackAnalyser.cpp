@@ -5,6 +5,8 @@
 
 #include "analysis/TrackAnalyser.h"
 
+#include "analysis/KeyDetector.h"
+
 #include <juce_dsp/juce_dsp.h>
 
 #include <algorithm>
@@ -602,6 +604,10 @@ std::shared_ptr<const TrackAnalysis> TrackAnalyser::analyse (const juce::AudioBu
 
     if (! buildWaveforms (*analysis, audio, sampleRate, options))
         return analysis;
+
+    // Before the tempo work, and not inside it: a track with no steady pulse
+    // still has a key, and the tempo pass returns early when it finds nothing.
+    analysis->key = KeyDetector::detect (audio, sampleRate);
 
     const auto envelopes = onsetEnvelopes (toMono (audio), sampleRate);
     const auto& envelope = envelopes.full;

@@ -7,6 +7,8 @@
 
 #include <juce_audio_basics/juce_audio_basics.h>
 
+#include "analysis/KeyDetector.h"
+
 #include <vector>
 
 namespace opendj
@@ -47,7 +49,10 @@ struct TrackAnalysis
     double firstBeatSeconds = 0.0;   ///< the downbeat the grid is anchored to
     float confidence = 0.0f;         ///< 0 to 1, how clear the tempo peak was
 
+    MusicalKey key;                  ///< invalid when nothing tonal was found
+
     bool hasTempo() const noexcept { return bpm > 0.0; }
+    bool hasKey() const noexcept { return key.isValid(); }
 
     /** The beat nearest a position, in seconds. Returns the position unchanged
         when there is no grid. */

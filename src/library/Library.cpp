@@ -571,6 +571,13 @@ void Library::store (const juce::File& file, const TrackAnalysis& analysis, doub
     record.bpm = analysis.bpm;
     record.firstBeatSeconds = analysis.firstBeatSeconds;
     record.tempoConfidence = analysis.confidence;
+
+    // A key written into the file's tags was put there by a person, or at least
+    // by software the owner of the collection chose. Detection fills the gap
+    // where there is nothing; it does not overrule what is already claimed.
+    if (analysis.hasKey() && record.key.isEmpty())
+        record.key = analysis.key.toString();
+
     record.analysed = true;
 
     upsertTrack (record);

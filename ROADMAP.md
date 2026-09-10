@@ -127,12 +127,35 @@ that is plainly 126, so the disagreement is not necessarily the wrong way round.
 To repeat the check, point the library at a folder, let the scan finish, and
 compare the `bpm` column with whatever you trust.
 
+## Key detection
+
+Twelve pitch classes folded out of the spectrum, then matched against the twenty-four
+Krumhansl-Kessler major and minor profiles. Reported in the spelling DJ software uses, sharps
+throughout, and convertible to Camelot notation, which is what harmonic mixing actually runs on.
+
+| Decision | Why |
+| --- | --- |
+| Only the middle two minutes are read | The intro and outro of a club record are usually just drums, which say nothing about key and pull the histogram towards noise. Reading a whole ten minute track costs five times as much and changes almost nothing |
+| Bins more than 35 cents off a semitone do not vote | A bin sitting between two semitones belongs to neither, and letting it vote is what turns a chromagram into a flat smear |
+| Nothing below about C3 counts | Below that, semitones are closer together than the transform can resolve, so they land in the wrong pitch class |
+| Each frame is normalised before it is added | So a loud drop does not outvote the four quiet minutes that share its key |
+| A key already in the tags wins | Detection fills the gap where there is nothing rather than overruling what a person put there |
+
+Confidence is the margin over the runner-up. It is worth reading: a track whose key is
+unambiguous finishes well clear, while a chromatic wash produces a near-tie between keys that
+share no notes.
+
+The honest limitation is the relative major. A minor key and its relative major contain the
+same seven notes, and a progression that touches neither leading tone is ambiguous to any
+method, including this one. Camelot notation is forgiving here, since a key and its relative
+share a number and mix anyway.
+
 ## Beyond milestone 1
 
 | Item | Status | Notes |
 | --- | :---: | --- |
 | Slip mode | ⬜ | After a scratch the track carries on from where the hand left it, rather than catching up to where it would have been. The DJ-202 has a button for it on note 0x07 |
-| Key detection | ⬜ | The library has the column and the browser the display; only tags fill them in so far |
+| Key detection | ✅ | `src/analysis/KeyDetector.*`, shown in the browser's Key column. See above |
 | Four decks | ⬜ | `AudioEngine::numDecks` is a constant the mixer sizes itself from, so the engine mostly follows. The interface and the DJ-202 deck-toggle button are the work |
 | Loops and loop rolls | ⬜ | The DJ-202's second pad row is already reserved for these |
 | Effects | ⬜ | Filter, echo, reverb. The DJ-202 effects section is on MIDI channels 9 and 10, unmapped |

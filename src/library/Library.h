@@ -67,8 +67,11 @@ class Library final : public AnalysisCache
 {
 public:
     /** Bump this when the analyser changes enough that old results are wrong.
-        Every track then quietly goes back into the queue. */
-    static constexpr int analysisVersion = 1;
+        Every track then quietly goes back into the queue.
+
+        2: the analyser now detects key as well as tempo, so tracks analysed by
+        version 1 have an empty key column that only a re-analysis will fill. */
+    static constexpr int analysisVersion = 2;
 
     Library();
     ~Library() override;

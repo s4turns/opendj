@@ -16,6 +16,7 @@ target_sources(opendj-tests PRIVATE
     Mixer_test.cpp
     Deck_test.cpp
     TrackAnalyser_test.cpp
+    KeyDetector_test.cpp
     MidiMapping_test.cpp
     AngleMath_test.cpp
     Library_test.cpp
