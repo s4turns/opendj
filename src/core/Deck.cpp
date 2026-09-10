@@ -47,6 +47,36 @@ namespace
 
     constexpr double gainRampSeconds = 0.005;
 
+    /** One channel of the track at a fractional position: the recorded mix, or
+        the stems weighted by their gains when the track has been separated.
+        Summing the stems at unity gives the mix back, so the two paths agree;
+        the mix is used when it can be, because it is a quarter of the work. */
+    inline float readSample (const float* const* mix,
+                             const SeparatedTrack* separation,
+                             const float* stemGains,
+                             int channel,
+                             juce::int64 numSamples,
+                             double position) noexcept
+    {
+        if (separation == nullptr)
+            return interpolate (mix[channel], numSamples, position);
+
+        float sum = 0.0f;
+
+        for (int stem = 0; stem < numStems; ++stem)
+        {
+            // A silenced stem is the common case once a pad is pressed, and it
+            // costs nothing to skip the interpolation for it.
+            if (stemGains[stem] <= 0.0f)
+                continue;
+
+            sum += interpolate (separation->stems[(size_t) stem].getReadPointer (channel),
+                                numSamples, position) * stemGains[stem];
+        }
+
+        return sum;
+    }
+
     // A record at 33 1/3 rpm takes 1.8 seconds to go round once.
     constexpr double vinylRevolutionSeconds = 60.0 / (100.0 / 3.0);
 
@@ -91,13 +121,59 @@ Deck::Deck (int deckIndex, juce::AudioFormatManager& formatManagerToUse)
 {
     for (auto& cue : hotCues)
         cue.store (-1.0, std::memory_order_relaxed);
+
+    for (auto& gain : stemGains)
+        gain.store (1.0f, std::memory_order_relaxed);
+}
+
+//==============================================================================
+// Stems
+//==============================================================================
+
+void Deck::setSeparation (std::shared_ptr<const SeparatedTrack> separation, const juce::File& forFile)
+{
+    // A separation takes far longer than a load, so by the time one arrives the
+    // deck may be playing something else entirely. Playing it then would be a
+    // different record over this one.
+    if (getLoadedFile() != forFile)
+        return;
+
+    if (separation != nullptr && ! separation->isWellFormed())
+        return;
+
+    auto* raw = separation.get();
+    auto previous = std::move (ownedSeparation);
+    ownedSeparation = std::move (separation);
+
+    activeSeparation.store (raw, std::memory_order_release);
+
+    if (previous != nullptr)
+        retiredSeparations.emplace_back (std::move (previous),
+                                         blocksProcessed.load (std::memory_order_relaxed));
+}
+
+void Deck::setStemGain (Stem stem, float gain)
+{
+    const auto index = static_cast<size_t> (stem);
+
+    if (index < numStems)
+        stemGains[index].store (juce::jlimit (0.0f, 2.0f, gain), std::memory_order_relaxed);
+}
+
+float Deck::getStemGain (Stem stem) const
+{
+    const auto index = static_cast<size_t> (stem);
+    return index < numStems ? stemGains[index].load (std::memory_order_relaxed) : 1.0f;
 }
 
 Deck::~Deck()
 {
     activeTrack.store (nullptr, std::memory_order_release);
+    activeSeparation.store (nullptr, std::memory_order_release);
     owned.reset();
+    ownedSeparation.reset();
     retired.clear();
+    retiredSeparations.clear();
 }
 
 //==============================================================================
@@ -149,6 +225,13 @@ void Deck::publish (std::unique_ptr<Track> newTrack)
     for (auto& cue : hotCues)
         cue.store (-1.0, std::memory_order_relaxed);
 
+    // The stems belonged to the track being replaced, so they go with it.
+    activeSeparation.store (nullptr, std::memory_order_release);
+
+    if (ownedSeparation != nullptr)
+        retiredSeparations.emplace_back (std::move (ownedSeparation),
+                                         blocksProcessed.load (std::memory_order_relaxed));
+
     lengthSeconds.store (seconds, std::memory_order_relaxed);
     cuePointSeconds.store (0.0, std::memory_order_relaxed);
     positionSeconds.store (0.0, std::memory_order_relaxed);
@@ -177,6 +260,15 @@ std::shared_ptr<const TrackAnalysis> Deck::getAnalysis() const
 void Deck::cleanUp()
 {
     const auto now = blocksProcessed.load (std::memory_order_relaxed);
+
+    const auto separationSafeToFree = [now] (const auto& entry)
+    {
+        return now - entry.second >= 2;
+    };
+
+    retiredSeparations.erase (std::remove_if (retiredSeparations.begin(), retiredSeparations.end(),
+                                              separationSafeToFree),
+                              retiredSeparations.end());
 
     // Two blocks is enough: the audio thread reloads the pointer at the top of
     // every processBlock() call, so it cannot still hold a stale one by then.
@@ -366,6 +458,12 @@ void Deck::prepare (double sampleRate, int)
     transportGain.reset (deviceSampleRate, gainRampSeconds);
     transportGain.setCurrentAndTargetValue (0.0f);
 
+    for (size_t i = 0; i < numStems; ++i)
+    {
+        stemGainRamps[i].reset (deviceSampleRate, gainRampSeconds);
+        stemGainRamps[i].setCurrentAndTargetValue (stemGains[i].load (std::memory_order_relaxed));
+    }
+
     // Built here, before the device starts, so that processBlock() never has to.
     stretcher = std::make_unique<RubberBand::RubberBandStretcher> (
         static_cast<size_t> (deviceSampleRate), 2, stretchOptions, 1.0, 1.0);
@@ -485,6 +583,23 @@ void Deck::processBlock (juce::AudioBuffer<float>& destination)
 
     const float* source[2] = { track->audio.getReadPointer (0), track->audio.getReadPointer (1) };
 
+    // Stems are only worth reading when one of them is turned down: at unity
+    // they sum back to the mix that is already there, for four times the work.
+    const auto* separation = activeSeparation.load (std::memory_order_acquire);
+    float stemGainNow[numStems];
+    auto anyStemChanged = false;
+
+    for (size_t stem = 0; stem < numStems; ++stem)
+    {
+        stemGainRamps[stem].setTargetValue (stemGains[stem].load (std::memory_order_relaxed));
+        anyStemChanged = anyStemChanged || stemGainRamps[stem].getTargetValue() != 1.0f
+                                        || stemGainRamps[stem].getCurrentValue() != 1.0f;
+        stemGainNow[stem] = stemGainRamps[stem].getCurrentValue();
+    }
+
+    if (! anyStemChanged)
+        separation = nullptr;
+
     // Key lock is bypassed on the platter, and if it would have nothing to do:
     // at exactly the recorded speed the stretcher is a delay line, and a delay
     // that comes and goes with the fader is worse than a pitch that does.
@@ -495,7 +610,7 @@ void Deck::processBlock (juce::AudioBuffer<float>& destination)
                          && std::abs (rate - fileToDevice) > 1.0e-6;
 
     if (stretching)
-        renderStretched (*track, destination, rate, fileToDevice);
+        renderStretched (*track, destination, rate, fileToDevice, separation, stemGainNow);
     else
         stretchPrimed = false;
 
@@ -507,11 +622,15 @@ void Deck::processBlock (juce::AudioBuffer<float>& destination)
         const auto gain = transportGain.getNextValue() * trim;
         const auto inRange = position >= 0.0 && position < static_cast<double> (numSamples);
 
+        for (size_t stem = 0; stem < numStems; ++stem)
+            stemGainNow[stem] = stemGainRamps[stem].getNextValue();
+
         for (int ch = 0; ch < outChannels; ++ch)
         {
             const auto sample = stretching
                 ? destination.getSample (ch, i) * gain
-                : (inRange ? interpolate (source[ch], numSamples, position) * gain : 0.0f);
+                : (inRange ? readSample (source, separation, stemGainNow, ch, numSamples, position) * gain
+                           : 0.0f);
 
             destination.setSample (ch, i, sample);
             peak = juce::jmax (peak, std::abs (sample));
@@ -547,7 +666,8 @@ void Deck::processBlock (juce::AudioBuffer<float>& destination)
 // Key lock
 //==============================================================================
 
-void Deck::feedStretcher (const Track& track, double fileToDevice)
+void Deck::feedStretcher (const Track& track, double fileToDevice,
+                          const SeparatedTrack* separation, const float* stemGains)
 {
     // The stretcher says how much it wants; give it that, within the chunk it
     // was told to expect. Zero means it is full and only needs draining, but a
@@ -560,6 +680,8 @@ void Deck::feedStretcher (const Track& track, double fileToDevice)
     // speed, so the stretcher sees audio at its own sample rate and at the
     // original pitch. Off either end the read is silence, which is what a
     // stretcher should be fed there.
+    const float* mix[2] = { track.audio.getReadPointer (0), track.audio.getReadPointer (1) };
+
     for (int ch = 0; ch < 2; ++ch)
     {
         auto* out = stretchInput.getWritePointer (ch);
@@ -567,7 +689,10 @@ void Deck::feedStretcher (const Track& track, double fileToDevice)
 
         for (int i = 0; i < count; ++i)
         {
-            out[i] = interpolate (track.audio.getReadPointer (ch), numSamples, position);
+            // The gains are taken as they stand rather than ramped: this audio
+            // is going into a stretcher that will smear it over its own window,
+            // which is far longer than any ramp would be.
+            out[i] = readSample (mix, separation, stemGains, ch, numSamples, position);
             position += fileToDevice;
         }
     }
@@ -579,7 +704,8 @@ void Deck::feedStretcher (const Track& track, double fileToDevice)
 }
 
 void Deck::renderStretched (const Track& track, juce::AudioBuffer<float>& destination,
-                            double rate, double fileToDevice)
+                            double rate, double fileToDevice,
+                            const SeparatedTrack* separation, const float* stemGains)
 {
     // Output samples per input sample. Each output sample must consume `rate`
     // file samples, and each input sample is fileToDevice of them.
@@ -601,7 +727,7 @@ void Deck::renderStretched (const Track& track, juce::AudioBuffer<float>& destin
         {
             if (stretcher->available() <= 0)
             {
-                feedStretcher (track, fileToDevice);
+                feedStretcher (track, fileToDevice, separation, stemGains);
                 continue;
             }
 
@@ -620,7 +746,7 @@ void Deck::renderStretched (const Track& track, juce::AudioBuffer<float>& destin
     {
         if (stretcher->available() <= 0)
         {
-            feedStretcher (track, fileToDevice);
+            feedStretcher (track, fileToDevice, separation, stemGains);
             continue;
         }
 

@@ -89,6 +89,7 @@ set(OPENDJ_ENGINE_SOURCES
     ${CMAKE_SOURCE_DIR}/src/analysis/TrackAnalysis.cpp
     ${CMAKE_SOURCE_DIR}/src/analysis/TrackAnalyser.cpp
     ${CMAKE_SOURCE_DIR}/src/analysis/TrackDecoder.cpp
+    ${CMAKE_SOURCE_DIR}/src/analysis/StemDsp.cpp
     ${CMAKE_SOURCE_DIR}/src/control/Action.cpp
     ${CMAKE_SOURCE_DIR}/src/control/ActionDispatcher.cpp
     ${CMAKE_SOURCE_DIR}/src/control/MidiMapping.cpp

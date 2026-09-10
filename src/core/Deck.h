@@ -9,6 +9,7 @@
 #include <juce_audio_basics/juce_audio_basics.h>
 
 #include "analysis/AnalysisCache.h"
+#include "analysis/Stems.h"
 #include "analysis/TrackAnalysis.h"
 
 #include <array>
@@ -99,6 +100,22 @@ public:
     float getTrim() const noexcept { return trimGain.load (std::memory_order_relaxed); }
 
     //==========================================================================
+    // Stems
+    //==========================================================================
+
+    /** Hands the deck a separated copy of the track it is already playing.
+        Ignored if it does not match what is loaded, so a separation that
+        finishes after the deck moved on is discarded rather than played. */
+    void setSeparation (std::shared_ptr<const SeparatedTrack> separation, const juce::File& forFile);
+
+    bool hasStems() const noexcept { return activeSeparation.load (std::memory_order_acquire) != nullptr; }
+
+    /** 1 is the stem as recorded, 0 removes it. Takes effect on the next block,
+        smoothed, so a pad does not click. */
+    void setStemGain (Stem stem, float gain);
+    float getStemGain (Stem stem) const;
+
+    //==========================================================================
     // Hot cues
     //==========================================================================
 
@@ -169,6 +186,22 @@ private:
     juce::AudioFormatManager& formatManager;
 
     std::atomic<Track*> activeTrack { nullptr };
+
+    // Stems live beside the track rather than inside it: a separation arrives
+    // long after the track it belongs to, and swapping it in must not disturb a
+    // deck that is already playing.
+    //
+    // Published the same way a track is, by storing one raw pointer. An
+    // atomic<shared_ptr> would be the obvious thing and is exactly wrong here:
+    // the standard library implements it with a spin lock, and the audio thread
+    // must not wait on one. The owning pointer stays on the message thread and
+    // the displaced one is retired until the audio thread has moved past it.
+    std::atomic<const SeparatedTrack*> activeSeparation { nullptr };
+    std::shared_ptr<const SeparatedTrack> ownedSeparation;
+    std::vector<std::pair<std::shared_ptr<const SeparatedTrack>, juce::uint32>> retiredSeparations;
+
+    std::array<std::atomic<float>, numStems> stemGains;
+    std::array<juce::SmoothedValue<float>, numStems> stemGainRamps;   // audio thread
     std::atomic<std::shared_ptr<const TrackAnalysis>> analysisData;
     std::unique_ptr<Track> owned;                       // the live track
     std::vector<std::unique_ptr<Track>> retired;        // message thread only
@@ -208,8 +241,10 @@ private:
     bool stretchPrimed = false;                            // audio thread only
 
     void renderStretched (const Track& track, juce::AudioBuffer<float>& destination,
-                          double rate, double fileToDevice);
-    void feedStretcher (const Track& track, double fileToDevice);
+                          double rate, double fileToDevice,
+                          const SeparatedTrack* separation, const float* stemGains);
+    void feedStretcher (const Track& track, double fileToDevice,
+                        const SeparatedTrack* separation, const float* stemGains);
 
     double readPosition = 0.0;                          // audio thread, in file samples
     double deviceSampleRate = 44100.0;

@@ -604,3 +604,145 @@ TEST_CASE ("letting go of a scratch does not jump the head", "[deck][jog][scratc
     REQUIRE_THAT (fixture.deck->getPositionSeconds() - scratched,
                   WithinAbs (fixture.secondsPerBlock(), 0.002));
 }
+
+namespace
+{
+    /** A separation whose four stems are tones an octave apart, so which of them
+        survived a gain change can be read straight off the output. */
+    std::shared_ptr<opendj::SeparatedTrack> makeSeparation (int numSamples, double rate)
+    {
+        auto separation = std::make_shared<opendj::SeparatedTrack>();
+        separation->sampleRate = rate;
+
+        const double frequency[opendj::numStems] { 110.0, 220.0, 440.0, 880.0 };
+
+        for (int stem = 0; stem < opendj::numStems; ++stem)
+        {
+            auto& buffer = separation->stems[(size_t) stem];
+            buffer.setSize (2, numSamples);
+
+            const auto delta = juce::MathConstants<double>::twoPi * frequency[stem] / rate;
+            double phase = 0.0;
+
+            for (int i = 0; i < numSamples; ++i)
+            {
+                const auto value = static_cast<float> (std::sin (phase)) * 0.2f;
+                phase += delta;
+                buffer.setSample (0, i, value);
+                buffer.setSample (1, i, value);
+            }
+        }
+
+        return separation;
+    }
+}
+
+TEST_CASE ("a separation is refused unless it matches the loaded track", "[deck][stems]")
+{
+    Fixture fixture;
+    auto separation = makeSeparation (44100, 44100.0);
+
+    // A separation finishing after the deck moved on belongs to another record.
+    fixture.deck->setSeparation (separation, juce::File ("/some/other/track.mp3"));
+    REQUIRE_FALSE (fixture.deck->hasStems());
+
+    fixture.deck->setSeparation (separation, fixture.deck->getLoadedFile());
+    REQUIRE (fixture.deck->hasStems());
+}
+
+TEST_CASE ("a malformed separation is refused", "[deck][stems]")
+{
+    Fixture fixture;
+
+    auto ragged = makeSeparation (44100, 44100.0);
+    ragged->stems[2].setSize (2, 100);        // one stem a different length
+
+    fixture.deck->setSeparation (ragged, fixture.deck->getLoadedFile());
+    REQUIRE_FALSE (fixture.deck->hasStems());
+
+    auto empty = std::make_shared<opendj::SeparatedTrack>();
+    fixture.deck->setSeparation (empty, fixture.deck->getLoadedFile());
+    REQUIRE_FALSE (fixture.deck->hasStems());
+}
+
+TEST_CASE ("stems at unity sound like the track they came from", "[deck][stems]")
+{
+    // Every stem at 1 must leave the output untouched: the deck should still be
+    // playing the recorded mix, not a reconstruction of it.
+    Fixture withoutStems;
+    withoutStems.deck->play();
+    withoutStems.run (30);
+    const auto plain = withoutStems.capture (20);
+
+    Fixture withStems;
+    withStems.deck->setSeparation (makeSeparation (44100 * 8, 44100.0),
+                                   withStems.deck->getLoadedFile());
+    withStems.deck->play();
+    withStems.run (30);
+    const auto stems = withStems.capture (20);
+
+    REQUIRE (plain.size() == stems.size());
+
+    auto worst = 0.0f;
+
+    for (size_t i = 0; i < plain.size(); ++i)
+        worst = juce::jmax (worst, std::abs (plain[i] - stems[i]));
+
+    INFO ("largest difference: " << worst);
+    REQUIRE (worst < 1.0e-6f);
+}
+
+TEST_CASE ("silencing a stem removes it and leaves the others", "[deck][stems]")
+{
+    Fixture fixture;
+    fixture.deck->setSeparation (makeSeparation (44100 * 8, 44100.0),
+                                 fixture.deck->getLoadedFile());
+    fixture.deck->play();
+
+    // Everything but the 440 Hz stem turned off, so that is what should be left.
+    fixture.deck->setStemGain (opendj::Stem::drums, 0.0f);
+    fixture.deck->setStemGain (opendj::Stem::bass, 0.0f);
+    fixture.deck->setStemGain (opendj::Stem::vocals, 0.0f);
+    fixture.run (40);
+
+    const auto tone = fixture.capture (100);
+    REQUIRE_THAT (measureFrequency (tone, deviceSampleRate), WithinAbs (440.0, 5.0));
+
+    // And with that one gone too, silence.
+    fixture.deck->setStemGain (opendj::Stem::other, 0.0f);
+    fixture.run (40);
+    fixture.deck->processBlock (fixture.buffer);
+    REQUIRE (fixture.buffer.getMagnitude (0, 0, blockSize) < 0.001f);
+}
+
+TEST_CASE ("a stem gain change does not click", "[deck][stems]")
+{
+    Fixture fixture;
+    fixture.deck->setSeparation (makeSeparation (44100 * 8, 44100.0),
+                                 fixture.deck->getLoadedFile());
+    fixture.deck->play();
+    fixture.run (30);
+
+    fixture.deck->setStemGain (opendj::Stem::vocals, 0.0f);
+
+    const auto samples = fixture.capture (4);
+    auto biggestStep = 0.0f;
+
+    for (size_t i = 1; i < samples.size(); ++i)
+        biggestStep = juce::jmax (biggestStep, std::abs (samples[i] - samples[i - 1]));
+
+    // A step change would show as a jump far larger than one sample of a tone.
+    INFO ("largest sample-to-sample step: " << biggestStep);
+    REQUIRE (biggestStep < 0.05f);
+}
+
+TEST_CASE ("loading another track drops the stems with it", "[deck][stems]")
+{
+    Fixture fixture;
+    fixture.deck->setSeparation (makeSeparation (44100 * 8, 44100.0),
+                                 fixture.deck->getLoadedFile());
+    REQUIRE (fixture.deck->hasStems());
+
+    REQUIRE (fixture.deck->loadFile (fixture.temporaryFile.getFile()));
+    REQUIRE_FALSE (fixture.deck->hasStems());
+}
