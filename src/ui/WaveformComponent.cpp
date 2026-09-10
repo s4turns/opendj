@@ -18,6 +18,7 @@ namespace
     const juce::Colour cueColour        { 0xffe8a33d };
     const juce::Colour beatColour       { 0x40ffffff };
     const juce::Colour barColour        { 0x90ffffff };
+    const juce::Colour loopColour       { 0xff4ad991 };
 }
 
 WaveformComponent::WaveformComponent (Mode modeToUse)
@@ -53,6 +54,19 @@ void WaveformComponent::setCuePoint (double seconds)
         return;
 
     cueSeconds = seconds;
+    repaint();
+}
+
+void WaveformComponent::setLoop (double startSeconds, double endSeconds, bool enabled)
+{
+    if (juce::approximatelyEqual (startSeconds, loopStart)
+        && juce::approximatelyEqual (endSeconds, loopEnd)
+        && enabled == loopEnabled)
+        return;
+
+    loopStart = startSeconds;
+    loopEnd = endSeconds;
+    loopEnabled = enabled;
     repaint();
 }
 
@@ -112,6 +126,15 @@ void WaveformComponent::paintOverview (juce::Graphics& g)
         g.drawVerticalLine (x, top, juce::jmax (top + 1.0f, bottom));
     }
 
+    if (trackLengthSeconds > 0.0 && loopStart >= 0.0 && loopEnd > loopStart)
+    {
+        const auto from = static_cast<float> (loopStart / trackLengthSeconds) * width;
+        const auto to = static_cast<float> (loopEnd / trackLengthSeconds) * width;
+
+        g.setColour (loopColour.withAlpha (loopEnabled ? 0.30f : 0.12f));
+        g.fillRect (from, 0.0f, juce::jmax (1.0f, to - from), height);
+    }
+
     if (trackLengthSeconds > 0.0)
     {
         const auto cueX = static_cast<float> (cueSeconds / trackLengthSeconds) * width;
@@ -138,7 +161,24 @@ void WaveformComponent::paintScrolling (juce::Graphics& g)
     const auto startSeconds = positionSeconds - windowSeconds;
     const auto secondsPerPixel = spanSeconds / juce::jmax (1, width);
 
-    // Beat grid first, so the waveform draws over it.
+    // The loop goes down first of all, so the grid and the waveform both read
+    // over the top of it rather than being hidden by it.
+    if (loopStart >= 0.0 && loopEnd > loopStart)
+    {
+        const auto from = static_cast<float> ((loopStart - startSeconds) / secondsPerPixel);
+        const auto to = static_cast<float> ((loopEnd - startSeconds) / secondsPerPixel);
+
+        g.setColour (loopColour.withAlpha (loopEnabled ? 0.22f : 0.10f));
+        g.fillRect (from, 0.0f, juce::jmax (1.0f, to - from), height);
+
+        // Hard edges, so the exact in and out points are readable even when the
+        // loop runs off the side of the window.
+        g.setColour (loopColour.withAlpha (loopEnabled ? 0.9f : 0.4f));
+        g.fillRect (from - 1.0f, 0.0f, 2.0f, height);
+        g.fillRect (to - 1.0f, 0.0f, 2.0f, height);
+    }
+
+    // Beat grid next, so the waveform draws over it.
     if (analysis->hasTempo())
     {
         const auto period = analysis->secondsPerBeat();

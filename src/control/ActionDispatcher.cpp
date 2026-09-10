@@ -130,6 +130,50 @@ void ActionDispatcher::dispatch (const ActionMessage& message)
             }
             break;
 
+        case Action::loopIn:
+            if (pressed)
+                deck.setLoopIn();
+            break;
+
+        case Action::loopOut:
+            if (pressed)
+                deck.setLoopOut();
+            break;
+
+        case Action::loopToggle:
+            if (pressed)
+                deck.toggleLoop();
+            break;
+
+        case Action::loopBeats:
+            if (pressed)
+                deck.setLoopBeats (loopBeatsForSlot (message.slot));
+            break;
+
+        case Action::loopRoll:
+            // Momentary: the pad being let go is as much a part of a roll as
+            // the pad going down, which is why this one reads the release.
+            if (pressed)
+                deck.beginLoopRoll (loopBeatsForSlot (message.slot));
+            else
+                deck.endLoopRoll();
+            break;
+
+        case Action::loopHalve:
+            if (pressed)
+                deck.halveLoop();
+            break;
+
+        case Action::loopDouble:
+            if (pressed)
+                deck.doubleLoop();
+            break;
+
+        case Action::loopReloop:
+            if (pressed)
+                deck.reloop();
+            break;
+
         case Action::hotCueClear:
             if (pressed)
                 deck.clearHotCue (message.slot);

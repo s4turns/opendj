@@ -15,6 +15,7 @@ juce_add_console_app(opendj-tests
 target_sources(opendj-tests PRIVATE
     Mixer_test.cpp
     Deck_test.cpp
+    Loop_test.cpp
     TrackAnalyser_test.cpp
     KeyDetector_test.cpp
     MidiMapping_test.cpp

@@ -150,6 +150,31 @@ same seven notes, and a progression that touches neither leading tone is ambiguo
 method, including this one. Camelot notation is forgiving here, since a key and its relative
 share a number and mix anyway.
 
+## Loops and rolls
+
+Beat-locked loops on each deck: a row of lengths from half a beat to sixteen, halve and double,
+loop in and out by hand, and a loop toggle. Clicking a length sets a loop; holding the same
+button rolls instead.
+
+| Decision | Why |
+| --- | --- |
+| An automatic loop starts on the beat *behind* the playhead | Snapping to the nearest beat lets a loop start a fraction late, and a loop that starts late is late for every bar it plays. That is the mistake the button exists to prevent |
+| Loop bounds are computed on the message thread | Working them out needs the beat grid, and the grid lives behind a shared pointer. Taking a reference count is not a realtime operation, so the audio thread only ever sees two plain numbers |
+| The wrap uses a modulo, not a subtract-until-inside loop | A very short loop could otherwise want hundreds of iterations inside one block, and the audio thread should not do an unbounded amount of anything |
+| Loops are honoured on the stretcher's feed head too | With key lock on, that head chooses the audio. A loop that wrapped only the audible head would show the deck looping while it played straight through |
+| A hand on the platter suspends the loop | Direct manipulation should never be fenced in by something set earlier |
+| A roll clears its own loop when it ends | It was the roll's doing. Leaving it enabled would silently trap the deck |
+
+A roll differs from a loop in one way that matters: underneath it the track keeps running, so
+letting go drops you where the music got to rather than where the loop left off. That is what
+makes a roll usable mid-phrase without losing the mix, and it is what the shadow playhead in
+`Deck::processBlock` is for.
+
+The loop actions are in the registry as `loop.in`, `loop.out`, `loop.toggle`, `loop.beats`,
+`loop.roll`, `loop.halve`, `loop.double` and `loop.reloop`, so the DJ-202's second pad row can
+be mapped to them without touching any engine code. `loop.beats` and `loop.roll` take a slot,
+which `loopBeatsForSlot` turns into a length.
+
 ## Beyond milestone 1
 
 | Item | Status | Notes |
@@ -157,7 +182,7 @@ share a number and mix anyway.
 | Slip mode | ⬜ | After a scratch the track carries on from where the hand left it, rather than catching up to where it would have been. The DJ-202 has a button for it on note 0x07 |
 | Key detection | ✅ | `src/analysis/KeyDetector.*`, shown in the browser's Key column. See above |
 | Four decks | ⬜ | `AudioEngine::numDecks` is a constant the mixer sizes itself from, so the engine mostly follows. The interface and the DJ-202 deck-toggle button are the work |
-| Loops and loop rolls | ⬜ | The DJ-202's second pad row is already reserved for these |
+| Loops and loop rolls | ✅ | `Deck::setLoopBeats` and friends, with a loop row on each deck. See above |
 | Effects | ⬜ | Filter, echo, reverb. The DJ-202 effects section is on MIDI channels 9 and 10, unmapped |
 | Sampler | ⬜ | The DJ-202 pads send sampler notes on 0x21 to 0x30, unmapped |
 | Record the master output | ⬜ | Straightforward: tap the master buffer in `AudioEngine` |

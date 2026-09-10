@@ -11,6 +11,7 @@
 #include "ui/PlatterComponent.h"
 #include "ui/WaveformComponent.h"
 
+#include <array>
 #include <memory>
 
 namespace opendj
@@ -69,6 +70,7 @@ public:
 
 private:
     void loadButtonClicked();
+    void refreshLoopControls();
     void applyTempoFromSlider();
     double rangePercent() const;
     void updateTempoReadout();
@@ -90,6 +92,16 @@ private:
     juce::Slider tempoSlider;
     juce::Label tempoLabel;
     juce::ComboBox tempoRangeBox;
+
+    // Loop controls. The beat buttons set an automatic loop of that length, and
+    // hold reads as a roll: press and hold repeats, letting go carries on from
+    // where the track would have reached.
+    static constexpr int numLoopButtons = 6;
+    std::array<MomentaryButton, numLoopButtons> loopButtons;
+    juce::TextButton loopToggleButton { "Loop" };
+    juce::TextButton loopHalveButton { "/2" };
+    juce::TextButton loopDoubleButton { "x2" };
+    std::array<bool, numLoopButtons> loopButtonRolling { };
 
     WaveformComponent scrollingWave { WaveformComponent::Mode::scrolling };
     WaveformComponent overviewWave { WaveformComponent::Mode::overview };

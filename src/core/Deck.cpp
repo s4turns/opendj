@@ -77,6 +77,11 @@ namespace
         return sum;
     }
 
+    // Shorter than this and a loop is a tone rather than a rhythm, and a badly
+    // placed loop-out could otherwise wrap the read head thousands of times in
+    // one block.
+    constexpr double minimumLoopSeconds = 0.02;
+
     // A record at 33 1/3 rpm takes 1.8 seconds to go round once.
     constexpr double vinylRevolutionSeconds = 60.0 / (100.0 / 3.0);
 
@@ -231,6 +236,14 @@ void Deck::publish (std::unique_ptr<Track> newTrack)
     if (ownedSeparation != nullptr)
         retiredSeparations.emplace_back (std::move (ownedSeparation),
                                          blocksProcessed.load (std::memory_order_relaxed));
+
+    // A loop belongs to the track it was made in. Carrying one across would
+    // trap the new track between two positions that mean nothing in it.
+    rollActive.store (false, std::memory_order_relaxed);
+    loopEnabled.store (false, std::memory_order_relaxed);
+    loopStartSeconds.store (-1.0, std::memory_order_relaxed);
+    loopEndSeconds.store (-1.0, std::memory_order_relaxed);
+    loopBeats.store (0.0, std::memory_order_relaxed);
 
     lengthSeconds.store (seconds, std::memory_order_relaxed);
     cuePointSeconds.store (0.0, std::memory_order_relaxed);
@@ -418,6 +431,192 @@ bool Deck::hasHotCue (int slot) const
 }
 
 //==============================================================================
+// Loops
+//==============================================================================
+
+bool Deck::hasLoop() const noexcept
+{
+    const auto start = loopStartSeconds.load (std::memory_order_relaxed);
+    const auto end = loopEndSeconds.load (std::memory_order_relaxed);
+
+    return start >= 0.0 && end > start;
+}
+
+void Deck::setLoopIn()
+{
+    if (! isLoaded())
+        return;
+
+    loopStartSeconds.store (getPositionSeconds(), std::memory_order_relaxed);
+    loopBeats.store (0.0, std::memory_order_relaxed);
+}
+
+void Deck::setLoopOut()
+{
+    if (! isLoaded())
+        return;
+
+    const auto start = loopStartSeconds.load (std::memory_order_relaxed);
+    const auto end = getPositionSeconds();
+
+    if (start < 0.0 || end - start < minimumLoopSeconds)
+        return;
+
+    loopEndSeconds.store (end, std::memory_order_relaxed);
+    loopBeats.store (0.0, std::memory_order_relaxed);
+    loopEnabled.store (true, std::memory_order_relaxed);
+}
+
+bool Deck::setLoopBeats (double beats)
+{
+    if (! isLoaded() || beats <= 0.0)
+        return false;
+
+    const auto analysis = getAnalysis();
+
+    if (analysis == nullptr || ! analysis->hasTempo())
+        return false;
+
+    const auto length = beats * analysis->secondsPerBeat();
+
+    if (length < minimumLoopSeconds)
+        return false;
+
+    // Snap to the beat at or behind the playhead. Snapping to the nearest beat
+    // instead would let a loop start a fraction of a beat late, which is exactly
+    // the mistake the button exists to prevent.
+    const auto position = getPositionSeconds();
+    auto start = analysis->nearestBeatSeconds (position);
+
+    if (start > position)
+        start -= analysis->secondsPerBeat();
+
+    start = juce::jmax (0.0, start);
+
+    loopStartSeconds.store (start, std::memory_order_relaxed);
+    loopEndSeconds.store (start + length, std::memory_order_relaxed);
+    loopBeats.store (beats, std::memory_order_relaxed);
+    loopEnabled.store (true, std::memory_order_relaxed);
+    return true;
+}
+
+void Deck::halveLoop()
+{
+    if (! hasLoop())
+        return;
+
+    const auto start = loopStartSeconds.load (std::memory_order_relaxed);
+    const auto length = loopEndSeconds.load (std::memory_order_relaxed) - start;
+
+    if (length * 0.5 < minimumLoopSeconds)
+        return;
+
+    loopEndSeconds.store (start + length * 0.5, std::memory_order_relaxed);
+
+    if (const auto beats = loopBeats.load (std::memory_order_relaxed); beats > 0.0)
+        loopBeats.store (beats * 0.5, std::memory_order_relaxed);
+}
+
+void Deck::doubleLoop()
+{
+    if (! hasLoop())
+        return;
+
+    const auto start = loopStartSeconds.load (std::memory_order_relaxed);
+    const auto length = loopEndSeconds.load (std::memory_order_relaxed) - start;
+    const auto trackLength = getLengthSeconds();
+
+    if (trackLength > 0.0 && start + length * 2.0 > trackLength)
+        return;
+
+    loopEndSeconds.store (start + length * 2.0, std::memory_order_relaxed);
+
+    if (const auto beats = loopBeats.load (std::memory_order_relaxed); beats > 0.0)
+        loopBeats.store (beats * 2.0, std::memory_order_relaxed);
+}
+
+void Deck::setLoopEnabled (bool shouldLoop)
+{
+    loopEnabled.store (shouldLoop && hasLoop(), std::memory_order_relaxed);
+}
+
+void Deck::toggleLoop()
+{
+    setLoopEnabled (! isLoopEnabled());
+}
+
+void Deck::clearLoop()
+{
+    loopEnabled.store (false, std::memory_order_relaxed);
+    loopStartSeconds.store (-1.0, std::memory_order_relaxed);
+    loopEndSeconds.store (-1.0, std::memory_order_relaxed);
+    loopBeats.store (0.0, std::memory_order_relaxed);
+}
+
+void Deck::reloop()
+{
+    if (! hasLoop())
+        return;
+
+    seekToSeconds (loopStartSeconds.load (std::memory_order_relaxed));
+    loopEnabled.store (true, std::memory_order_relaxed);
+}
+
+bool Deck::beginLoopRoll (double beats)
+{
+    if (isLoopRolling() || ! setLoopBeats (beats))
+        return false;
+
+    rollActive.store (true, std::memory_order_relaxed);
+    return true;
+}
+
+void Deck::endLoopRoll()
+{
+    if (! rollActive.exchange (false, std::memory_order_relaxed))
+        return;
+
+    // The loop was the roll's doing, so it goes when the roll goes. Leaving it
+    // behind enabled would silently trap the deck.
+    clearLoop();
+}
+
+bool Deck::wrapIntoLoop (double& position, double rate, const Track& track) const
+{
+    if (! loopEnabled.load (std::memory_order_relaxed))
+        return false;
+
+    const auto start = loopStartSeconds.load (std::memory_order_relaxed);
+    const auto end = loopEndSeconds.load (std::memory_order_relaxed);
+
+    if (start < 0.0 || end - start < minimumLoopSeconds)
+        return false;
+
+    const auto startSample = start * track.sampleRate;
+    const auto endSample = end * track.sampleRate;
+    const auto length = endSample - startSample;
+
+    // Modulo rather than a loop that subtracts: a very short loop at a high
+    // tempo could otherwise want hundreds of iterations, and the audio thread
+    // should not be doing an unbounded amount of anything.
+    if (rate >= 0.0 && position >= endSample)
+    {
+        position = startSample + std::fmod (position - startSample, length);
+        return true;
+    }
+
+    // Running backwards out of the front of a loop wraps to its end, so a
+    // reversed deck inside a loop stays inside it.
+    if (rate < 0.0 && position < startSample)
+    {
+        position = endSample - std::fmod (endSample - position, length);
+        return true;
+    }
+
+    return false;
+}
+
+//==============================================================================
 // Jog wheel
 //==============================================================================
 
@@ -520,6 +719,7 @@ void Deck::processBlock (juce::AudioBuffer<float>& destination)
             readPosition = seek * track->sampleRate;
             stretchPrimed = false;   // whatever the stretcher holds is from the old place
             scratchTargetValid = false;
+            rollReturnValid = false; // the head was moved by hand; the shadow is stale
         }
     }
 
@@ -637,6 +837,35 @@ void Deck::processBlock (juce::AudioBuffer<float>& destination)
         }
 
         position += rate;
+
+        // A hand on the platter beats a loop: direct manipulation should never
+        // be fenced in by something set earlier.
+        if (! scratching)
+            wrapIntoLoop (position, rate, *track);
+    }
+
+    // While a roll is held, the track carries on underneath it. This is the
+    // shadow head that says where it would have been, and it is what letting go
+    // jumps to.
+    if (rollActive.load (std::memory_order_relaxed))
+    {
+        if (! rollReturnValid)
+        {
+            rollReturnPosition = readPosition;
+            rollReturnValid = true;
+        }
+
+        rollReturnPosition += rate * blockSize;
+    }
+    else if (rollReturnValid)
+    {
+        // The roll just ended. Land where the music got to, not where the loop
+        // left off, so a roll can be dropped in mid-phrase without losing the
+        // mix. Off the end of the track it simply stops, as playing off the end
+        // always does.
+        position = juce::jlimit (0.0, static_cast<double> (numSamples), rollReturnPosition);
+        rollReturnValid = false;
+        stretchPrimed = false;
     }
 
     // Running off either end stops playback rather than looping. Scratching
@@ -680,6 +909,10 @@ void Deck::feedStretcher (const Track& track, double fileToDevice,
     // speed, so the stretcher sees audio at its own sample rate and at the
     // original pitch. Off either end the read is silence, which is what a
     // stretcher should be fed there.
+    // The loop has to be honoured on the way into the stretcher as well as on
+    // the audible head. This is the head that actually chooses the audio when
+    // key lock is on, so a loop that only wrapped the other one would be
+    // inaudible: the deck would show itself looping and play straight through.
     const float* mix[2] = { track.audio.getReadPointer (0), track.audio.getReadPointer (1) };
 
     for (int ch = 0; ch < 2; ++ch)
@@ -694,10 +927,17 @@ void Deck::feedStretcher (const Track& track, double fileToDevice,
             // which is far longer than any ramp would be.
             out[i] = readSample (mix, separation, stemGains, ch, numSamples, position);
             position += fileToDevice;
+            wrapIntoLoop (position, fileToDevice, track);
         }
     }
 
-    feedPosition += count * fileToDevice;
+    // Advance the shared head the same way, one sample at a time, so it lands
+    // exactly where the per-channel reads did.
+    for (int i = 0; i < count; ++i)
+    {
+        feedPosition += fileToDevice;
+        wrapIntoLoop (feedPosition, fileToDevice, track);
+    }
 
     const float* inputs[2] = { stretchInput.getReadPointer (0), stretchInput.getReadPointer (1) };
     stretcher->process (inputs, static_cast<size_t> (count), false);

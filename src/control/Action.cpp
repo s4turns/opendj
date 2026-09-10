@@ -6,6 +6,7 @@
 #include "control/Action.h"
 
 #include <array>
+#include <iterator>
 
 namespace opendj
 {
@@ -16,7 +17,7 @@ namespace
 
     // One table, read in both directions, so a name can never disagree with
     // itself between the parser and the writer.
-    constexpr std::array<Entry, 25> actionNames
+    constexpr std::array<Entry, 33> actionNames
     {{
         { Action::deckPlayToggle,   "deck.play_toggle" },
         { Action::deckPlay,         "deck.play" },
@@ -32,6 +33,14 @@ namespace
         { Action::jogTurn,          "jog.turn" },
         { Action::hotCue,           "pad.hotcue" },
         { Action::hotCueClear,      "pad.hotcue_clear" },
+        { Action::loopIn,           "loop.in" },
+        { Action::loopOut,          "loop.out" },
+        { Action::loopToggle,       "loop.toggle" },
+        { Action::loopBeats,        "loop.beats" },
+        { Action::loopRoll,         "loop.roll" },
+        { Action::loopHalve,        "loop.halve" },
+        { Action::loopDouble,       "loop.double" },
+        { Action::loopReloop,       "loop.reloop" },
         { Action::channelFader,     "mixer.fader" },
         { Action::channelEq,        "mixer.eq" },
         { Action::channelCueToggle, "mixer.cue_toggle" },
@@ -62,6 +71,16 @@ Action actionFromString (const juce::String& name)
             return entry.action;
 
     return Action::none;
+}
+
+double loopBeatsForSlot (int slot)
+{
+    // A quarter beat up to thirty-two, doubling each step. Short enough at one
+    // end to stutter a single hit, long enough at the other to hold a phrase.
+    constexpr double lengths[] = { 0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0 };
+    constexpr auto count = static_cast<int> (std::size (lengths));
+
+    return lengths[juce::jlimit (0, count - 1, slot)];
 }
 
 bool isContinuous (Action action)

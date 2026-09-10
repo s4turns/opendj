@@ -129,6 +129,52 @@ public:
     bool hasHotCue (int slot) const;
 
     //==========================================================================
+    // Loops
+    //==========================================================================
+
+    /** Sets the start of a loop at the playhead, leaving the end alone. */
+    void setLoopIn();
+
+    /** Sets the end at the playhead and starts looping, which is what pressing
+        loop out on any piece of DJ gear does. */
+    void setLoopOut();
+
+    /** A loop of a given number of beats starting from the beat at or behind
+        the playhead, so it lands in time rather than wherever the finger did.
+        Returns false when the track has no beat grid to snap to, because an
+        auto loop without one is just a guess. */
+    bool setLoopBeats (double beats);
+
+    /** Halving and doubling keep the start where it is, so a loop can be closed
+        in on a bar without it wandering off the beat. */
+    void halveLoop();
+    void doubleLoop();
+
+    void setLoopEnabled (bool shouldLoop);
+    void toggleLoop();
+    void clearLoop();
+
+    /** Jumps back to the start of the last loop and starts it again. */
+    void reloop();
+
+    bool hasLoop() const noexcept;
+    bool isLoopEnabled() const noexcept { return loopEnabled.load (std::memory_order_relaxed); }
+    double getLoopStartSeconds() const noexcept { return loopStartSeconds.load (std::memory_order_relaxed); }
+    double getLoopEndSeconds() const noexcept   { return loopEndSeconds.load (std::memory_order_relaxed); }
+
+    /** The length in beats of the last automatic loop, or 0 for one set by hand. */
+    double getLoopBeats() const noexcept { return loopBeats.load (std::memory_order_relaxed); }
+
+    /** A momentary loop. While it is held the deck repeats, and underneath the
+        track keeps running, so letting go drops you where you would have been
+        rather than where the loop left you. That is the whole difference
+        between a roll and a loop, and it is why a roll can be used mid-phrase
+        without losing the mix. */
+    bool beginLoopRoll (double beats);
+    void endLoopRoll();
+    bool isLoopRolling() const noexcept { return rollActive.load (std::memory_order_relaxed); }
+
+    //==========================================================================
     // Jog wheel
     //==========================================================================
 
@@ -222,6 +268,24 @@ private:
     std::atomic<bool> previewingFromCue { false };
 
     std::array<std::atomic<double>, numHotCues> hotCues;   // negative means unset
+
+    // Loop bounds are worked out on the message thread, where the beat grid can
+    // be read, and cross to the audio thread as plain numbers. The audio thread
+    // never touches the analysis: reading a shared pointer there would mean
+    // taking a reference count, and that is not a realtime operation.
+    std::atomic<double> loopStartSeconds { -1.0 };
+    std::atomic<double> loopEndSeconds { -1.0 };
+    std::atomic<double> loopBeats { 0.0 };                 // 0 when set by hand
+    std::atomic<bool> loopEnabled { false };
+    std::atomic<bool> rollActive { false };
+
+    // Where the track would have been if the roll had never happened.
+    double rollReturnPosition = 0.0;                       // audio thread, file samples
+    bool rollReturnValid = false;                          // audio thread only
+
+    /** Wraps a read head back to the loop start when it runs past the end.
+        Returns true when it moved. Audio thread only. */
+    bool wrapIntoLoop (double& position, double rate, const Track& track) const;
 
     std::atomic<bool> jogTouched { false };
     std::atomic<double> jogTicks { 0.0 };

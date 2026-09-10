@@ -32,6 +32,11 @@ public:
     void setPosition (double seconds, double lengthSeconds);
     void setCuePoint (double seconds);
 
+    /** The loop to shade, in seconds. A start below zero means there is none.
+        `enabled` distinguishes a loop that is running from one that is merely
+        remembered, which is worth seeing at a glance. */
+    void setLoop (double startSeconds, double endSeconds, bool enabled);
+
     /** How many seconds the scrolling view shows either side of the playhead. */
     void setWindowSeconds (double seconds);
 
@@ -55,6 +60,9 @@ private:
     double positionSeconds = 0.0;
     double trackLengthSeconds = 0.0;
     double cueSeconds = 0.0;
+    double loopStart = -1.0;
+    double loopEnd = -1.0;
+    bool loopEnabled = false;
     double windowSeconds = 3.0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (WaveformComponent)

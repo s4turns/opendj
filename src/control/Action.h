@@ -44,6 +44,16 @@ enum class Action
     hotCue,             ///< press sets an empty slot, or jumps to a set one
     hotCueClear,
 
+    // Loops. slot is an index into the beat lengths in loopBeatsForSlot().
+    loopIn,
+    loopOut,
+    loopToggle,
+    loopBeats,          ///< an automatic loop of that many beats
+    loopRoll,           ///< the same, but only while the pad is held down
+    loopHalve,
+    loopDouble,
+    loopReloop,
+
     // Mixer. deck selects the channel; slot selects the EQ band for deckEq.
     channelFader,
     channelEq,          ///< slot 0 low, 1 mid, 2 high
@@ -62,6 +72,12 @@ enum class Action
     // Modifier, held rather than toggled.
     shift
 };
+
+/** The loop length a pad slot stands for, in beats.
+
+    Eight lengths, shortest first, which is the order the second row of pads on
+    a controller runs in and the order a length list should read in. */
+double loopBeatsForSlot (int slot);
 
 /** One thing that happened, ready to be executed. */
 struct ActionMessage

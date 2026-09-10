@@ -5,6 +5,10 @@
 
 #include "ui/DeckComponent.h"
 
+#include "control/Action.h"
+
+#include <utility>
+
 #include <cmath>
 
 namespace opendj
@@ -27,6 +31,7 @@ namespace
     const juce::Colour panelColour   { 0xff1c1c22 };
     const juce::Colour accentColour  { 0xff35c2f0 };
     const juce::Colour cueColour     { 0xffe8a33d };
+    const juce::Colour loopColour    { 0xff4ad991 };
 }
 
 DeckComponent::DeckComponent (AudioEngine& engineToUse, int deckIndex, const juce::String& deckName)
@@ -70,6 +75,56 @@ DeckComponent::DeckComponent (AudioEngine& engineToUse, int deckIndex, const juc
     keyLockButton.setTooltip ("Key lock: the tempo fader stops changing the pitch");
     keyLockButton.onClick = [this] { deck.toggleKeyLock(); refresh(); };
     addAndMakeVisible (keyLockButton);
+
+    // Loop lengths. A click sets a loop of that many beats and leaves it
+    // running; holding turns the same button into a roll, which repeats while
+    // it is down and then drops you where the track would have reached. One
+    // button, both behaviours, decided by how long it is held.
+    for (int i = 0; i < numLoopButtons; ++i)
+    {
+        const auto slot = i + 1;                 // start at half a beat
+        const auto beats = loopBeatsForSlot (slot);
+        auto& button = loopButtons[(size_t) i];
+
+        button.setButtonText (beats < 1.0 ? "1/" + juce::String (juce::roundToInt (1.0 / beats))
+                                          : juce::String (beats, 0));
+        button.setTooltip ("Click for a " + button.getButtonText()
+                           + " beat loop, hold for a roll");
+
+        button.onPress = [this, i, beats]
+        {
+            // A roll only makes sense over a running deck; on a stopped one the
+            // button behaves as a plain loop.
+            if (deck.isPlaying() && deck.beginLoopRoll (beats))
+                loopButtonRolling[(size_t) i] = true;
+            else
+                deck.setLoopBeats (beats);
+
+            refresh();
+        };
+
+        button.onRelease = [this, i]
+        {
+            if (std::exchange (loopButtonRolling[(size_t) i], false))
+                deck.endLoopRoll();
+
+            refresh();
+        };
+
+        addAndMakeVisible (button);
+    }
+
+    loopToggleButton.setTooltip ("Turn the current loop on or off");
+    loopToggleButton.onClick = [this] { deck.toggleLoop(); refresh(); };
+    addAndMakeVisible (loopToggleButton);
+
+    loopHalveButton.setTooltip ("Halve the loop, keeping its start");
+    loopHalveButton.onClick = [this] { deck.halveLoop(); refresh(); };
+    addAndMakeVisible (loopHalveButton);
+
+    loopDoubleButton.setTooltip ("Double the loop, keeping its start");
+    loopDoubleButton.onClick = [this] { deck.doubleLoop(); refresh(); };
+    addAndMakeVisible (loopDoubleButton);
 
     tempoSlider.setSliderStyle (juce::Slider::LinearVertical);
     tempoSlider.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
@@ -202,6 +257,8 @@ void DeckComponent::refresh()
     syncButton.setEnabled (engine.getEffectiveBpm (index) > 0.0
                            && engine.getEffectiveBpm (1 - index) > 0.0);
 
+    refreshLoopControls();
+
     keyLockButton.setColour (juce::TextButton::buttonColourId,
                              deck.isKeyLockEnabled() ? accentColour.darker (0.4f) : juce::Colour (0xff2c2c34));
 
@@ -239,6 +296,37 @@ void DeckComponent::itemDropped (const SourceDetails& details)
     load (juce::File (details.description.toString()));
 }
 
+void DeckComponent::refreshLoopControls()
+{
+    const auto hasGrid = shownAnalysis != nullptr && shownAnalysis->hasTempo();
+    const auto looping = deck.isLoopEnabled();
+    const auto activeBeats = deck.getLoopBeats();
+
+    for (int i = 0; i < numLoopButtons; ++i)
+    {
+        auto& button = loopButtons[(size_t) i];
+        const auto beats = loopBeatsForSlot (i + 1);
+        const auto isActive = looping && std::abs (activeBeats - beats) < 0.001;
+
+        button.setEnabled (hasGrid);
+        button.setColour (juce::TextButton::buttonColourId,
+                          isActive ? loopColour.darker (0.2f) : juce::Colour (0xff2c2c34));
+    }
+
+    loopToggleButton.setEnabled (deck.hasLoop());
+    loopToggleButton.setColour (juce::TextButton::buttonColourId,
+                                looping ? loopColour.darker (0.2f) : juce::Colour (0xff2c2c34));
+
+    loopHalveButton.setEnabled (deck.hasLoop());
+    loopDoubleButton.setEnabled (deck.hasLoop());
+
+    const auto start = deck.getLoopStartSeconds();
+    const auto end = deck.getLoopEndSeconds();
+
+    scrollingWave.setLoop (start, end, looping);
+    overviewWave.setLoop (start, end, looping);
+}
+
 void DeckComponent::paint (juce::Graphics& g)
 {
     g.setColour (panelColour);
@@ -264,6 +352,21 @@ void DeckComponent::resized()
     scrollingWave.setBounds (area.removeFromTop (96));
     area.removeFromTop (4);
     overviewWave.setBounds (area.removeFromTop (34));
+
+    // Loop row, directly under the waveform the loop is drawn on.
+    area.removeFromTop (6);
+    auto loopRow = area.removeFromTop (24);
+
+    loopToggleButton.setBounds (loopRow.removeFromLeft (52).reduced (1));
+    loopRow.removeFromLeft (4);
+    loopHalveButton.setBounds (loopRow.removeFromLeft (30).reduced (1));
+    loopDoubleButton.setBounds (loopRow.removeFromLeft (30).reduced (1));
+    loopRow.removeFromLeft (6);
+
+    const auto lengthWidth = juce::jmax (24, loopRow.getWidth() / numLoopButtons);
+
+    for (auto& button : loopButtons)
+        button.setBounds (loopRow.removeFromLeft (lengthWidth).reduced (1));
 
     area.removeFromTop (10);
 
