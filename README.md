@@ -1,6 +1,12 @@
 # OpenDJ
 
+[![main](https://git.interdo.me/interdome/opendj/actions/workflows/build.yml/badge.svg?branch=main)](https://git.interdo.me/interdome/opendj/actions?workflow=build.yml&branch=main)
+[![testing](https://git.interdo.me/interdome/opendj/actions/workflows/build.yml/badge.svg?branch=testing)](https://git.interdo.me/interdome/opendj/actions?workflow=build.yml&branch=testing)
+
 Free and open source DJ software, built in C++ with [JUCE](https://juce.com).
+
+Each badge covers the whole workflow for that branch: a build and the full test suite on
+Fedora, Debian and Windows. It goes red if any one of the three fails.
 
 The goal is an application a VirtualDJ user can sit down at and already know how to use:
 the same deck layout, the same workflow, the same muscle memory. The artwork, the naming

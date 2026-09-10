@@ -159,7 +159,7 @@ pull requests.
 | --- | --- | :---: |
 | fedora | `fedora:latest` container on the Linux runner | ✅ |
 | debian | the Linux runner's own image | ✅ |
-| windows | a self-hosted Windows runner | 🚧 needs a runner registered |
+| windows | a self-hosted Windows runner | ✅ |
 
 Two things about this setup are worth knowing before changing it.
 
@@ -168,11 +168,16 @@ Two things about this setup are worth knowing before changing it.
 | The Fedora job installs `nodejs` and `git` before anything else | `actions/checkout` is a JavaScript action, and the stock Fedora image has neither. Without that step the job fails in two seconds, long before a compiler is involved |
 | The Windows job calls `scripts/build.ps1` rather than CMake directly | The script finds the CMake, Ninja and MSVC environment inside Visual Studio Build Tools, so a self-hosted machine needs nothing on PATH but git and node |
 
-### Registering the Windows runner
+The README carries a status badge per branch. Gitea's badges are per workflow rather than per
+job, so one badge covers all three platforms and goes red if any of them fails.
 
-The Linux runner advertises `ubuntu-latest` and has no MSVC, so it will never take the Windows
-job; that job is simply never scheduled until a Windows machine is registered. On the Windows
-machine, with Visual Studio Build Tools, git and Node installed:
+### Registering a Windows runner
+
+One is already registered as `INTERHOME-windows`, started from a scheduled task at logon, so
+Windows CI runs only while that machine is logged in. To add another, or to replace it: the
+Linux runner advertises `ubuntu-latest` and has no MSVC, so it will never take the Windows job,
+and that job is simply never scheduled without a Windows machine. On a machine with Visual
+Studio Build Tools, git and Node installed:
 
 ```
 pwsh scripts/setup-windows-runner.ps1 -Token <registration token>
