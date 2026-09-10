@@ -1,12 +1,15 @@
 # OpenDJ
 
-[![main](https://git.interdo.me/interdome/opendj/actions/workflows/build.yml/badge.svg?branch=main)](https://git.interdo.me/interdome/opendj/actions?workflow=build.yml&branch=main)
-[![testing](https://git.interdo.me/interdome/opendj/actions/workflows/build.yml/badge.svg?branch=testing)](https://git.interdo.me/interdome/opendj/actions?workflow=build.yml&branch=testing)
+| Branch | Build and tests |
+| --- | --- |
+| [`main`](https://git.interdo.me/interdome/opendj/actions?workflow=build.yml&branch=main) | [![main](https://git.interdo.me/interdome/opendj/actions/workflows/build.yml/badge.svg?branch=main)](https://git.interdo.me/interdome/opendj/actions?workflow=build.yml&branch=main) |
+| [`testing`](https://git.interdo.me/interdome/opendj/actions?workflow=build.yml&branch=testing) | [![testing](https://git.interdo.me/interdome/opendj/actions/workflows/build.yml/badge.svg?branch=testing)](https://git.interdo.me/interdome/opendj/actions?workflow=build.yml&branch=testing) |
 
 Free and open source DJ software, built in C++ with [JUCE](https://juce.com).
 
-Each badge covers the whole workflow for that branch: a build and the full test suite on
-Fedora, Debian and Windows. It goes red if any one of the three fails.
+Each badge is a build and the full test suite on Fedora, Debian and Windows, and goes red if
+any one of the three fails. The badge itself only ever says "build", because Gitea labels it
+with the workflow name and offers no way to change that, so the branch is named beside it.
 
 The goal is an application a VirtualDJ user can sit down at and already know how to use:
 the same deck layout, the same workflow, the same muscle memory. The artwork, the naming
