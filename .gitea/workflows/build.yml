@@ -6,20 +6,45 @@ on:
   pull_request:
 
 jobs:
-  linux:
+  fedora:
+    runs-on: ubuntu-latest
+    container: fedora:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install JUCE system dependencies
+        run: >
+          dnf install -y
+          gcc-c++ cmake ninja-build git pkgconf-pkg-config
+          alsa-lib-devel pipewire-jack-audio-connection-kit-devel
+          freetype-devel fontconfig-devel
+          libX11-devel libXext-devel libXinerama-devel
+          libXrandr-devel libXcursor-devel libXcomposite-devel
+          mesa-libGL-devel
+
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+  debian:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - name: Install JUCE system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential cmake ninja-build pkg-config \
-            libasound2-dev libjack-jackd2-dev \
-            libfreetype-dev libfontconfig1-dev \
-            libx11-dev libxext-dev libxinerama-dev libxrandr-dev libxcursor-dev \
-            libcurl4-openssl-dev
+        run: >
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends
+          build-essential cmake ninja-build git pkg-config
+          libasound2-dev libjack-jackd2-dev
+          libfreetype-dev libfontconfig1-dev
+          libx11-dev libxext-dev libxinerama-dev
+          libxrandr-dev libxcursor-dev libxcomposite-dev
+          libgl1-mesa-dev
 
       - name: Configure
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo

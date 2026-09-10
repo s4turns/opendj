@@ -104,6 +104,22 @@ juce::File MainComponent::findMappingsFolder() const
     return {};
 }
 
+void MainComponent::loadInitialTracks (const juce::StringArray& paths)
+{
+    auto deckIndex = 0;
+
+    for (const auto& path : paths)
+    {
+        if (deckIndex >= AudioEngine::numDecks)
+            break;
+
+        // Tokens keep the quotes that held a path with spaces together, so they
+        // have to come off before the name means anything.
+        if (const juce::File file (path.unquoted()); file.existsAsFile())
+            deckViews[(size_t) deckIndex++]->load (file);
+    }
+}
+
 void MainComponent::timerCallback()
 {
     for (auto& view : deckViews)

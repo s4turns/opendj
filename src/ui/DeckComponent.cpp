@@ -28,8 +28,11 @@ namespace
 }
 
 DeckComponent::DeckComponent (AudioEngine& engineToUse, int deckIndex, const juce::String& deckName)
-    : engine (engineToUse), index (deckIndex), name (deckName), deck (engineToUse.getDeck (deckIndex))
+    : engine (engineToUse), index (deckIndex), name (deckName),
+      deck (engineToUse.getDeck (deckIndex)), platter (deck, deckName)
 {
+    addAndMakeVisible (platter);
+
     titleLabel.setColour (juce::Label::textColourId, juce::Colours::white);
     titleLabel.setFont (juce::FontOptions (16.0f, juce::Font::bold));
     addAndMakeVisible (titleLabel);
@@ -168,6 +171,7 @@ void DeckComponent::refresh()
         overviewWave.setAnalysis (shownAnalysis);
     }
 
+    platter.refresh (shownAnalysis);
     scrollingWave.setPosition (position, length);
     overviewWave.setPosition (position, length);
     scrollingWave.setCuePoint (deck.getCueSeconds());
@@ -224,14 +228,41 @@ void DeckComponent::resized()
 
     area.removeFromRight (10);
 
-    auto transport = area.removeFromTop (40);
-    loadButton.setBounds (transport.removeFromLeft (66).reduced (0, 2));
-    transport.removeFromLeft (6);
-    cueButton.setBounds (transport.removeFromLeft (66).reduced (0, 2));
-    transport.removeFromLeft (6);
-    playButton.setBounds (transport.removeFromLeft (82).reduced (0, 2));
-    transport.removeFromLeft (6);
-    syncButton.setBounds (transport.removeFromLeft (66).reduced (0, 2));
+    // The platter takes whatever square it can get, leaving room beside it for
+    // the transport column, and the window can be made small enough that it has
+    // to give up rather than push the buttons off the panel.
+    const auto transportWidth = 88;
+    const auto platterSize = juce::jlimit (0,
+                                           juce::jmax (0, area.getWidth() - transportWidth - 10),
+                                           juce::jmin (240, area.getHeight()));
+
+    if (platterSize > 60)
+    {
+        auto platterArea = area.removeFromLeft (platterSize);
+        platter.setBounds (platterArea.removeFromTop (platterSize));
+        area.removeFromLeft (10);
+        platter.setVisible (true);
+    }
+    else
+    {
+        platter.setVisible (false);
+    }
+
+    auto transport = area.removeFromLeft (juce::jmin (transportWidth, area.getWidth()));
+
+    // Spelled out, because the cue button is a different type to the others.
+    const std::initializer_list<juce::Button*> transportButtons
+    {
+        &loadButton, &cueButton, &playButton, &syncButton
+    };
+
+    for (auto* button : transportButtons)
+    {
+        button->setBounds (transport.removeFromTop (36).reduced (0, 3));
+
+        if (transport.getHeight() <= 0)
+            break;
+    }
 }
 
 } // namespace opendj

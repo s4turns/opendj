@@ -41,6 +41,10 @@ public:
     MainComponent();
     ~MainComponent() override;
 
+    /** Loads files onto successive decks. Used by the command line, so a build
+        can be started with two tracks already on the decks. */
+    void loadInitialTracks (const juce::StringArray& paths);
+
     void paint (juce::Graphics& g) override;
     void resized() override;
 

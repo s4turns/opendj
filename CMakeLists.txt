@@ -56,6 +56,7 @@ target_sources(OpenDJ PRIVATE
     src/control/MidiControlSurface.cpp
     src/ui/DeckComponent.cpp
     src/ui/MidiSetupComponent.cpp
+    src/ui/PlatterComponent.cpp
     src/ui/WaveformComponent.cpp
     src/ui/MixerComponent.cpp)
 

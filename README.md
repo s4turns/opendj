@@ -6,9 +6,9 @@ The goal is an application a VirtualDJ user can sit down at and already know how
 the same deck layout, the same workflow, the same muscle memory. The artwork, the naming
 and the code are entirely original and entirely open.
 
-**Status: early development.** Two decks play with waveforms, beat grids, automatic BPM
-detection and sync. The mixer works. Roland DJ-202 controllers are mapped, including the jog
-wheels and hot cue pads. There is no track browser, key lock, effects or sampler yet.
+**Status: early development, but it mixes.** Two decks with turntable platters you can scratch,
+waveforms, beat grids, automatic BPM detection and sync, a working mixer, hot cues, and Roland
+DJ-202 support. No track browser, key lock, effects or sampler yet.
 
 ## Design goals
 
@@ -18,30 +18,28 @@ wheels and hot cue pads. There is no track browser, key lock, effects or sampler
   reference controller. Mappings are JSON files, so a new controller needs no recompile.
 - **Free, in both senses.** GPLv3, no paid tier, no locked features.
 
-## Roadmap to the first playable release
+## Roadmap
 
-1. Project scaffolding and audio device setup â€” **done**
-2. Two decks with play, pause and cue
-3. Tempo fader and key lock
-4. Scrolling and overview waveforms
-5. Mixer: gain, three-band EQ, crossfader, headphone cue
-6. BPM analysis, beatgrid and sync
-7. MIDI mapping engine and monitor — **done**
-8. Roland DJ-202 mapping, including jog wheel scratch — **done**, pending hardware checks
-9. Track browser backed by a SQLite library
-
-Out of scope until that is finished: effects racks, four decks, stem separation, video,
-streaming services and recording.
+See [ROADMAP.md](ROADMAP.md) for what is done, what is left, and where to start. The short
+version: the decks, platters, mixer, waveforms, beat grids, sync, hot cues and controller
+support all work. Key lock and the track browser are the two gaps in the first milestone.
 
 ## Using it
 
-Load a track with the Load button on either deck, or drag an audio file onto a deck. Decoding
+Load a track with the Load button on either deck, drag an audio file onto a deck, or name
+files on the command line to start with them already loaded. Decoding
 and analysis run in the background, so the interface stays responsive on a long file. Click the
 overview waveform to move through the track.
 
 Each deck shows a scrolling waveform with the beat grid drawn over it, bar lines brighter than
 beats, and the detected tempo next to the title. Sync matches this deck's tempo and beat phase
 to the other one.
+
+The platter turns at 33 1/3 rpm against the track position, so it is a readout and not
+decoration: if it is crawling, the deck is crawling. Drag the middle of it to scratch, exactly
+as if you had a hand on the record, and drag the outer ring to nudge the pitch without stopping
+playback. The rim flashes on every beat, which is a second way to see two decks drifting apart
+without reading the waveforms.
 
 | Key | Action |
 | --- | --- |
@@ -67,25 +65,57 @@ A recognised controller is opened automatically at startup.
 
 ## Building
 
-You need a C++20 compiler, CMake 3.22 or newer, and git.
+You need a C++20 compiler, CMake 3.22 or newer, and git. JUCE and Catch2 are fetched into
+`external/` at configure time, so the first configure needs a network connection and takes a
+few minutes.
 
-On Windows, Visual Studio 2022 Build Tools with the C++ workload provides all three; its
-bundled CMake and Ninja are used automatically by `scripts/build.ps1`.
+### Linux
+
+One script covers Fedora, Debian and Arch. It installs the right packages for whichever
+package manager it finds, then builds.
+
+```
+scripts/build.sh --deps     # install system dependencies, once
+scripts/build.sh            # configure and build
+scripts/build.sh --run      # and launch it
+```
+
+On **Fedora** the dependencies are:
+
+```
+sudo dnf install -y \
+    gcc-c++ cmake ninja-build git pkgconf-pkg-config \
+    alsa-lib-devel pipewire-jack-audio-connection-kit-devel \
+    freetype-devel fontconfig-devel \
+    libX11-devel libXext-devel libXinerama-devel \
+    libXrandr-devel libXcursor-devel libXcomposite-devel \
+    mesa-libGL-devel
+```
+
+Fedora 40 and newer route JACK through PipeWire, so the package above is the one to install
+rather than `jack-audio-connection-kit-devel`; the two conflict. On an older release, or a
+system deliberately running classic JACK, swap it for `jack-audio-connection-kit-devel`. The
+build script picks whichever is available.
+
+For low latency, run OpenDJ through JACK or PipeWire rather than plain ALSA, and pick that
+device in Audio setup. PipeWire presents itself as a JACK server, so nothing extra is needed
+on a stock Fedora desktop.
+
+### Windows
+
+Visual Studio 2022 Build Tools with the C++ workload provides everything. Its bundled CMake
+and Ninja are found and used automatically, so nothing else has to be installed.
+
+```
+pwsh scripts/build.ps1        # configure and build
+pwsh scripts/build.ps1 -Run   # and launch it
+```
+
+### Any platform, by hand
 
 ```
 cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo
 cmake --build build --parallel
-```
-
-JUCE and Catch2 are fetched into `external/` at configure time, so the first configure
-needs a network connection and takes a few minutes.
-
-On Linux you also need the JUCE system packages:
-
-```
-sudo apt install build-essential cmake pkg-config libasound2-dev libjack-jackd2-dev \
-    libfreetype-dev libfontconfig1-dev libx11-dev libxext-dev libxinerama-dev \
-    libxrandr-dev libxcursor-dev libcurl4-openssl-dev
 ```
 
 ### ASIO on Windows

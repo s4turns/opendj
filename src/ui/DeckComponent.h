@@ -8,6 +8,7 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include "core/AudioEngine.h"
+#include "ui/PlatterComponent.h"
 #include "ui/WaveformComponent.h"
 
 #include <memory>
@@ -83,6 +84,7 @@ private:
 
     WaveformComponent scrollingWave { WaveformComponent::Mode::scrolling };
     WaveformComponent overviewWave { WaveformComponent::Mode::overview };
+    PlatterComponent platter;
 
     std::unique_ptr<juce::FileChooser> fileChooser;
     std::shared_ptr<const TrackAnalysis> shownAnalysis;

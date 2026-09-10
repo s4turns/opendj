@@ -24,9 +24,16 @@ public:
     const juce::String getApplicationVersion() override { return ProjectInfo::versionString; }
     bool moreThanOneInstanceAllowed() override          { return false; }
 
-    void initialise (const juce::String&) override
+    void initialise (const juce::String& commandLine) override
     {
         mainWindow = std::make_unique<MainWindow> (getApplicationName());
+
+        // Files named on the command line go straight onto the decks. It saves
+        // a lot of clicking while testing, and it makes the app work as a
+        // handler for audio files.
+        if (const auto files = juce::StringArray::fromTokens (commandLine, true); ! files.isEmpty())
+            if (auto* content = dynamic_cast<MainComponent*> (mainWindow->getContentComponent()))
+                content->loadInitialTracks (files);
     }
 
     void shutdown() override

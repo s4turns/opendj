@@ -17,6 +17,7 @@ target_sources(opendj-tests PRIVATE
     Deck_test.cpp
     TrackAnalyser_test.cpp
     MidiMapping_test.cpp
+    AngleMath_test.cpp
     ${CMAKE_SOURCE_DIR}/src/core/Mixer.cpp
     ${CMAKE_SOURCE_DIR}/src/core/Deck.cpp
     ${CMAKE_SOURCE_DIR}/src/analysis/TrackAnalysis.cpp
