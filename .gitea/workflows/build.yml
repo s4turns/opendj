@@ -10,6 +10,14 @@ jobs:
     runs-on: ubuntu-latest
     container: fedora:latest
     steps:
+      # actions/checkout is a JavaScript action, so the runner needs a node
+      # binary inside the container to run it at all. The stock Fedora image has
+      # neither node nor git, which is why this job used to fail in two seconds
+      # before reaching a compiler. This step is plain shell, so it runs first
+      # without needing either.
+      - name: Install node and git so the checkout action can run
+        run: dnf install -y nodejs git
+
       - uses: actions/checkout@v4
 
       - name: Install JUCE system dependencies
