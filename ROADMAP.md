@@ -167,12 +167,11 @@ If a Windows job fails or sits unclaimed, check the machine before reading the l
 
 | Check | Command |
 | --- | --- |
-| Is the runner running? | `Get-Process act_runner` |
-| Did its task stop, and why? | `Get-ScheduledTaskInfo -TaskName 'Gitea Actions runner'` |
-| Start it again | `Start-ScheduledTask -TaskName 'Gitea Actions runner'` |
+| Is the service running? | `Get-Service GiteaRunner` |
+| Start or restart it | `Restart-Service GiteaRunner` |
+| What did it say? | `Get-Content C:\gitea-runner\logs\runner.log -Tail 40` |
 
 A last result of `0xC000013A` means it was killed by the session ending rather than crashing.
-The task is set to restart itself once a minute if that happens.
 
 | Job | Runs on | Status |
 | --- | --- | :---: |
@@ -192,8 +191,8 @@ job, so one badge covers all three platforms and goes red if any of them fails.
 
 ### Registering a Windows runner
 
-One is already registered as `INTERHOME-windows`, started from a scheduled task at logon, so
-Windows CI runs only while that machine is logged in. To add another, or to replace it: the
+One is already registered as `INTERHOME-windows`, running as a Windows service, so Windows CI
+works whether or not anyone is signed in. To add another, or to replace it: the
 Linux runner advertises `ubuntu-latest` and has no MSVC, so it will never take the Windows job,
 and that job is simply never scheduled without a Windows machine. On a machine with Visual
 Studio Build Tools, git and Node installed:
@@ -206,3 +205,19 @@ Get the token from Gitea under repository Settings, then Actions, then Runners, 
 runner". The script downloads the runner, registers it with the label `windows-latest:host`, and
 starts it from a task at logon. The `:host` suffix is what makes jobs run directly on the machine
 rather than in a container.
+
+Then make it unattended:
+
+```
+pwsh scripts/install-runner-service.ps1
+```
+
+That asks for Administrator, installs NSSM, and runs the runner as the `GiteaRunner` service on
+automatic startup, disabling the logon task so only one runner is ever live. `-Uninstall` undoes
+it and puts the task back.
+
+| Detail | Why |
+| --- | --- |
+| NSSM rather than `sc.exe` | The runner is a console program and does not speak to the service control manager. Installed directly, Windows would keep reporting it as failing to start while it worked perfectly. NSSM runs it as a child and does the service protocol for it |
+| It runs as `LocalSystem` | So it needs no stored password. That is a privileged account, and jobs it runs are equally privileged, which is worth knowing before pointing this repository's CI at code you have not read |
+| Logs in `C:\gitea-runner\logs` | Rotated at 10 MB. The service restarts itself five seconds after any exit |
