@@ -244,3 +244,72 @@ TEST_CASE ("the cue bus ignores the channel fader and the crossfader", "[mixer][
     REQUIRE (masterPeak < 0.001f);
     REQUIRE (cuePeak > 0.4f);
 }
+
+TEST_CASE ("the filter knob is transparent in the middle", "[mixer][filter]")
+{
+    Harness harness;
+    harness.mixer.setChannelFilter (0, 0.5f);
+
+    // Both filters are parked outside the audible range at centre, so a tone
+    // should arrive at the level the EQ alone would give it.
+    const auto centred = harness.measureMasterRms (1000.0);
+    REQUIRE (centred > 0.01f);
+
+    Harness reference;
+    REQUIRE_THAT (centred, WithinAbs (reference.measureMasterRms (1000.0), 0.005f));
+}
+
+TEST_CASE ("turning the filter down takes the top off", "[mixer][filter]")
+{
+    Harness harness;
+    harness.mixer.setChannelFilter (0, 0.5f);
+    const auto open = harness.measureMasterRms (6000.0);
+
+    harness.mixer.setChannelFilter (0, 0.0f);
+    const auto closed = harness.measureMasterRms (6000.0);
+
+    INFO ("6 kHz: open " << open << ", closed " << closed);
+    REQUIRE (open > 0.01f);
+    REQUIRE (closed < open * 0.25f);
+}
+
+TEST_CASE ("turning the filter up takes the bottom out", "[mixer][filter]")
+{
+    Harness harness;
+    harness.mixer.setChannelFilter (0, 0.5f);
+    const auto open = harness.measureMasterRms (80.0);
+
+    harness.mixer.setChannelFilter (0, 1.0f);
+    const auto closed = harness.measureMasterRms (80.0);
+
+    INFO ("80 Hz: open " << open << ", closed " << closed);
+    REQUIRE (open > 0.01f);
+    REQUIRE (closed < open * 0.25f);
+}
+
+TEST_CASE ("a filtered channel still passes what is left of it", "[mixer][filter]")
+{
+    // Turning the knob down should not simply mute the channel: the bass has to
+    // survive, which is the whole point of a DJ filter.
+    Harness harness;
+    harness.mixer.setChannelFilter (0, 0.0f);
+
+    REQUIRE (harness.measureMasterRms (100.0) > 0.01f);
+}
+
+TEST_CASE ("the filter position is reported back for the interface", "[mixer][filter]")
+{
+    opendj::Mixer mixer;
+
+    REQUIRE_THAT (mixer.getChannelFilter (0), WithinAbs (0.5f, 0.001f));
+
+    mixer.setChannelFilter (0, 0.25f);
+    REQUIRE_THAT (mixer.getChannelFilter (0), WithinAbs (0.25f, 0.001f));
+
+    // Out of range values are clamped rather than believed.
+    mixer.setChannelFilter (0, 5.0f);
+    REQUIRE_THAT (mixer.getChannelFilter (0), WithinAbs (1.0f, 0.001f));
+
+    // An unknown channel answers with the neutral position rather than crashing.
+    REQUIRE_THAT (mixer.getChannelFilter (99), WithinAbs (0.5f, 0.001f));
+}

@@ -260,10 +260,11 @@ TEST_CASE ("a hand on the platter drives playback", "[deck][jog]")
     fixture.run (1);
 
     // A record at 33 1/3 rpm turns once in 1.8 seconds, so half a turn of the
-    // platter should move half of that.
+    // platter should move half of that. The head chases the hand over a couple
+    // of blocks rather than teleporting, so let it arrive before measuring.
     fixture.deck->setJogTouched (true);
     fixture.deck->addJogTicks (256.0);
-    fixture.run (1);
+    fixture.run (40);
 
     REQUIRE_THAT (fixture.deck->getPositionSeconds(), WithinAbs (2.9, 0.01));
 }
@@ -276,7 +277,7 @@ TEST_CASE ("the platter runs the track backwards", "[deck][jog]")
 
     fixture.deck->setJogTouched (true);
     fixture.deck->addJogTicks (-256.0);
-    fixture.run (1);
+    fixture.run (40);
 
     REQUIRE_THAT (fixture.deck->getPositionSeconds(), WithinAbs (3.1, 0.01));
 }
@@ -499,4 +500,107 @@ TEST_CASE ("key lock is bypassed while a hand is on the platter", "[deck][keyloc
     fixture.run (40);
     const auto after = fixture.capture (200);
     REQUIRE_THAT (measureFrequency (after, deviceSampleRate), WithinAbs (440.0, 5.0));
+}
+
+TEST_CASE ("a nudge means the same at any platter resolution", "[deck][jog]")
+{
+    // The same movement — a fifth of a turn — on two wheels that count very
+    // differently must bend the pitch by the same amount, or a mapping that
+    // reports absolute position would fling the track away.
+    const auto bendAfterFifthOfATurn = [] (int ticksPerRevolution)
+    {
+        Fixture fixture;
+        fixture.deck->setJogTicksPerRevolution (ticksPerRevolution);
+        fixture.deck->play();
+        fixture.run (20);
+
+        const auto before = fixture.deck->getPositionSeconds();
+        fixture.deck->addJogTicks (ticksPerRevolution / 5.0);
+        fixture.run (1);
+
+        // How far the block moved, against how far it would have moved unbent.
+        const auto moved = fixture.deck->getPositionSeconds() - before;
+        return moved / fixture.secondsPerBlock();
+    };
+
+    const auto coarse = bendAfterFifthOfATurn (512);
+    const auto fine = bendAfterFifthOfATurn (16384);
+
+    INFO ("512 ticks/rev gave " << coarse << ", 16384 gave " << fine);
+    REQUIRE_THAT (fine, WithinAbs (coarse, 0.01));
+
+    // And it is a nudge, not a leap: a few percent, not a few hundred.
+    REQUIRE (coarse > 1.0);
+    REQUIRE (coarse < 1.15);
+}
+
+TEST_CASE ("a scratch keeps moving between uneven bursts of ticks", "[deck][jog][scratch]")
+{
+    // A controller does not report evenly. During the slow part of a scratch,
+    // which is the turnaround, several blocks pass with nothing and then two
+    // arrive at once. The head has to keep moving through the gaps or the
+    // scratch is heard as a stutter.
+    Fixture fixture;
+    fixture.deck->setJogTicksPerRevolution (800);
+    fixture.deck->setJogTouched (true);
+
+    const auto ticksPerBurst = 12.0;
+    auto stalledBlocks = 0;
+    auto previous = fixture.deck->getPositionSeconds();
+
+    for (int block = 0; block < 60; ++block)
+    {
+        if (block % 3 == 0)                       // ticks arrive every third block
+            fixture.deck->addJogTicks (ticksPerBurst);
+
+        fixture.run (1);
+
+        const auto now = fixture.deck->getPositionSeconds();
+
+        if (block > 3 && std::abs (now - previous) < 1.0e-6)
+            ++stalledBlocks;
+
+        previous = now;
+    }
+
+    INFO ("blocks with no movement: " << stalledBlocks);
+    REQUIRE (stalledBlocks == 0);
+}
+
+TEST_CASE ("a scratch still arrives where the hand put it", "[deck][jog][scratch]")
+{
+    // Chasing the hand must not lose ground: after the platter stops, the head
+    // has to settle exactly where the movement asked for, not short of it.
+    Fixture fixture;
+    fixture.deck->setJogTicksPerRevolution (800);
+    fixture.deck->setJogTouched (true);
+
+    const auto start = fixture.deck->getPositionSeconds();
+
+    // Half a turn, which is 0.9 seconds of a record at 33 1/3 rpm.
+    fixture.deck->addJogTicks (400.0);
+    fixture.run (60);                              // long enough to settle
+
+    REQUIRE_THAT (fixture.deck->getPositionSeconds() - start, WithinAbs (0.9, 0.01));
+}
+
+TEST_CASE ("letting go of a scratch does not jump the head", "[deck][jog][scratch]")
+{
+    Fixture fixture;
+    fixture.deck->setJogTicksPerRevolution (800);
+    fixture.deck->play();
+    fixture.run (20);
+
+    fixture.deck->setJogTouched (true);
+    fixture.deck->addJogTicks (200.0);
+    fixture.run (40);
+
+    const auto scratched = fixture.deck->getPositionSeconds();
+
+    fixture.deck->setJogTouched (false);
+    fixture.run (1);
+
+    // One block of ordinary playback, not a leap back to where the hand was.
+    REQUIRE_THAT (fixture.deck->getPositionSeconds() - scratched,
+                  WithinAbs (fixture.secondsPerBlock(), 0.002));
 }

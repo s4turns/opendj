@@ -7,6 +7,11 @@
 #   scripts/build.sh --clean          throw the build directory away first
 #   scripts/build.sh --deps           install the system packages and exit
 #   scripts/build.sh --run [files]    build, then launch with those tracks loaded
+#   scripts/build.sh --install        build, then install (asks for sudo)
+#
+# Installs under /usr/local by default; set PREFIX to change it, for example
+#   PREFIX=~/.local scripts/build.sh --install
+# which needs no sudo at all.
 #
 set -euo pipefail
 
@@ -16,6 +21,8 @@ config="RelWithDebInfo"
 do_clean=0
 do_run=0
 do_deps=0
+do_install=0
+prefix="${PREFIX:-/usr/local}"
 run_args=()
 
 while [[ $# -gt 0 ]]; do
@@ -24,8 +31,9 @@ while [[ $# -gt 0 ]]; do
         --release) config="Release"; shift ;;
         --clean)   do_clean=1; shift ;;
         --deps)    do_deps=1; shift ;;
+        --install) do_install=1; shift ;;
         --run)     do_run=1; shift; run_args=("$@"); break ;;
-        -h|--help) sed -n '3,10p' "${BASH_SOURCE[0]}" | sed 's/^# \?//'; exit 0 ;;
+        -h|--help) sed -n '3,16p' "${BASH_SOURCE[0]}" | sed 's/^# \?//'; exit 0 ;;
         *)         echo "Unknown option: $1" >&2; exit 1 ;;
     esac
 done
@@ -118,7 +126,8 @@ if command -v ninja >/dev/null 2>&1; then
 fi
 
 echo "Configuring ($config)..."
-cmake -S "$repo_root" -B "$build_dir" "${generator_args[@]}" -DCMAKE_BUILD_TYPE="$config"
+cmake -S "$repo_root" -B "$build_dir" "${generator_args[@]}" \
+    -DCMAKE_BUILD_TYPE="$config" -DCMAKE_INSTALL_PREFIX="$prefix"
 
 echo "Building..."
 cmake --build "$build_dir" --parallel "$(nproc)"
@@ -132,6 +141,28 @@ if [[ ! -x "$binary" ]]; then
 fi
 
 echo "Built $binary"
+
+if [[ $do_install -eq 1 ]]; then
+    # Writing into somewhere the user owns needs no help; anywhere else does.
+    if [[ -w "$prefix" ]] || [[ ! -e "$prefix" && -w "$(dirname "$prefix")" ]]; then
+        cmake --install "$build_dir" --component opendj
+    else
+        echo "Installing to $prefix needs root."
+        sudo cmake --install "$build_dir" --component opendj
+    fi
+
+    # Without this the launcher does not notice the new entry until the next
+    # login, which looks like the install having silently failed.
+    if command -v update-desktop-database >/dev/null 2>&1; then
+        "$([[ -w "$prefix" ]] || echo sudo)" update-desktop-database "$prefix/share/applications" 2>/dev/null || true
+    fi
+
+    if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+        "$([[ -w "$prefix" ]] || echo sudo)" gtk-update-icon-cache -qtf "$prefix/share/icons/hicolor" 2>/dev/null || true
+    fi
+
+    echo "Installed to $prefix"
+fi
 
 if [[ $do_run -eq 1 ]]; then
     exec "$binary" "${run_args[@]}"

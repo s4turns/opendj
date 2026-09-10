@@ -41,6 +41,12 @@ public:
     void setChannelFader (int channel, float normalised);          // 0 to 1
     void setChannelEq (int channel, int band, float normalised);   // 0 to 1, 0.5 is flat
     void setChannelCue (int channel, bool shouldMonitor);
+
+    /** One knob per channel, centred at 0.5 and doing nothing there. Turned
+        down it is a low pass sweeping out of the top; turned up, a high pass
+        sweeping out of the bottom. Both filters run at all times, transparent
+        at their ends, so the knob never switches type mid-signal and clicks. */
+    void setChannelFilter (int channel, float normalised);
     void toggleChannelCue (int channel);
     bool isChannelCued (int channel) const;
 
@@ -52,6 +58,22 @@ public:
     void setCueMix (float normalised);                             // 0 cue only, 1 master only
 
     float getMasterPeak (int channel) const noexcept;
+
+    //==========================================================================
+    // Where every control is, so that the interface can follow a controller.
+    //
+    // The positions are kept as they were set rather than worked back out of
+    // the gains: the fader and EQ curves are not worth inverting, and a knob
+    // that came back a fraction different from where it was put would creep.
+    //==========================================================================
+
+    float getChannelFader (int channel) const noexcept;
+    float getChannelEq (int channel, int band) const noexcept;
+    float getChannelFilter (int channel) const noexcept;
+    float getCrossfaderPosition() const noexcept { return crossfaderPosition.load (std::memory_order_relaxed); }
+    float getMasterGain() const noexcept { return masterPosition.load (std::memory_order_relaxed); }
+    float getCueGain() const noexcept    { return cuePosition.load (std::memory_order_relaxed); }
+    float getCueMix() const noexcept     { return targetCueMix.load (std::memory_order_relaxed); }
 
     //==========================================================================
     // Audio thread
@@ -76,12 +98,21 @@ private:
         juce::dsp::LinkwitzRileyFilter<float> highSplit;   // crossover at highCrossoverHz
         juce::dsp::LinkwitzRileyFilter<float> lowAllpass;  // phase match for the low band
 
+        juce::dsp::StateVariableTPTFilter<float> filterLow;    // the knob turned down
+        juce::dsp::StateVariableTPTFilter<float> filterHigh;   // the knob turned up
+        juce::SmoothedValue<float> filterLowCutoff, filterHighCutoff;
+
         std::array<juce::SmoothedValue<float>, 3> bandGain;
         juce::SmoothedValue<float> faderGain;
         juce::SmoothedValue<float> crossfaderGain;
 
         std::atomic<float> targetBandGain[3] { { 1.0f }, { 1.0f }, { 1.0f } };
         std::atomic<float> targetFaderGain { 0.0f };
+
+        // The normalised positions behind those gains.
+        std::atomic<float> bandPosition[3] { { 0.5f }, { 0.5f }, { 0.5f } };
+        std::atomic<float> faderPosition { 0.0f };
+        std::atomic<float> filterPosition { 0.5f };
         std::atomic<float> targetCrossfaderGain { 1.0f };
         std::atomic<bool> cueEnabled { false };
     };
@@ -100,6 +131,8 @@ private:
     juce::SmoothedValue<float> cueGain;
     juce::SmoothedValue<float> cueMix;
 
+    std::atomic<float> masterPosition { 1.0f };
+    std::atomic<float> cuePosition { 0.7f };
     std::atomic<float> targetMasterGain { 1.0f };
     std::atomic<float> targetCueGain { 0.7f };
     std::atomic<float> targetCueMix { 0.0f };

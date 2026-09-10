@@ -5,6 +5,8 @@
 
 #include "ui/MixerComponent.h"
 
+#include <cmath>
+
 namespace opendj
 {
 
@@ -44,6 +46,16 @@ MixerComponent::MixerComponent (Mixer& mixerToControl)
             };
             addAndMakeVisible (knob);
         }
+
+        configureKnob (strip.filter);
+        strip.filter.setValue (0.5, juce::dontSendNotification);
+        strip.filter.setDoubleClickReturnValue (true, 0.5);
+        strip.filter.setTooltip ("Filter: down is a low pass, up is a high pass, centre is off");
+        strip.filter.onValueChange = [this, channel, &strip]
+        {
+            mixer.setChannelFilter (channel, static_cast<float> (strip.filter.getValue()));
+        };
+        addAndMakeVisible (strip.filter);
 
         strip.fader.setSliderStyle (juce::Slider::LinearVertical);
         strip.fader.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
@@ -139,6 +151,37 @@ void MixerComponent::refresh()
         meterLevels[(size_t) ch] = juce::jmax (level, meterLevels[(size_t) ch] * 0.82f);
     }
 
+    // Follow the engine, so a hardware knob moves the one on screen. Without
+    // this a controller appears to do nothing at all, whatever it is really
+    // doing to the audio. Notifications are suppressed, or setting a slider
+    // here would be dispatched straight back to the mixer.
+    const auto follow = [] (juce::Slider& slider, double value)
+    {
+        if (! slider.isMouseButtonDown() && std::abs (slider.getValue() - value) > 1.0e-4)
+            slider.setValue (value, juce::dontSendNotification);
+    };
+
+    for (int channel = 0; channel < Mixer::numChannels; ++channel)
+    {
+        auto& strip = strips[(size_t) channel];
+
+        follow (strip.fader, mixer.getChannelFader (channel));
+
+        // The knobs read high, mid, low down the strip; the mixer numbers the
+        // bands the other way up.
+        for (int row = 0; row < 3; ++row)
+            follow (strip.eq[(size_t) row], mixer.getChannelEq (channel, 2 - row));
+
+        follow (strip.filter, mixer.getChannelFilter (channel));
+
+        strip.cue.setToggleState (mixer.isChannelCued (channel), juce::dontSendNotification);
+    }
+
+    follow (crossfader, mixer.getCrossfaderPosition());
+    follow (masterKnob, mixer.getMasterGain());
+    follow (cueKnob, mixer.getCueGain());
+    follow (cueMixKnob, mixer.getCueMix());
+
     repaint (meterBounds);
 }
 
@@ -176,6 +219,8 @@ void MixerComponent::layOutStrip (Strip& strip, juce::Rectangle<int> area)
     {
         knob.setBounds (area.removeFromTop (44).reduced (4, 2));
     }
+
+    strip.filter.setBounds (area.removeFromTop (44).reduced (4, 2));
 
     strip.cue.setBounds (area.removeFromBottom (24).reduced (4, 2));
     strip.fader.setBounds (area.reduced (10, 6));

@@ -147,6 +147,10 @@ void ActionDispatcher::dispatch (const ActionMessage& message)
             mixer.setChannelCue (deckIndex, pressed);
             break;
 
+        case Action::channelFilter:
+            mixer.setChannelFilter (deckIndex, message.value);
+            break;
+
         case Action::channelCueToggle:
             if (pressed)
                 mixer.toggleChannelCue (deckIndex);

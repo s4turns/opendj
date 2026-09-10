@@ -12,6 +12,8 @@
 
 #include "ui/MidiSetupComponent.h"
 
+#include <iostream>
+
 namespace opendj
 {
 
@@ -39,23 +41,50 @@ MainComponent::MainComponent()
     else
         engine.setAnalysisCache (&library);
 
-    startupError = engine.initialise();
-
     dispatcher.onStateChanged = [safe = juce::Component::SafePointer<MainComponent> (this)]
     {
         // Actions arrive on the MIDI thread, so bounce the redraw to the message
         // thread rather than touching components from there.
         juce::MessageManager::callAsync ([safe]
         {
-            if (safe != nullptr)
-                for (auto& view : safe->deckViews)
-                    if (view != nullptr)
-                        view->refresh();
+            if (safe == nullptr)
+                return;
+
+            for (auto& view : safe->deckViews)
+                if (view != nullptr)
+                    view->refresh();
+
+            // The mixer too: a hardware EQ knob or crossfader is an action like
+            // any other, and the interface has to show it moved.
+            if (safe->mixerView != nullptr)
+                safe->mixerView->refresh();
         });
     };
 
-    midi.loadMappingsFromFolder (findMappingsFolder());
+    for (const auto& folder : findMappingsFolders())
+    {
+        const auto loaded = midi.loadMappingsFromFolder (folder);
+
+        if (juce::SystemStats::getEnvironmentVariable ("OPENDJ_MIDI_TRACE", {}).getIntValue() != 0)
+            std::cerr << "[opendj midi] " << loaded << " mapping(s) from "
+                      << folder.getFullPathName() << std::endl;
+    }
+
     midi.openFirstRecognisedDevice();
+
+    // Audio comes after MIDI on purpose. The mappings name the controllers this
+    // build knows, and a DJ controller's audio interface carries the same name
+    // as its MIDI port, so the list that finds the knobs also finds the outputs
+    // they belong to. Playing into the machine's default output instead means
+    // no headphone cue at all and a jog wheel felt through desktop latency.
+    startupError = engine.initialise (midi.getDeviceNameHints());
+
+    if (juce::SystemStats::getEnvironmentVariable ("OPENDJ_MIDI_TRACE", {}).getIntValue() != 0)
+        std::cerr << "[opendj audio] "
+                  << (startupError.isNotEmpty()
+                        ? "FAILED: " + startupError
+                        : engine.getDeviceDescription() + "  |  " + engine.getDeviceChoiceReason())
+                  << std::endl;
 
     addAndMakeVisible (deckRow);
 
@@ -161,21 +190,54 @@ void MainComponent::loadOntoDeck (const juce::File& file, int deckIndex)
         deckViews[(size_t) deckIndex]->load (file);
 }
 
-juce::File MainComponent::findMappingsFolder() const
+juce::Array<juce::File> MainComponent::findMappingsFolders() const
 {
-    // Beside the executable in an installed copy, and somewhere up the tree from
-    // the build directory while developing, so a freshly built binary finds them.
+    juce::Array<juce::File> folders;
+
+    const auto add = [&folders] (const juce::File& folder)
+    {
+        if (folder.isDirectory() && ! folders.contains (folder))
+            folders.add (folder);
+    };
+
+    const auto dataFolder = [] (const juce::File& root) { return root.getChildFile ("opendj/mappings"); };
+
+   #if JUCE_LINUX || JUCE_BSD
+    // The user's own mappings come first, so one written here replaces a
+    // shipped mapping of the same name instead of competing with it.
+    const auto dataHome = juce::SystemStats::getEnvironmentVariable ("XDG_DATA_HOME", {});
+
+    add (dataFolder (dataHome.isNotEmpty()
+                        ? juce::File (dataHome)
+                        : juce::File::getSpecialLocation (juce::File::userHomeDirectory)
+                              .getChildFile (".local/share")));
+   #endif
+
+    // Beside the executable while developing, so a freshly built binary finds
+    // the mappings in the source tree, and under the prefix once installed,
+    // where /usr/local/bin/opendj must reach /usr/local/share/opendj/mappings.
     const auto executable = juce::File::getSpecialLocation (juce::File::currentExecutableFile);
 
     for (auto directory = executable.getParentDirectory();
          directory.exists() && directory != directory.getParentDirectory();
          directory = directory.getParentDirectory())
     {
-        if (const auto candidate = directory.getChildFile ("mappings"); candidate.isDirectory())
-            return candidate;
+        add (directory.getChildFile ("mappings"));
+        add (dataFolder (directory.getChildFile ("share")));
     }
 
-    return {};
+   #if JUCE_LINUX || JUCE_BSD
+    auto dataDirs = juce::SystemStats::getEnvironmentVariable ("XDG_DATA_DIRS", {});
+
+    if (dataDirs.isEmpty())
+        dataDirs = "/usr/local/share:/usr/share";
+
+    for (const auto& directory : juce::StringArray::fromTokens (dataDirs, ":", {}))
+        if (directory.isNotEmpty())
+            add (dataFolder (juce::File (directory)));
+   #endif
+
+    return folders;
 }
 
 void MainComponent::loadInitialTracks (const juce::StringArray& paths)

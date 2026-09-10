@@ -92,6 +92,7 @@ set(OPENDJ_ENGINE_SOURCES
     ${CMAKE_SOURCE_DIR}/src/control/ActionDispatcher.cpp
     ${CMAKE_SOURCE_DIR}/src/control/MidiMapping.cpp
     ${CMAKE_SOURCE_DIR}/src/control/MidiControlSurface.cpp
+    ${CMAKE_SOURCE_DIR}/src/control/AlsaMidiCompat.cpp
     ${CMAKE_SOURCE_DIR}/src/library/Library.cpp
     ${CMAKE_SOURCE_DIR}/src/library/LibraryScanner.cpp
     ${CMAKE_SOURCE_DIR}/src/library/TagReader.cpp)
@@ -161,6 +162,48 @@ target_link_libraries(OpenDJ PRIVATE
 
 if(MSVC)
     target_compile_options(OpenDJ PRIVATE /utf-8)
+endif()
+
+# ---------------------------------------------------------------------------
+# Installation
+#
+# The mappings have to land somewhere the application will look. It searches
+# up from its own executable for share/opendj/mappings, so an installed
+# /usr/local/bin/opendj finds /usr/local/share/opendj/mappings, and it reads
+# the XDG data directories too, so a user's own mappings in
+# ~/.local/share/opendj/mappings take precedence over the ones installed here.
+#
+# Everything here is in the "opendj" component, and installing means
+#
+#     cmake --install build --component opendj
+#
+# rather than a bare `cmake --install`. JUCE is brought in with FetchContent and
+# carries its own install rules, which are not guarded by anything, so a plain
+# install would also deposit the JUCE CMake package and its juceaide build tool
+# into the prefix. Naming a component leaves all of that behind.
+# ---------------------------------------------------------------------------
+include(GNUInstallDirs)
+
+# Lower case on the command line, whatever the product is called in the window
+# title, because that is what a binary in the path is expected to look like.
+install(PROGRAMS "$<TARGET_FILE:OpenDJ>"
+        DESTINATION "${CMAKE_INSTALL_BINDIR}"
+        RENAME opendj
+        COMPONENT opendj)
+
+install(DIRECTORY mappings/
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/opendj/mappings"
+        COMPONENT opendj
+        FILES_MATCHING PATTERN "*.json")
+
+if(UNIX AND NOT APPLE)
+    install(FILES packaging/opendj.desktop
+            DESTINATION "${CMAKE_INSTALL_DATADIR}/applications"
+            COMPONENT opendj)
+
+    install(FILES packaging/opendj.svg
+            DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps"
+            COMPONENT opendj)
 endif()
 
 if(OPENDJ_BUILD_TESTS)

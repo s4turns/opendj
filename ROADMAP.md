@@ -19,13 +19,14 @@ check behind it, not just code that compiles.
 | 4 | Tempo fader | ✅ | `src/core/Deck.*`, `src/ui/DeckComponent.*` |
 | 5 | Key lock, so tempo does not shift pitch | ✅ | `Deck::renderStretched`, via Rubber Band |
 | 6 | Mixer: fader, three-band EQ, crossfader, cue | ✅ | `src/core/Mixer.*` |
+| 6b | Per-channel filter, low pass down and high pass up | ✅ | `Mixer::setChannelFilter` |
 | 7 | Scrolling and overview waveforms | ✅ | `src/ui/WaveformComponent.*` |
 | 8 | BPM detection and beat grid | ✅ | `src/analysis/TrackAnalyser.*`, checked against a real collection below |
 | 9 | Sync: tempo and beat phase | ✅ | `AudioEngine::syncDeck` |
 | 10 | Turntable platters, mouse drivable | ✅ | `src/ui/PlatterComponent.*`, `src/ui/AngleMath.h` |
 | 11 | Hot cues | ✅ | `Deck::hotCuePressed` and friends |
 | 12 | MIDI mapping engine, monitor, device picker | ✅ | `src/control/`, `src/ui/MidiSetupComponent.*` |
-| 13 | Roland DJ-202 mapping | 🚧 | `mappings/roland-dj-202.json` |
+| 13 | Roland DJ-202 mapping | ✅ | `mappings/roland-dj-202.json`, verified on hardware |
 | 14 | Track browser and library database | ✅ | `src/library/`, `src/ui/BrowserComponent.*` |
 
 ## Platforms
@@ -33,21 +34,39 @@ check behind it, not just code that compiles.
 | Platform | Builds | Runs | Notes |
 | --- | :---: | :---: | --- |
 | Windows | ✅ | ✅ | Built and run with MSVC 19.44. WASAPI by default, ASIO opt-in. CI needs a self-hosted runner, see below |
-| Fedora | ✅ | ✅ | Built and run on Fedora 44 with GCC 16 and PipeWire's JACK. Decks, browser, analysis and the library all exercised |
+| Fedora | ✅ | ✅ | Built and run on Fedora 44 with GCC 16, on a DJ-202's own four-channel interface through PipeWire's JACK. Decks, platters, browser, analysis and the library all exercised |
 | Debian and Ubuntu | ✅ | ⬜ | Same, via the Debian CI job |
 | Arch | ⬜ | ⬜ | `scripts/build.sh` knows the packages, untested |
 | macOS | ⬜ | ⬜ | JUCE supports it; nothing has been tried |
 
-## Item 13: DJ-202 checks that need the hardware
+## Item 13: DJ-202, as measured on the hardware
 
-The mapping is complete for two-deck use, but three values were derived from documentation
-rather than measured. The Controller panel's monitor shows raw values, so each takes a minute.
-
-| Check | Status | What to do |
+| Check | Status | What was found |
 | --- | :---: | --- |
-| Tempo fader polarity | ⬜ | Mapped `"inverted": true`, assuming the highest value is at the bottom of the throw. If the fader works backwards, set it to `false` |
-| Note off behaviour | ⬜ | The mapping assumes buttons send note on with velocity 0. Both forms are handled, but the pads have not been watched on hardware |
-| Jog tick rate | ⬜ | 512 ticks per revolution came from the Mixxx mapping. If one full turn does not move the track by exactly 1.8 seconds, change `jogTicksPerRevolution` |
+| Note off behaviour | ✅ | Both forms occur, and which one depends on the sequencer's MIDI version: as a UMP client the DJ-202's releases arrive as note off, as a legacy client as note on with velocity zero. A release is now taken from the message rather than the mapping, and a note off falls back to the note on control of the same number, so either form releases the button it belongs to |
+| Jog tick rate | ✅ | 800, not the 512 the Mixxx mapping states: two turns of the platter produced 1590 ticks on controller 6 |
+| Platter encoding | ✅ | Controller 6, relative, centred on 64. The wheel also streams 14-bit absolute position as pitch bend, but that flows whenever a hand merely rests on it and its net movement over two real turns was 0.04 of a revolution, so it is deliberately unmapped |
+| Tempo fader polarity | ⬜ | Still mapped `"inverted": true` on the assumption that the highest value is at the bottom of the throw. If the fader works backwards, set it to `false` |
+
+### The one that cost the most: controller 6 and MIDI 2.0
+
+JUCE registers its ALSA sequencer client as MIDI 2.0. On a kernel that knows about
+UMP, the sequencer then translates every legacy message before handing it over, and
+MIDI 2.0 reserves controller 6 as Data Entry, the middle of an RPN sequence, rather
+than a controller in its own right. A bare controller 6 is swallowed in translation.
+
+The DJ-202's platters report on controller 6. The touch was seen and the turning was
+not, so the deck stopped dead under the hand. It is reproducible with nothing but
+`aseqdump`:
+
+```
+aseqdump -u 0   ->  controller 6 arrives, controller 7 arrives
+aseqdump -u 2   ->  controller 6 is gone, controller 7 arrives
+```
+
+`src/control/AlsaMidiCompat.cpp` defines the weak symbol JUCE uses to ask for MIDI
+2.0, so the client stays at the legacy MIDI 1.0 a new one gets by default. Delete it
+once JUCE lets an application choose its own client MIDI version.
 
 ## Item 5: key lock — done
 
@@ -112,13 +131,13 @@ compare the `bpm` column with whatever you trust.
 
 | Item | Status | Notes |
 | --- | :---: | --- |
+| Slip mode | ⬜ | After a scratch the track carries on from where the hand left it, rather than catching up to where it would have been. The DJ-202 has a button for it on note 0x07 |
 | Key detection | ⬜ | The library has the column and the browser the display; only tags fill them in so far |
 | Four decks | ⬜ | `AudioEngine::numDecks` is a constant the mixer sizes itself from, so the engine mostly follows. The interface and the DJ-202 deck-toggle button are the work |
 | Loops and loop rolls | ⬜ | The DJ-202's second pad row is already reserved for these |
 | Effects | ⬜ | Filter, echo, reverb. The DJ-202 effects section is on MIDI channels 9 and 10, unmapped |
 | Sampler | ⬜ | The DJ-202 pads send sampler notes on 0x21 to 0x30, unmapped |
 | Record the master output | ⬜ | Straightforward: tap the master buffer in `AudioEngine` |
-| Slip mode | ⬜ | The DJ-202 has a button for it on note 0x07 |
 | Stem separation | ⬜ | Large. Needs a model and a licence decision about shipping weights |
 | Video | ⬜ | Very large. Probably a separate project |
 

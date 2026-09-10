@@ -36,8 +36,19 @@ public:
     AudioEngine();
     ~AudioEngine() override;
 
-    /** Opens the default device. Returns an error string, empty on success. */
-    juce::String initialise();
+    /** Opens an output device and starts the engine. Returns an error string,
+        empty on success.
+
+        A DJ controller almost always carries its own audio interface, and it is
+        the one the music has to come out of: playing into the machine's default
+        output means no headphone cue at all, and a jog wheel felt through the
+        desktop's latency feels broken however good the MIDI is. Names to look
+        for are passed in, and the default device is the fallback rather than
+        the first choice. */
+    juce::String initialise (const juce::StringArray& preferredDeviceNames = {});
+
+    /** The device that was opened, and why. For the status bar and the log. */
+    juce::String getDeviceChoiceReason() const { return deviceChoiceReason; }
 
     juce::AudioDeviceManager& getDeviceManager() noexcept { return deviceManager; }
     juce::AudioFormatManager& getFormatManager() noexcept { return formatManager; }
@@ -107,6 +118,7 @@ private:
     juce::AudioBuffer<float> cueBuffer;
 
     std::atomic<bool> cueOutputAvailable { false };
+    juce::String deviceChoiceReason;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AudioEngine)
 };

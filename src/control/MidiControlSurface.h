@@ -62,6 +62,11 @@ public:
     int loadMappingsFromFolder (const juce::File& folder);
 
     juce::StringArray getMappingNames() const;
+
+    /** Every device name the loaded mappings recognise. A controller's audio
+        interface is named after the same hardware as its MIDI port, so this is
+        also the list of interfaces worth preferring. */
+    juce::StringArray getDeviceNameHints() const;
     juce::StringArray getWarnings() const { return warnings; }
 
     /** Selects a mapping by name. An empty name means no mapping, in which case
@@ -92,12 +97,20 @@ public:
     /** Refreshes every mapped LED from the current engine state. */
     void refreshFeedback();
 
+    /** True when the mapping asks for messages the device never got, because
+        there is no output to send them on. Such a controller stays silent, and
+        the setup panel says so rather than leaving it a mystery. */
+    bool needsUnavailableOutput() const;
+
 private:
     void handleIncomingMidiMessage (juce::MidiInput* source, const juce::MidiMessage& message) override;
     void timerCallback() override;
 
-    void handleMappedMessage (const MidiControl& control, int number, int rawValue);
-    float valueFor (const MidiControl& control, int number, int rawValue);
+    void handleMappedMessage (const MidiControl& control, int number, int rawValue,
+                              int lowByte, bool isRelease);
+    void sendInitMessages();
+    void sendKeepAlive();
+    float valueFor (const MidiControl& control, int number, int rawValue, int lowByte);
     bool feedbackStateFor (const MidiControl& control) const;
 
     static juce::String describe (const juce::MidiMessage& message);
@@ -116,6 +129,11 @@ private:
     // Coarse halves of 14-bit pairs, held until the fine half arrives.
     std::array<int, 128 * 16> coarseValues {};
 
+    // The last absolute platter reading per channel, so movement can be worked
+    // out from the difference. Negative means nothing has been read yet.
+    std::array<int, 16> lastPlatterPosition { -1, -1, -1, -1, -1, -1, -1, -1,
+                                              -1, -1, -1, -1, -1, -1, -1, -1 };
+
     mutable std::mutex logMutex;
     std::deque<LogEntry> log;
     static constexpr size_t maxLogEntries = 200;
@@ -125,6 +143,8 @@ private:
 
     // Last state sent for each feedback light, so only changes go out.
     std::map<int, bool> lastFeedbackState;
+
+    juce::uint32 lastKeepAliveMs = 0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MidiControlSurface)
 };

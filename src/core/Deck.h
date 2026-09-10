@@ -194,6 +194,8 @@ private:
     std::atomic<double> jogTicks { 0.0 };
     std::atomic<int> jogTicksPerRevolution { 512 };
     double pitchBend = 0.0;                                // audio thread only
+    double scratchTarget = 0.0;                            // audio thread, in file samples
+    bool scratchTargetValid = false;                       // audio thread only
 
     // Key lock. The stretcher is built in prepare(), so the audio thread only
     // ever uses it and never allocates it. It is fed from feedPosition, which

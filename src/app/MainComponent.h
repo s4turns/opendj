@@ -63,7 +63,8 @@ private:
     void showAudioSettings();
     void showMidiSettings();
     void loadOntoDeck (const juce::File& file, int deckIndex);
-    juce::File findMappingsFolder() const;
+    /** Every folder that may hold controller mappings, in precedence order. */
+    juce::Array<juce::File> findMappingsFolders() const;
 
     // Declared before the engine so they outlive it: its loader threads use
     // the library as their analysis cache right up until they are joined.

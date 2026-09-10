@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    OpenDJ application icon. Two platters and the crossfader between them,
+    which is the whole instrument in one shape.
+
+    This file is part of OpenDJ. See LICENSE for terms (GPLv3 or later).
+    Copyright (C) 2026 The OpenDJ contributors.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="panel" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#26262f"/>
+      <stop offset="1" stop-color="#141418"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="4" y="4" width="120" height="120" rx="26" fill="url(#panel)"/>
+  <rect x="4.75" y="4.75" width="118.5" height="118.5" rx="25.25"
+        fill="none" stroke="#ffffff" stroke-opacity="0.08" stroke-width="1.5"/>
+
+  <!-- The decks: grooves, label, spindle. The right one is cued, so it glows. -->
+  <g fill="none" stroke="#5a5a68" stroke-width="2.5">
+    <circle cx="40" cy="50" r="24"/>
+    <circle cx="40" cy="50" r="17" stroke-opacity="0.55"/>
+  </g>
+  <circle cx="40" cy="50" r="9" fill="#3a3a46"/>
+  <circle cx="40" cy="50" r="2.5" fill="#141418"/>
+
+  <g fill="none" stroke="#35c2f0" stroke-width="2.5">
+    <circle cx="88" cy="50" r="24"/>
+    <circle cx="88" cy="50" r="17" stroke-opacity="0.55"/>
+  </g>
+  <circle cx="88" cy="50" r="9" fill="#35c2f0" fill-opacity="0.28"/>
+  <circle cx="88" cy="50" r="2.5" fill="#141418"/>
+
+  <!-- Crossfader, thrown towards the deck that is playing. -->
+  <rect x="26" y="94" width="76" height="8" rx="4" fill="#2c2c34"/>
+  <rect x="70" y="86" width="16" height="24" rx="5" fill="#d8d8e0"/>
+</svg>

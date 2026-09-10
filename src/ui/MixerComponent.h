@@ -33,6 +33,7 @@ private:
     {
         juce::Label heading;
         std::array<juce::Slider, 3> eq;      // high, mid, low, top to bottom
+        juce::Slider filter;                 // centred: low pass down, high pass up
         juce::Slider fader;
         juce::TextButton cue { "Cue" };
     };

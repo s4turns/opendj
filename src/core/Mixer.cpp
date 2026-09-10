@@ -57,6 +57,35 @@ namespace
         normalised = juce::jlimit (0.0f, 1.0f, normalised);
         return normalised * normalised;
     }
+
+    // The dead zone either side of centre, so that a knob resting a hair off
+    // the middle is still audibly out of the way.
+    constexpr float filterDeadZone = 0.02f;
+
+    constexpr float filterLowestCutoff = 120.0f;
+    constexpr float filterHighestCutoff = 8000.0f;
+    constexpr float filterOpenLow = 22000.0f;   // a low pass this high is transparent
+    constexpr float filterOpenHigh = 15.0f;     // and a high pass this low likewise
+
+    /** Cutoff for the low pass half of the knob: transparent from the centre up. */
+    float lowPassCutoffFor (float position)
+    {
+        if (position >= 0.5f - filterDeadZone)
+            return filterOpenLow;
+
+        const auto amount = juce::jlimit (0.0f, 1.0f, (0.5f - filterDeadZone - position) / (0.5f - filterDeadZone));
+        return filterOpenLow * std::pow (filterLowestCutoff / filterOpenLow, amount);
+    }
+
+    /** And the high pass half: transparent from the centre down. */
+    float highPassCutoffFor (float position)
+    {
+        if (position <= 0.5f + filterDeadZone)
+            return filterOpenHigh;
+
+        const auto amount = juce::jlimit (0.0f, 1.0f, (position - 0.5f - filterDeadZone) / (0.5f - filterDeadZone));
+        return filterOpenHigh * std::pow (filterHighestCutoff / filterOpenHigh, amount);
+    }
 }
 
 //==============================================================================
@@ -71,6 +100,23 @@ void Mixer::ChannelStrip::prepare (const juce::dsp::ProcessSpec& spec)
     highSplit.setType (juce::dsp::LinkwitzRileyFilterType::lowpass);
     lowAllpass.setType (juce::dsp::LinkwitzRileyFilterType::allpass);
 
+    filterLow.prepare (spec);
+    filterHigh.prepare (spec);
+    filterLow.setType (juce::dsp::StateVariableTPTFilterType::lowpass);
+    filterHigh.setType (juce::dsp::StateVariableTPTFilterType::highpass);
+
+    // Just enough resonance to give the sweep a voice, and not so much that a
+    // knob left at the end of its travel whistles.
+    filterLow.setResonance (0.8f);
+    filterHigh.setResonance (0.8f);
+
+    filterLowCutoff.reset (spec.sampleRate, smoothingSeconds);
+    filterHighCutoff.reset (spec.sampleRate, smoothingSeconds);
+    filterLowCutoff.setCurrentAndTargetValue (filterOpenLow);
+    filterHighCutoff.setCurrentAndTargetValue (filterOpenHigh);
+    filterLow.setCutoffFrequency (filterOpenLow);
+    filterHigh.setCutoffFrequency (filterOpenHigh);
+
     for (auto& g : bandGain)
         g.reset (spec.sampleRate, smoothingSeconds);
 
@@ -83,6 +129,8 @@ void Mixer::ChannelStrip::reset()
     lowSplit.reset();
     highSplit.reset();
     lowAllpass.reset();
+    filterLow.reset();
+    filterHigh.reset();
 }
 
 //==============================================================================
@@ -107,15 +155,49 @@ Mixer::Mixer()
 void Mixer::setChannelFader (int channel, float normalised)
 {
     if (juce::isPositiveAndBelow (channel, numChannels))
+    {
+        strips[(size_t) channel].faderPosition.store (normalised, std::memory_order_relaxed);
         strips[(size_t) channel].targetFaderGain.store (faderToGain (normalised),
                                                         std::memory_order_relaxed);
+    }
+}
+
+float Mixer::getChannelFader (int channel) const noexcept
+{
+    return juce::isPositiveAndBelow (channel, numChannels)
+        ? strips[(size_t) channel].faderPosition.load (std::memory_order_relaxed)
+        : 0.0f;
 }
 
 void Mixer::setChannelEq (int channel, int band, float normalised)
 {
     if (juce::isPositiveAndBelow (channel, numChannels) && juce::isPositiveAndBelow (band, 3))
+    {
+        strips[(size_t) channel].bandPosition[(size_t) band].store (normalised, std::memory_order_relaxed);
         strips[(size_t) channel].targetBandGain[(size_t) band].store (eqKnobToGain (normalised),
                                                                       std::memory_order_relaxed);
+    }
+}
+
+void Mixer::setChannelFilter (int channel, float normalised)
+{
+    if (juce::isPositiveAndBelow (channel, numChannels))
+        strips[(size_t) channel].filterPosition.store (juce::jlimit (0.0f, 1.0f, normalised),
+                                                       std::memory_order_relaxed);
+}
+
+float Mixer::getChannelFilter (int channel) const noexcept
+{
+    return juce::isPositiveAndBelow (channel, numChannels)
+        ? strips[(size_t) channel].filterPosition.load (std::memory_order_relaxed)
+        : 0.5f;
+}
+
+float Mixer::getChannelEq (int channel, int band) const noexcept
+{
+    return juce::isPositiveAndBelow (channel, numChannels) && juce::isPositiveAndBelow (band, 3)
+        ? strips[(size_t) channel].bandPosition[(size_t) band].load (std::memory_order_relaxed)
+        : 0.5f;
 }
 
 void Mixer::setChannelCue (int channel, bool shouldMonitor)
@@ -185,11 +267,13 @@ void Mixer::recalculateCrossfader()
 
 void Mixer::setMasterGain (float normalised)
 {
+    masterPosition.store (normalised, std::memory_order_relaxed);
     targetMasterGain.store (faderToGain (normalised), std::memory_order_relaxed);
 }
 
 void Mixer::setCueGain (float normalised)
 {
+    cuePosition.store (normalised, std::memory_order_relaxed);
     targetCueGain.store (faderToGain (normalised), std::memory_order_relaxed);
 }
 
@@ -263,6 +347,12 @@ void Mixer::processBlock (const std::array<juce::AudioBuffer<float>*, numChannel
         for (size_t b = 0; b < 3; ++b)
             strip.bandGain[b].setTargetValue (strip.targetBandGain[b].load (std::memory_order_relaxed));
 
+        // A cutoff is swept, not stepped: setting it per sample would be
+        // needless work, but jumping it per block would zipper.
+        const auto filterPosition = strip.filterPosition.load (std::memory_order_relaxed);
+        strip.filterLowCutoff.setTargetValue (lowPassCutoffFor (filterPosition));
+        strip.filterHighCutoff.setTargetValue (highPassCutoffFor (filterPosition));
+
         strip.faderGain.setTargetValue (strip.targetFaderGain.load (std::memory_order_relaxed));
         strip.crossfaderGain.setTargetValue (strip.targetCrossfaderGain.load (std::memory_order_relaxed));
 
@@ -276,6 +366,9 @@ void Mixer::processBlock (const std::array<juce::AudioBuffer<float>*, numChannel
             const auto gFader = strip.faderGain.getNextValue();
             const auto gCross = strip.crossfaderGain.getNextValue();
 
+            strip.filterLow.setCutoffFrequency (strip.filterLowCutoff.getNextValue());
+            strip.filterHigh.setCutoffFrequency (strip.filterHighCutoff.getNextValue());
+
             for (int ch = 0; ch < 2; ++ch)
             {
                 const auto input = deckBuffer->getSample (ch, i);
@@ -287,7 +380,10 @@ void Mixer::processBlock (const std::array<juce::AudioBuffer<float>*, numChannel
                 // The low band skipped the second crossover, so match its phase.
                 low = strip.lowAllpass.processSample (ch, low);
 
-                const auto shaped = low * gLow + mid * gMid + high * gHigh;
+                auto shaped = low * gLow + mid * gMid + high * gHigh;
+
+                // Filter after the EQ, which is where a DJ mixer puts it.
+                shaped = strip.filterHigh.processSample ((int) ch, strip.filterLow.processSample ((int) ch, shaped));
 
                 // The cue bus is pre-fader and pre-crossfader, so a track can be
                 // lined up in headphones before it is brought into the mix.

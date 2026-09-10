@@ -5,6 +5,8 @@
 
 #include "ui/DeckComponent.h"
 
+#include <cmath>
+
 namespace opendj
 {
 
@@ -135,26 +137,32 @@ void DeckComponent::loadButtonClicked()
     });
 }
 
+double DeckComponent::rangePercent() const
+{
+    switch (tempoRangeBox.getSelectedId())
+    {
+        case 2:  return 16.0;
+        case 3:  return 50.0;
+        default: return 8.0;
+    }
+}
+
 void DeckComponent::applyTempoFromSlider()
 {
-    const auto rangePercent = [this]
-    {
-        switch (tempoRangeBox.getSelectedId())
-        {
-            case 2:  return 16.0;
-            case 3:  return 50.0;
-            default: return 8.0;
-        }
-    }();
-
     // The fader reads the way a DJ expects: up is faster.
-    deck.setTempoRatio (1.0 + tempoSlider.getValue() * rangePercent / 100.0);
+    deck.setTempoRatio (1.0 + tempoSlider.getValue() * rangePercent() / 100.0);
     updateTempoReadout();
 }
 
 void DeckComponent::updateTempoReadout()
 {
     const auto percent = (deck.getTempoRatio() - 1.0) * 100.0;
+
+    // Follow the engine, so the hardware tempo fader moves the one on screen.
+    if (const auto range = rangePercent(); range > 0.0 && ! tempoSlider.isMouseButtonDown())
+        if (const auto position = percent / range; std::abs (tempoSlider.getValue() - position) > 1.0e-4)
+            tempoSlider.setValue (juce::jlimit (-1.0, 1.0, position), juce::dontSendNotification);
+
     tempoLabel.setText (juce::String (percent, 1) + "%", juce::dontSendNotification);
 
     const auto bpm = engine.getEffectiveBpm (index);

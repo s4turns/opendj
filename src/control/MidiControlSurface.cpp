@@ -5,12 +5,58 @@
 
 #include "control/MidiControlSurface.h"
 
+#include <algorithm>
+#include <iostream>
+
 namespace opendj
 {
 
 namespace
 {
     constexpr int feedbackIntervalMs = 50;
+
+    /** Set OPENDJ_MIDI_TRACE=1 to have every incoming message printed, with the
+        control it matched. A controller that does nothing is otherwise very
+        hard to argue with: this says whether the messages are arriving at all,
+        and if they are, what the mapping made of them. */
+    bool midiTracingEnabled()
+    {
+        static const auto enabled =
+            juce::SystemStats::getEnvironmentVariable ("OPENDJ_MIDI_TRACE", {}).getIntValue() != 0;
+
+        return enabled;
+    }
+
+    /** Actions that quietly do nothing when the deck is empty. */
+    bool needsLoadedTrack (Action action)
+    {
+        switch (action)
+        {
+            case Action::deckPlayToggle:
+            case Action::deckPlay:
+            case Action::deckPause:
+            case Action::deckCue:
+            case Action::deckSync:
+            case Action::deckSeek:
+            case Action::jogTouch:
+            case Action::jogTurn:
+            case Action::hotCue:
+            case Action::hotCueClear:
+                return true;
+
+            default:
+                return false;
+        }
+    }
+
+    void trace (const juce::String& line)
+    {
+        if (midiTracingEnabled())
+        {
+            std::cerr << "[opendj midi] " << line << std::endl;
+            std::cerr.flush();
+        }
+    }
 
     int statusOf (const juce::MidiMessage& message)
     {
@@ -72,6 +118,7 @@ juce::Result MidiControlSurface::openDevice (const juce::String& inputIdentifier
 
     openDeviceName = midiInput->getName();
     midiInput->start();
+    trace ("opened input \"" + openDeviceName + "\"");
 
     // Pair it with an output of the same name so the lights work. A controller
     // with no output, or one already claimed elsewhere, still plays fine; it
@@ -81,6 +128,8 @@ juce::Result MidiControlSurface::openDevice (const juce::String& inputIdentifier
         if (output.name == openDeviceName)
         {
             midiOutput = juce::MidiOutput::openDevice (output.identifier);
+            trace (midiOutput != nullptr ? "opened output \"" + output.name + "\""
+                                         : "FAILED to open output \"" + output.name + "\"");
             break;
         }
     }
@@ -95,9 +144,69 @@ juce::Result MidiControlSurface::openDevice (const juce::String& inputIdentifier
         }
     }
 
+    trace (selectedMapping >= 0
+            ? "selected mapping \"" + mappings[(size_t) selectedMapping].name + "\""
+            : juce::String ("NO MAPPING matched this device"));
+
+    if (midiOutput == nullptr)
+        trace ("no MIDI output: a controller needing a handshake will stay silent");
+
     lastFeedbackState.clear();
+    lastPlatterPosition.fill (-1);
+    sendInitMessages();
     refreshFeedback();
     return juce::Result::ok();
+}
+
+void MidiControlSurface::sendInitMessages()
+{
+    if (midiOutput == nullptr
+        || ! juce::isPositiveAndBelow (selectedMapping, static_cast<int> (mappings.size())))
+        return;
+
+    const auto& mapping = mappings[(size_t) selectedMapping];
+
+    trace ("sending " + juce::String ((int) mapping.initMessages.size())
+            + " init message(s) for \"" + mapping.name + "\"");
+
+    for (const auto& message : mapping.initMessages)
+        midiOutput->sendMessageNow (message);
+
+    // Start the clock now, so the first reminder is due an interval from the
+    // request rather than immediately after it.
+    lastKeepAliveMs = juce::Time::getMillisecondCounter();
+}
+
+void MidiControlSurface::sendKeepAlive()
+{
+    if (midiOutput == nullptr
+        || ! juce::isPositiveAndBelow (selectedMapping, static_cast<int> (mappings.size())))
+        return;
+
+    const auto& mapping = mappings[(size_t) selectedMapping];
+
+    if (mapping.keepAliveIntervalMs <= 0 || mapping.keepAliveMessages.empty())
+        return;
+
+    const auto now = juce::Time::getMillisecondCounter();
+
+    if (now - lastKeepAliveMs < static_cast<juce::uint32> (mapping.keepAliveIntervalMs))
+        return;
+
+    lastKeepAliveMs = now;
+
+    for (const auto& message : mapping.keepAliveMessages)
+        midiOutput->sendMessageNow (message);
+}
+
+bool MidiControlSurface::needsUnavailableOutput() const
+{
+    if (midiOutput != nullptr
+        || ! juce::isPositiveAndBelow (selectedMapping, static_cast<int> (mappings.size())))
+        return false;
+
+    const auto& mapping = mappings[(size_t) selectedMapping];
+    return ! mapping.initMessages.empty() || ! mapping.keepAliveMessages.empty();
 }
 
 void MidiControlSurface::closeDevice()
@@ -164,6 +273,13 @@ int MidiControlSurface::loadMappingsFromFolder (const juce::File& folder)
             continue;
         }
 
+        // Folders are searched in order of precedence, so a mapping the user
+        // wrote themselves takes the place of the one that shipped with the
+        // same name rather than appearing beside it.
+        if (std::any_of (mappings.begin(), mappings.end(),
+                         [&mapping] (const MidiMapping& existing) { return existing.name == mapping.name; }))
+            continue;
+
         for (const auto& warning : fileWarnings)
             warnings.add (mapping.name + ": " + warning);
 
@@ -175,6 +291,22 @@ int MidiControlSurface::loadMappingsFromFolder (const juce::File& folder)
         selectedMapping = 0;
 
     return loaded;
+}
+
+juce::StringArray MidiControlSurface::getDeviceNameHints() const
+{
+    juce::StringArray hints;
+
+    // The open device first, so a controller that is actually plugged in wins
+    // over one that merely has a mapping on disk.
+    if (openDeviceName.isNotEmpty())
+        hints.add (openDeviceName);
+
+    for (const auto& mapping : mappings)
+        for (const auto& hint : mapping.deviceNameHints)
+            hints.addIfNotAlreadyThere (hint);
+
+    return hints;
 }
 
 juce::StringArray MidiControlSurface::getMappingNames() const
@@ -201,6 +333,7 @@ bool MidiControlSurface::selectMapping (const juce::String& mappingName)
         {
             selectedMapping = static_cast<int> (i);
             lastFeedbackState.clear();
+            sendInitMessages();
             refreshFeedback();
             return true;
         }
@@ -273,9 +406,26 @@ void MidiControlSurface::handleIncomingMidiMessage (juce::MidiInput*, const juce
 
     const MidiControl* control = nullptr;
 
+    // Pitch bend has no controller number: its second byte is the low half of
+    // the value and changes constantly, so a mapping addresses it by status
+    // alone and every such entry is written with number 0.
+    const auto isPitchBend = (status & 0xF0) == 0xE0;
+    const auto lookupNumber = isPitchBend ? 0 : number;
+    const auto isNoteOff = (status & 0xF0) == 0x80;
+
     if (juce::isPositiveAndBelow (selectedMapping, static_cast<int> (mappings.size())))
-        control = mappings[(size_t) selectedMapping].findControl (status, number,
-                                                                  dispatcher.isShiftHeld());
+    {
+        const auto& mapping = mappings[(size_t) selectedMapping];
+        control = mapping.findControl (status, lookupNumber, dispatcher.isShiftHeld());
+
+        // A button that was pressed with a note on is released with a note off,
+        // and a mapping names it once, at the note on. Without this the release
+        // matches nothing and is dropped: the DJ-202's platter then never stops
+        // being touched, so the deck stays in a scratch that never ends, and a
+        // cue button never comes back up.
+        if (control == nullptr && isNoteOff)
+            control = mapping.findControl (status + 0x10, lookupNumber, dispatcher.isShiftHeld());
+    }
 
     {
         std::lock_guard<std::mutex> lock (logMutex);
@@ -285,14 +435,65 @@ void MidiControlSurface::handleIncomingMidiMessage (juce::MidiInput*, const juce
             log.pop_back();
     }
 
+    if (midiTracingEnabled())
+    {
+        auto line = describe (message) + "  ->  "
+                  + (control != nullptr ? control->name + " (" + toString (control->action) + ")"
+                                        : juce::String ("unmapped"));
+
+        // The commonest reason a controller looks dead: the transport and the
+        // platters do nothing at all on a deck with no track on it, while the
+        // EQ and the faders carry on working. Saying so here saves the guess.
+        if (isNoteOff)
+            line << "   [release]";
+
+        if (control != nullptr && needsLoadedTrack (control->action)
+            && ! engine.getDeck (juce::jlimit (0, AudioEngine::numDecks - 1, control->deck)).isLoaded())
+            line << "   [ignored: deck " << control->deck << " has no track loaded]";
+
+        trace (line);
+    }
+
     if (control != nullptr)
-        handleMappedMessage (*control, number, rawValue);
+        handleMappedMessage (*control, lookupNumber, rawValue, number, isNoteOff);
 }
 
-float MidiControlSurface::valueFor (const MidiControl& control, int number, int rawValue)
+float MidiControlSurface::valueFor (const MidiControl& control, int number, int rawValue, int lowByte)
 {
     switch (control.mode)
     {
+        case ValueMode::absolutePosition14:
+        {
+            // Pitch bend is sent low byte first, so the position is the two
+            // seven-bit halves put back together.
+            const auto position = ((rawValue & 0x7F) << 7) | (lowByte & 0x7F);
+            const auto channel = control.status & 0x0F;
+            auto& last = lastPlatterPosition[(size_t) channel];
+
+            if (last < 0)
+            {
+                // The first reading only says where the platter is, not that it
+                // moved. Reporting the difference from nothing would fling the
+                // track across the room.
+                last = position;
+                return 0.0f;
+            }
+
+            auto delta = position - last;
+            last = position;
+
+            // A platter goes round: crossing zero is a small movement, not a
+            // leap the length of the whole scale.
+            constexpr int range = 1 << 14;
+
+            if (delta > range / 2)
+                delta -= range;
+            else if (delta < -range / 2)
+                delta += range;
+
+            return static_cast<float> (delta) * (control.inverted ? -1.0f : 1.0f);
+        }
+
         case ValueMode::button:
             return rawValue > 0 ? 1.0f : 0.0f;
 
@@ -332,21 +533,27 @@ float MidiControlSurface::valueFor (const MidiControl& control, int number, int 
     return 0.0f;
 }
 
-void MidiControlSurface::handleMappedMessage (const MidiControl& control, int number, int rawValue)
+void MidiControlSurface::handleMappedMessage (const MidiControl& control, int number, int rawValue,
+                                              int lowByte, bool isRelease)
 {
-    // A note off is a release whatever velocity it carries.
-    const auto isNoteOff = (control.status & 0xF0) == 0x80;
-    const auto effectiveValue = isNoteOff ? 0 : rawValue;
+    // A note off is a release whatever velocity it carries. The message says so,
+    // not the mapping: the same control is named once and answers to both.
+    const auto effectiveValue = isRelease || (control.status & 0xF0) == 0x80 ? 0 : rawValue;
 
-    const auto value = valueFor (control, number, effectiveValue);
+    const auto value = valueFor (control, number, effectiveValue, lowByte);
 
     if (value < 0.0f && control.mode == ValueMode::absolute14Bit)
         return;   // half of a pair, nothing to do yet
 
     if (control.action == Action::jogTurn)
     {
+        // A control may count in its own units; otherwise the mapping's figure
+        // stands. Whichever platter source the hardware actually uses is the
+        // one that sets this, so a mapping can carry both.
         const auto& mapping = mappings[(size_t) selectedMapping];
-        engine.getDeck (control.deck).setJogTicksPerRevolution (mapping.jogTicksPerRevolution);
+        const auto ticks = control.ticksPerRevolution > 0 ? control.ticksPerRevolution
+                                                          : mapping.jogTicksPerRevolution;
+        engine.getDeck (control.deck).setJogTicksPerRevolution (ticks);
     }
 
     dispatcher.dispatch ({ control.action, control.deck, control.slot, value });
@@ -460,6 +667,9 @@ void MidiControlSurface::refreshFeedback()
 
 void MidiControlSurface::timerCallback()
 {
+    // Before the lights: a controller that has dropped back into standalone
+    // mode is not listening to them anyway.
+    sendKeepAlive();
     refreshFeedback();
 }
 

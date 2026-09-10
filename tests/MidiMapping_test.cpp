@@ -177,7 +177,12 @@ TEST_CASE ("the shipped DJ-202 mapping loads without warnings", "[midi][mapping]
     REQUIRE (warnings.isEmpty());
 
     REQUIRE (mapping.matchesDeviceName ("DJ-202"));
-    REQUIRE (mapping.jogTicksPerRevolution == 512);
+
+    // Measured, not taken from the documentation: two turns of the platter on
+    // real hardware produced 1590 ticks on CC 0x06, so a revolution is about
+    // 800 rather than the 512 the Mixxx mapping states. This is what decides
+    // whether a scratch tracks the hand, so it is worth pinning.
+    REQUIRE (mapping.jogTicksPerRevolution == 800);
 
     // The controls a two-deck mix cannot happen without.
     const auto hasControl = [&mapping] (int status, int number)
@@ -209,6 +214,166 @@ TEST_CASE ("the shipped DJ-202 mapping loads without warnings", "[midi][mapping]
             REQUIRE (knob->action == opendj::Action::channelEq);
             REQUIRE (knob->deck == deck);
             REQUIRE (knob->slot == band);
+        }
+    }
+}
+
+TEST_CASE ("a mapping reads init and keep-alive messages", "[midi][mapping]")
+{
+    juce::StringArray warnings;
+    const auto mapping = parse (R"({
+        "name": "Test",
+        "initMessages": [ "F0 00 20 7F 00 F7", "F0 00 20 7F 01 F7" ],
+        "keepAlive": { "message": "BF 64 00", "intervalMs": 500 },
+        "controls": [ { "name": "play", "status": "0x90", "number": "0x00", "action": "deck.play_toggle" } ]
+    })", warnings);
+
+    REQUIRE (warnings.isEmpty());
+    REQUIRE (mapping.initMessages.size() == 2);
+
+    // JUCE stores a system exclusive message with its start and end bytes on.
+    REQUIRE (mapping.initMessages[0].isSysEx());
+    REQUIRE (mapping.initMessages[0].getSysExDataSize() == 4);
+
+    const auto* data = mapping.initMessages[0].getSysExData();
+    REQUIRE (data[0] == 0x00);
+    REQUIRE (data[1] == 0x20);
+    REQUIRE (data[2] == 0x7F);
+    REQUIRE (data[3] == 0x00);
+
+    REQUIRE (mapping.keepAliveIntervalMs == 500);
+    REQUIRE (mapping.keepAliveMessages.size() == 1);
+    REQUIRE (mapping.keepAliveMessages[0].isController());
+    REQUIRE (mapping.keepAliveMessages[0].getControllerNumber() == 0x64);
+    REQUIRE (mapping.keepAliveMessages[0].getControllerValue() == 0x00);
+}
+
+TEST_CASE ("a mapping with no handshake asks for none", "[midi][mapping]")
+{
+    juce::StringArray warnings;
+    const auto mapping = parse (R"({ "name": "Test", "controls": [ { "name": "play", "status": "0x90", "number": "0x00", "action": "deck.play_toggle" } ] })", warnings);
+
+    REQUIRE (mapping.initMessages.empty());
+    REQUIRE (mapping.keepAliveMessages.empty());
+    REQUIRE (mapping.keepAliveIntervalMs == 0);
+}
+
+TEST_CASE ("a malformed handshake message is reported, not sent", "[midi][mapping]")
+{
+    juce::StringArray warnings;
+    const auto mapping = parse (R"({
+        "name": "Test",
+        "initMessages": [ "F0 00 20 7F 00 F7", "not hex", "F0 11" ],
+        "controls": [ { "name": "play", "status": "0x90", "number": "0x00", "action": "deck.play_toggle" } ]
+    })", warnings);
+
+    // The good one still goes; the two broken ones are named so they can be fixed.
+    REQUIRE (mapping.initMessages.size() == 1);
+    REQUIRE (warnings.size() == 2);
+}
+
+TEST_CASE ("the shipped DJ-202 mapping wakes the controller up", "[midi][mapping][dj202]")
+{
+    const auto file = findShippedMapping();
+
+    if (! file.existsAsFile())
+        SUCCEED ("mapping file not found beside the test binary");
+    else
+    {
+        opendj::MidiMapping mapping;
+        juce::StringArray warnings;
+        REQUIRE (opendj::MidiMapping::loadFromFile (file, mapping, warnings).wasOk());
+
+        // Without these the DJ-202 stays in standalone mode and not one button
+        // on it produces a MIDI message.
+        REQUIRE (mapping.initMessages.size() == 2);
+        REQUIRE (mapping.keepAliveMessages.size() == 1);
+
+        // It drops back to standalone about 1.5 seconds after the last one.
+        REQUIRE (mapping.keepAliveIntervalMs > 0);
+        REQUIRE (mapping.keepAliveIntervalMs <= 1000);
+    }
+}
+
+TEST_CASE ("a platter reporting absolute position is read as movement", "[midi][mapping][jog]")
+{
+    juce::StringArray warnings;
+    const auto mapping = parse (R"({
+        "name": "Test",
+        "controls": [
+            { "name": "platter", "status": "0xE0", "number": "0x00", "action": "jog.turn",
+              "deck": 0, "mode": "position14", "ticksPerRevolution": 16384 }
+        ]
+    })", warnings);
+
+    REQUIRE (warnings.isEmpty());
+    REQUIRE (mapping.controls.size() == 1);
+    REQUIRE (mapping.controls[0].mode == opendj::ValueMode::absolutePosition14);
+    REQUIRE (mapping.controls[0].ticksPerRevolution == 16384);
+
+    // Pitch bend is addressed by status alone, since its second byte is part of
+    // the value rather than a controller number.
+    REQUIRE (mapping.findControl (0xE0, 0, false) != nullptr);
+}
+
+TEST_CASE ("a control without its own tick count defers to the mapping", "[midi][mapping][jog]")
+{
+    juce::StringArray warnings;
+    const auto mapping = parse (R"({
+        "name": "Test",
+        "jogTicksPerRevolution": 512,
+        "controls": [
+            { "name": "platter", "status": "0xb0", "number": "0x06", "action": "jog.turn",
+              "deck": 0, "mode": "relative_offset" }
+        ]
+    })", warnings);
+
+    REQUIRE (mapping.jogTicksPerRevolution == 512);
+    REQUIRE (mapping.controls[0].ticksPerRevolution == 0);   // meaning "use the mapping's"
+}
+
+TEST_CASE ("the shipped DJ-202 mapping covers the platters and the toggled decks",
+           "[midi][mapping][dj202]")
+{
+    const auto file = findShippedMapping();
+
+    if (! file.existsAsFile())
+        SUCCEED ("mapping file not found beside the test binary");
+    else
+    {
+        opendj::MidiMapping mapping;
+        juce::StringArray warnings;
+        REQUIRE (opendj::MidiMapping::loadFromFile (file, mapping, warnings).wasOk());
+        INFO (warnings.joinIntoString ("; "));
+        REQUIRE (warnings.isEmpty());
+
+        // The platters are the relative encoder on CC 0x06. They also stream
+        // absolute position as pitch bend, but that flows whenever a hand rests
+        // on the wheel, so mapping it too would feed the deck a hand's tremor
+        // and fight the encoder for the tick scale.
+        for (const auto status : { 0xB0, 0xB1 })
+        {
+            const auto* platter = mapping.findControl (status, 0x06, false);
+            REQUIRE (platter != nullptr);
+            REQUIRE (platter->action == opendj::Action::jogTurn);
+            REQUIRE (platter->mode == opendj::ValueMode::relativeOffset);
+        }
+
+        for (const auto status : { 0xE0, 0xE1 })
+            REQUIRE (mapping.findControl (status, 0, false) == nullptr);
+
+        // Pressing DECK moves a side onto channels 3 and 4. Leaving those
+        // unmapped is what makes a stray press kill half the controller.
+        REQUIRE (mapping.findControl (0x92, 0x00, false) != nullptr);   // deck A play
+        REQUIRE (mapping.findControl (0x93, 0x01, false) != nullptr);   // deck B cue
+        REQUIRE (mapping.findControl (0xB2, 0x17, false) != nullptr);   // deck A EQ high
+
+        // And the filter, which the hardware has always had.
+        for (const auto status : { 0xB0, 0xB1 })
+        {
+            const auto* filter = mapping.findControl (status, 0x1A, false);
+            REQUIRE (filter != nullptr);
+            REQUIRE (filter->action == opendj::Action::channelFilter);
         }
     }
 }

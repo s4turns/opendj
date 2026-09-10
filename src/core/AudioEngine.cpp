@@ -5,6 +5,8 @@
 
 #include "core/AudioEngine.h"
 
+#include <algorithm>
+
 #include <cmath>
 
 namespace opendj
@@ -35,12 +37,93 @@ AudioEngine::~AudioEngine()
     deviceManager.closeAudioDevice();
 }
 
-juce::String AudioEngine::initialise()
+juce::String AudioEngine::initialise (const juce::StringArray& preferredDeviceNames)
 {
-    const auto error = deviceManager.initialiseWithDefaultDevices (0, preferredOutputChannels);
+    // The device manager has to be initialised before its device types can be
+    // enumerated, so start with the default and then look for something better.
+    auto error = deviceManager.initialiseWithDefaultDevices (0, preferredOutputChannels);
 
     if (error.isNotEmpty())
         return error;
+
+    deviceChoiceReason = "default device";
+
+    const auto openNamed = [this] (juce::AudioIODeviceType& type, const juce::String& name)
+    {
+        juce::AudioDeviceManager::AudioDeviceSetup setup;
+        setup.outputDeviceName = name;
+        setup.inputDeviceName = {};
+        setup.useDefaultInputChannels = false;
+        setup.inputChannels.clear();
+        setup.useDefaultOutputChannels = true;
+
+        deviceManager.setCurrentAudioDeviceType (type.getTypeName(), true);
+        return deviceManager.setAudioDeviceSetup (setup, true);
+    };
+
+    // The controller's own interface first, wherever it turns up. Its four
+    // outputs are exactly the master pair and the cue pair the mixer wants.
+    for (auto* type : deviceManager.getAvailableDeviceTypes())
+    {
+        if (type == nullptr)
+            continue;
+
+        type->scanForDevices();
+
+        for (const auto& name : type->getDeviceNames (false))
+        {
+            const auto matches = std::any_of (preferredDeviceNames.begin(), preferredDeviceNames.end(),
+                                              [&name] (const juce::String& hint)
+                                              {
+                                                  return hint.isNotEmpty() && name.containsIgnoreCase (hint);
+                                              });
+
+            if (! matches)
+                continue;
+
+            if (openNamed (*type, name).isEmpty())
+            {
+                deviceChoiceReason = "matched the controller";
+                deviceManager.addAudioCallback (this);
+                startTimer (retirementSweepMs);
+                return {};
+            }
+        }
+    }
+
+    // Failing that, anything that can carry a cue bus beats something that
+    // cannot: two outputs means mixing with no way to hear what is coming.
+    if (auto* device = deviceManager.getCurrentAudioDevice();
+        device == nullptr || device->getOutputChannelNames().size() < preferredOutputChannels)
+    {
+        for (auto* type : deviceManager.getAvailableDeviceTypes())
+        {
+            if (type == nullptr)
+                continue;
+
+            for (const auto& name : type->getDeviceNames (false))
+            {
+                if (openNamed (*type, name).isNotEmpty())
+                    continue;
+
+                if (auto* opened = deviceManager.getCurrentAudioDevice();
+                    opened != nullptr && opened->getOutputChannelNames().size() >= preferredOutputChannels)
+                {
+                    deviceChoiceReason = "has a cue bus";
+                    deviceManager.addAudioCallback (this);
+                    startTimer (retirementSweepMs);
+                    return {};
+                }
+            }
+        }
+
+        // Nothing better was found, so go back to the default rather than
+        // leaving whichever device the search happened to stop on.
+        error = deviceManager.initialiseWithDefaultDevices (0, preferredOutputChannels);
+
+        if (error.isNotEmpty())
+            return error;
+    }
 
     deviceManager.addAudioCallback (this);
     startTimer (retirementSweepMs);

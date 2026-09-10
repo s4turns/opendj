@@ -50,11 +50,23 @@ namespace
     // A record at 33 1/3 rpm takes 1.8 seconds to go round once.
     constexpr double vinylRevolutionSeconds = 60.0 / (100.0 / 3.0);
 
-    // A nudge off the platter is worth a small fraction of a percent per tick,
-    // and fades away over roughly a quarter of a second. A fifth of a turn is
-    // then about a five percent bend, which is the range a DJ nudges by.
-    constexpr double bendPerTick = 0.0005;
+    // A nudge off the platter is measured as a fraction of a turn, not in ticks:
+    // a wheel reporting absolute position counts in thousands per revolution and
+    // one sending relative ticks in hundreds, and the same hand movement has to
+    // mean the same thing on both. A fifth of a turn is about a five percent
+    // bend, which is the range a DJ nudges by. It fades over about a quarter of
+    // a second.
+    constexpr double bendPerRevolution = 0.256;
     constexpr double bendDecayPerSecond = 0.002;
+
+    // How long the head takes to close the distance to where the hand has put
+    // the platter, in blocks. Messages from a wheel do not arrive evenly: during
+    // the slow part of a scratch, which is exactly the turnaround, several
+    // blocks pass with nothing and then two arrive together. Chasing the hand
+    // over a couple of blocks bridges those gaps, where using only the ticks
+    // that landed in this block makes the deck lurch and stall. The cost is a
+    // lag of about two blocks, some ten milliseconds, which a hand cannot feel.
+    constexpr double scratchChaseBlocks = 2.0;
 
     // Key lock. The R2 engine is the one that keeps up with a tempo fader in
     // real time at a cost of a few percent of a core per deck; R3
@@ -319,8 +331,8 @@ bool Deck::hasHotCue (int slot) const
 
 void Deck::setJogTouched (bool touched)
 {
-    if (! jogTouched.exchange (touched, std::memory_order_relaxed) && touched)
-        jogTicks.store (0.0, std::memory_order_relaxed);   // start from a clean slate
+    if (jogTouched.exchange (touched, std::memory_order_relaxed) != touched)
+        jogTicks.store (0.0, std::memory_order_relaxed);   // start from a clean slate, either way
 }
 
 void Deck::addJogTicks (double ticks)
@@ -382,6 +394,7 @@ void Deck::processBlock (juce::AudioBuffer<float>& destination)
         transportGain.setCurrentAndTargetValue (0.0f);
         peakLevel.store (0.0f, std::memory_order_relaxed);
         stretchPrimed = false;
+        scratchTargetValid = false;
         return;
     }
 
@@ -408,6 +421,7 @@ void Deck::processBlock (juce::AudioBuffer<float>& destination)
         {
             readPosition = seek * track->sampleRate;
             stretchPrimed = false;   // whatever the stretcher holds is from the old place
+            scratchTargetValid = false;
         }
     }
 
@@ -416,6 +430,7 @@ void Deck::processBlock (juce::AudioBuffer<float>& destination)
     {
         pitchBend = 0.0;
         stretchPrimed = false;
+        scratchTargetValid = false;
         positionSeconds.store (readPosition / track->sampleRate, std::memory_order_relaxed);
         peakLevel.store (0.0f, std::memory_order_relaxed);
         return;
@@ -428,21 +443,35 @@ void Deck::processBlock (juce::AudioBuffer<float>& destination)
     if (scratching)
     {
         // One turn of the platter moves one turn of a record at 33 1/3 rpm, so
-        // the wheel feels like vinyl rather than like a scrub bar. The rate is
-        // whatever the hand did this block, which is why a still hand is silence
-        // and a backwards hand plays backwards.
+        // the wheel feels like vinyl rather than like a scrub bar. A still hand
+        // is silence and a backwards hand plays backwards.
         const auto secondsPerTick = vinylRevolutionSeconds
                                   / jogTicksPerRevolution.load (std::memory_order_relaxed);
-        const auto samplesToMove = ticks * secondsPerTick * track->sampleRate;
 
-        rate = samplesToMove / juce::jmax (1, blockSize);
+        // The hand's own position, which the head then chases. Keeping it apart
+        // from the head is what lets an uneven stream of messages come out as
+        // even movement.
+        if (! scratchTargetValid)
+        {
+            scratchTarget = readPosition;
+            scratchTargetValid = true;
+        }
+
+        scratchTarget += ticks * secondsPerTick * track->sampleRate;
+
+        rate = (scratchTarget - readPosition) / (juce::jmax (1, blockSize) * scratchChaseBlocks);
         pitchBend = 0.0;
     }
     else
     {
-        // Off the platter, a nudge bends the pitch briefly and then decays back
-        // to the tempo fader, the way pushing the side of a record does.
-        pitchBend += ticks * bendPerTick;
+        // Off the platter the hand's position means nothing, so forget it: the
+        // next touch starts again from wherever the head has reached.
+        scratchTargetValid = false;
+
+        // A nudge bends the pitch briefly and then decays back to the tempo
+        // fader, the way pushing the side of a record does.
+        pitchBend += (ticks / juce::jmax (1, jogTicksPerRevolution.load (std::memory_order_relaxed)))
+                   * bendPerRevolution;
         pitchBend *= std::pow (bendDecayPerSecond, blockSize / deviceSampleRate);
 
         if (std::abs (pitchBend) < 1.0e-5)

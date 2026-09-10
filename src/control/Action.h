@@ -49,6 +49,7 @@ enum class Action
     channelEq,          ///< slot 0 low, 1 mid, 2 high
     channelCueToggle,
     channelCue,
+    channelFilter,      ///< 0.5 is out of the way, down is a low pass, up a high pass
 
     crossfader,         ///< 0 is hard A, 1 is hard B
     masterGain,

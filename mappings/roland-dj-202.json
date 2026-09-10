@@ -1,12 +1,20 @@
 {
   "name": "Roland DJ-202",
   "author": "The OpenDJ contributors",
-  "description": "Two-deck mapping for the Roland DJ-202. Control assignments were taken from Roland's MIDI implementation chart and cross checked against the Mixxx community mapping by Silvio Ankermann, Sebastian Reusse and Rene Kraus (https://github.com/mixxxdj/mixxx/wiki/Roland-Dj-202), which is GPLv2 or later and so compatible with this project. The browse encoder scrolls the library and the load buttons put the selected track on a deck. Deck-toggle, effects, the TR-S sequencer and the pad modes beyond hot cue are recognised by the hardware but not yet mapped here.",
+  "description": "Two-deck mapping for the Roland DJ-202. Control assignments were taken from Roland's MIDI implementation chart and cross checked against the Mixxx community mapping by Silvio Ankermann, Sebastian Reusse and Rene Kraus (https://github.com/mixxxdj/mixxx/wiki/Roland-Dj-202), which is GPLv2 or later and so compatible with this project. The DJ-202 powers up in a standalone mode in which it sends nothing at all; initMessages asks it to talk to a computer, and keepAlive holds it there, since it falls back after about a second and a half without one. The platters report relative ticks on CC 0x06, centred on 64. They also stream 14-bit absolute position as pitch bend on 0xE0/0xE1, but that flows whenever a hand merely rests on the wheel, so it is deliberately left unmapped. Pressing DECK moves a side onto MIDI channels 3 and 4; those are routed back to the same decks, so a stray press cannot leave one dead. The browse encoder scrolls the library and the load buttons put the selected track on a deck. Deck-toggle, effects, the TR-S sequencer and the pad modes beyond hot cue are recognised by the hardware but not yet mapped here.",
   "deviceNameHints": [
     "DJ-202",
     "DJ202"
   ],
-  "jogTicksPerRevolution": 512,
+  "jogTicksPerRevolution": 800,
+  "initMessages": [
+    "F0 00 20 7F 00 F7",
+    "F0 00 20 7F 01 F7"
+  ],
+  "keepAlive": {
+    "message": "BF 64 00",
+    "intervalMs": 500
+  },
   "controls": [
     {
       "name": "Deck A play",
@@ -540,6 +548,506 @@
       "fineNumber": "0x58",
       "action": "mixer.crossfader",
       "mode": "absolute14"
+    },
+    {
+      "name": "Deck A filter",
+      "status": "0xB0",
+      "number": "0x1A",
+      "action": "mixer.filter",
+      "deck": 0
+    },
+    {
+      "name": "Deck B filter",
+      "status": "0xB1",
+      "number": "0x1A",
+      "action": "mixer.filter",
+      "deck": 1
+    },
+    {
+      "name": "Deck A play (deck toggled)",
+      "status": "0x92",
+      "number": "0x00",
+      "action": "deck.play_toggle",
+      "deck": 0
+    },
+    {
+      "name": "Deck A cue (deck toggled)",
+      "status": "0x92",
+      "number": "0x01",
+      "action": "deck.cue",
+      "deck": 0
+    },
+    {
+      "name": "Deck A sync (deck toggled)",
+      "status": "0x92",
+      "number": "0x02",
+      "action": "deck.sync",
+      "deck": 0
+    },
+    {
+      "name": "Deck A platter touch (deck toggled)",
+      "status": "0x92",
+      "number": "0x06",
+      "action": "jog.touch",
+      "deck": 0
+    },
+    {
+      "name": "Deck A headphone cue (deck toggled)",
+      "status": "0x92",
+      "number": "0x1B",
+      "action": "mixer.cue_toggle",
+      "deck": 0
+    },
+    {
+      "name": "Deck A key lock (deck toggled)",
+      "status": "0x92",
+      "number": "0x0D",
+      "action": "deck.keylock_toggle",
+      "deck": 0
+    },
+    {
+      "name": "Deck A platter (deck toggled)",
+      "status": "0xB2",
+      "number": "0x06",
+      "action": "jog.turn",
+      "deck": 0,
+      "mode": "relative_offset"
+    },
+    {
+      "name": "Deck A tempo fader (deck toggled)",
+      "status": "0xB2",
+      "number": "0x09",
+      "fineNumber": "0x3B",
+      "action": "deck.tempo",
+      "deck": 0,
+      "mode": "absolute14",
+      "inverted": true
+    },
+    {
+      "name": "Deck A trim (deck toggled)",
+      "status": "0xB2",
+      "number": "0x16",
+      "fineNumber": "0x34",
+      "action": "deck.trim",
+      "deck": 0,
+      "mode": "absolute14"
+    },
+    {
+      "name": "Deck A EQ high (deck toggled)",
+      "status": "0xB2",
+      "number": "0x17",
+      "fineNumber": "0x35",
+      "action": "mixer.eq",
+      "deck": 0,
+      "slot": 2,
+      "mode": "absolute14"
+    },
+    {
+      "name": "Deck A EQ mid (deck toggled)",
+      "status": "0xB2",
+      "number": "0x18",
+      "fineNumber": "0x36",
+      "action": "mixer.eq",
+      "deck": 0,
+      "slot": 1,
+      "mode": "absolute14"
+    },
+    {
+      "name": "Deck A EQ low (deck toggled)",
+      "status": "0xB2",
+      "number": "0x19",
+      "fineNumber": "0x37",
+      "action": "mixer.eq",
+      "deck": 0,
+      "slot": 0,
+      "mode": "absolute14"
+    },
+    {
+      "name": "Deck A channel fader (deck toggled)",
+      "status": "0xB2",
+      "number": "0x1C",
+      "fineNumber": "0x3A",
+      "action": "mixer.fader",
+      "deck": 0,
+      "mode": "absolute14"
+    },
+    {
+      "name": "Deck B play (deck toggled)",
+      "status": "0x93",
+      "number": "0x00",
+      "action": "deck.play_toggle",
+      "deck": 1
+    },
+    {
+      "name": "Deck B cue (deck toggled)",
+      "status": "0x93",
+      "number": "0x01",
+      "action": "deck.cue",
+      "deck": 1
+    },
+    {
+      "name": "Deck B sync (deck toggled)",
+      "status": "0x93",
+      "number": "0x02",
+      "action": "deck.sync",
+      "deck": 1
+    },
+    {
+      "name": "Deck B platter touch (deck toggled)",
+      "status": "0x93",
+      "number": "0x06",
+      "action": "jog.touch",
+      "deck": 1
+    },
+    {
+      "name": "Deck B headphone cue (deck toggled)",
+      "status": "0x93",
+      "number": "0x1B",
+      "action": "mixer.cue_toggle",
+      "deck": 1
+    },
+    {
+      "name": "Deck B key lock (deck toggled)",
+      "status": "0x93",
+      "number": "0x0D",
+      "action": "deck.keylock_toggle",
+      "deck": 1
+    },
+    {
+      "name": "Deck B platter (deck toggled)",
+      "status": "0xB3",
+      "number": "0x06",
+      "action": "jog.turn",
+      "deck": 1,
+      "mode": "relative_offset"
+    },
+    {
+      "name": "Deck B tempo fader (deck toggled)",
+      "status": "0xB3",
+      "number": "0x09",
+      "fineNumber": "0x3B",
+      "action": "deck.tempo",
+      "deck": 1,
+      "mode": "absolute14",
+      "inverted": true
+    },
+    {
+      "name": "Deck B trim (deck toggled)",
+      "status": "0xB3",
+      "number": "0x16",
+      "fineNumber": "0x34",
+      "action": "deck.trim",
+      "deck": 1,
+      "mode": "absolute14"
+    },
+    {
+      "name": "Deck B EQ high (deck toggled)",
+      "status": "0xB3",
+      "number": "0x17",
+      "fineNumber": "0x35",
+      "action": "mixer.eq",
+      "deck": 1,
+      "slot": 2,
+      "mode": "absolute14"
+    },
+    {
+      "name": "Deck B EQ mid (deck toggled)",
+      "status": "0xB3",
+      "number": "0x18",
+      "fineNumber": "0x36",
+      "action": "mixer.eq",
+      "deck": 1,
+      "slot": 1,
+      "mode": "absolute14"
+    },
+    {
+      "name": "Deck B EQ low (deck toggled)",
+      "status": "0xB3",
+      "number": "0x19",
+      "fineNumber": "0x37",
+      "action": "mixer.eq",
+      "deck": 1,
+      "slot": 0,
+      "mode": "absolute14"
+    },
+    {
+      "name": "Deck B channel fader (deck toggled)",
+      "status": "0xB3",
+      "number": "0x1C",
+      "fineNumber": "0x3A",
+      "action": "mixer.fader",
+      "deck": 1,
+      "mode": "absolute14"
+    },
+    {
+      "name": "Deck A pad 1 (deck toggled)",
+      "status": "0x96",
+      "number": "0x1",
+      "action": "pad.hotcue",
+      "deck": 0,
+      "slot": 0
+    },
+    {
+      "name": "Deck A pad 1 clear (deck toggled)",
+      "status": "0x96",
+      "number": "0x9",
+      "action": "pad.hotcue_clear",
+      "deck": 0,
+      "slot": 0
+    },
+    {
+      "name": "Deck A pad 2 (deck toggled)",
+      "status": "0x96",
+      "number": "0x2",
+      "action": "pad.hotcue",
+      "deck": 0,
+      "slot": 1
+    },
+    {
+      "name": "Deck A pad 2 clear (deck toggled)",
+      "status": "0x96",
+      "number": "0xa",
+      "action": "pad.hotcue_clear",
+      "deck": 0,
+      "slot": 1
+    },
+    {
+      "name": "Deck A pad 3 (deck toggled)",
+      "status": "0x96",
+      "number": "0x3",
+      "action": "pad.hotcue",
+      "deck": 0,
+      "slot": 2
+    },
+    {
+      "name": "Deck A pad 3 clear (deck toggled)",
+      "status": "0x96",
+      "number": "0xb",
+      "action": "pad.hotcue_clear",
+      "deck": 0,
+      "slot": 2
+    },
+    {
+      "name": "Deck A pad 4 (deck toggled)",
+      "status": "0x96",
+      "number": "0x4",
+      "action": "pad.hotcue",
+      "deck": 0,
+      "slot": 3
+    },
+    {
+      "name": "Deck A pad 4 clear (deck toggled)",
+      "status": "0x96",
+      "number": "0xc",
+      "action": "pad.hotcue_clear",
+      "deck": 0,
+      "slot": 3
+    },
+    {
+      "name": "Deck A pad 5 (deck toggled)",
+      "status": "0x96",
+      "number": "0x5",
+      "action": "pad.hotcue",
+      "deck": 0,
+      "slot": 4
+    },
+    {
+      "name": "Deck A pad 5 clear (deck toggled)",
+      "status": "0x96",
+      "number": "0xd",
+      "action": "pad.hotcue_clear",
+      "deck": 0,
+      "slot": 4
+    },
+    {
+      "name": "Deck A pad 6 (deck toggled)",
+      "status": "0x96",
+      "number": "0x6",
+      "action": "pad.hotcue",
+      "deck": 0,
+      "slot": 5
+    },
+    {
+      "name": "Deck A pad 6 clear (deck toggled)",
+      "status": "0x96",
+      "number": "0xe",
+      "action": "pad.hotcue_clear",
+      "deck": 0,
+      "slot": 5
+    },
+    {
+      "name": "Deck A pad 7 (deck toggled)",
+      "status": "0x96",
+      "number": "0x7",
+      "action": "pad.hotcue",
+      "deck": 0,
+      "slot": 6
+    },
+    {
+      "name": "Deck A pad 7 clear (deck toggled)",
+      "status": "0x96",
+      "number": "0xf",
+      "action": "pad.hotcue_clear",
+      "deck": 0,
+      "slot": 6
+    },
+    {
+      "name": "Deck A pad 8 (deck toggled)",
+      "status": "0x96",
+      "number": "0x8",
+      "action": "pad.hotcue",
+      "deck": 0,
+      "slot": 7
+    },
+    {
+      "name": "Deck A pad 8 clear (deck toggled)",
+      "status": "0x96",
+      "number": "0x10",
+      "action": "pad.hotcue_clear",
+      "deck": 0,
+      "slot": 7
+    },
+    {
+      "name": "Deck B pad 1 (deck toggled)",
+      "status": "0x97",
+      "number": "0x1",
+      "action": "pad.hotcue",
+      "deck": 1,
+      "slot": 0
+    },
+    {
+      "name": "Deck B pad 1 clear (deck toggled)",
+      "status": "0x97",
+      "number": "0x9",
+      "action": "pad.hotcue_clear",
+      "deck": 1,
+      "slot": 0
+    },
+    {
+      "name": "Deck B pad 2 (deck toggled)",
+      "status": "0x97",
+      "number": "0x2",
+      "action": "pad.hotcue",
+      "deck": 1,
+      "slot": 1
+    },
+    {
+      "name": "Deck B pad 2 clear (deck toggled)",
+      "status": "0x97",
+      "number": "0xa",
+      "action": "pad.hotcue_clear",
+      "deck": 1,
+      "slot": 1
+    },
+    {
+      "name": "Deck B pad 3 (deck toggled)",
+      "status": "0x97",
+      "number": "0x3",
+      "action": "pad.hotcue",
+      "deck": 1,
+      "slot": 2
+    },
+    {
+      "name": "Deck B pad 3 clear (deck toggled)",
+      "status": "0x97",
+      "number": "0xb",
+      "action": "pad.hotcue_clear",
+      "deck": 1,
+      "slot": 2
+    },
+    {
+      "name": "Deck B pad 4 (deck toggled)",
+      "status": "0x97",
+      "number": "0x4",
+      "action": "pad.hotcue",
+      "deck": 1,
+      "slot": 3
+    },
+    {
+      "name": "Deck B pad 4 clear (deck toggled)",
+      "status": "0x97",
+      "number": "0xc",
+      "action": "pad.hotcue_clear",
+      "deck": 1,
+      "slot": 3
+    },
+    {
+      "name": "Deck B pad 5 (deck toggled)",
+      "status": "0x97",
+      "number": "0x5",
+      "action": "pad.hotcue",
+      "deck": 1,
+      "slot": 4
+    },
+    {
+      "name": "Deck B pad 5 clear (deck toggled)",
+      "status": "0x97",
+      "number": "0xd",
+      "action": "pad.hotcue_clear",
+      "deck": 1,
+      "slot": 4
+    },
+    {
+      "name": "Deck B pad 6 (deck toggled)",
+      "status": "0x97",
+      "number": "0x6",
+      "action": "pad.hotcue",
+      "deck": 1,
+      "slot": 5
+    },
+    {
+      "name": "Deck B pad 6 clear (deck toggled)",
+      "status": "0x97",
+      "number": "0xe",
+      "action": "pad.hotcue_clear",
+      "deck": 1,
+      "slot": 5
+    },
+    {
+      "name": "Deck B pad 7 (deck toggled)",
+      "status": "0x97",
+      "number": "0x7",
+      "action": "pad.hotcue",
+      "deck": 1,
+      "slot": 6
+    },
+    {
+      "name": "Deck B pad 7 clear (deck toggled)",
+      "status": "0x97",
+      "number": "0xf",
+      "action": "pad.hotcue_clear",
+      "deck": 1,
+      "slot": 6
+    },
+    {
+      "name": "Deck B pad 8 (deck toggled)",
+      "status": "0x97",
+      "number": "0x8",
+      "action": "pad.hotcue",
+      "deck": 1,
+      "slot": 7
+    },
+    {
+      "name": "Deck B pad 8 clear (deck toggled)",
+      "status": "0x97",
+      "number": "0x10",
+      "action": "pad.hotcue_clear",
+      "deck": 1,
+      "slot": 7
+    },
+    {
+      "name": "Deck A filter (deck toggled)",
+      "status": "0xB2",
+      "number": "0x1A",
+      "action": "mixer.filter",
+      "deck": 0
+    },
+    {
+      "name": "Deck B filter (deck toggled)",
+      "status": "0xB3",
+      "number": "0x1A",
+      "action": "mixer.filter",
+      "deck": 1
     }
   ]
 }

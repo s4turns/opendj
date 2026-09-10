@@ -70,6 +70,7 @@ public:
 private:
     void loadButtonClicked();
     void applyTempoFromSlider();
+    double rangePercent() const;
     void updateTempoReadout();
 
     AudioEngine& engine;

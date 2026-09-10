@@ -5,6 +5,8 @@
 
 #include "control/MidiMapping.h"
 
+#include <optional>
+
 namespace opendj
 {
 
@@ -41,8 +43,57 @@ namespace
         if (text == "absolute14")        return ValueMode::absolute14Bit;
         if (text == "relative_offset")   return ValueMode::relativeOffset;
         if (text == "relative_twos")     return ValueMode::relativeTwosComplement;
+        if (text == "position14")        return ValueMode::absolutePosition14;
 
         return fallback;
+    }
+
+    /** A raw MIDI message written as hex bytes, for example "F0 00 20 7F 00 F7"
+        or "BF 64 00". Returns nothing if it is not a message that can be sent. */
+    std::optional<juce::MidiMessage> parseRawMessage (const juce::String& text)
+    {
+        juce::StringArray tokens;
+        tokens.addTokens (text, " ,\t", {});
+        tokens.removeEmptyStrings();
+
+        std::vector<juce::uint8> bytes;
+
+        for (auto token : tokens)
+        {
+            token = token.startsWithIgnoreCase ("0x") ? token.substring (2) : token;
+
+            if (! token.containsOnly ("0123456789abcdefABCDEF") || token.isEmpty())
+                return {};
+
+            const auto value = token.getHexValue32();
+
+            if (value < 0 || value > 255)
+                return {};
+
+            bytes.push_back (static_cast<juce::uint8> (value));
+        }
+
+        if (bytes.empty())
+            return {};
+
+        if (bytes.front() == 0xF0)
+        {
+            // JUCE wraps the payload itself, so hand it what is between the
+            // start and end bytes.
+            if (bytes.size() < 3 || bytes.back() != 0xF7)
+                return {};
+
+            return juce::MidiMessage::createSysExMessage (bytes.data() + 1,
+                                                          static_cast<int> (bytes.size()) - 2);
+        }
+
+        switch (bytes.size())
+        {
+            case 1:  return juce::MidiMessage (bytes[0]);
+            case 2:  return juce::MidiMessage (bytes[0], bytes[1]);
+            case 3:  return juce::MidiMessage (bytes[0], bytes[1], bytes[2]);
+            default: return {};
+        }
     }
 }
 
@@ -75,6 +126,39 @@ juce::Result MidiMapping::loadFromJson (const juce::var& json,
     destination.name = json.getProperty ("name", "Unnamed mapping").toString();
     destination.author = json.getProperty ("author", {}).toString();
     destination.description = json.getProperty ("description", {}).toString();
+
+    const auto readMessages = [&warnings] (const juce::var& value, const juce::String& what)
+    {
+        std::vector<juce::MidiMessage> messages;
+
+        const auto readOne = [&] (const juce::var& entry)
+        {
+            if (const auto message = parseRawMessage (entry.toString()))
+                messages.push_back (*message);
+            else
+                warnings.add (what + ": could not read the message \"" + entry.toString() + "\".");
+        };
+
+        if (const auto* array = value.getArray())
+            for (const auto& entry : *array)
+                readOne (entry);
+        else if (value.toString().isNotEmpty())
+            readOne (value);
+
+        return messages;
+    };
+
+    destination.initMessages = readMessages (json.getProperty ("initMessages", {}), "initMessages");
+
+    if (const auto keepAlive = json.getProperty ("keepAlive", {}); keepAlive.isObject())
+    {
+        destination.keepAliveMessages = readMessages (keepAlive.getProperty ("message", {}), "keepAlive");
+
+        if (const auto interval = parseNumber (keepAlive.getProperty ("intervalMs", {})))
+            destination.keepAliveIntervalMs = juce::jlimit (10, 10000, *interval);
+        else if (! destination.keepAliveMessages.empty())
+            destination.keepAliveIntervalMs = 500;
+    }
 
     if (const auto ticks = parseNumber (json.getProperty ("jogTicksPerRevolution", {})))
         destination.jogTicksPerRevolution = juce::jmax (1, *ticks);
@@ -133,6 +217,9 @@ juce::Result MidiMapping::loadFromJson (const juce::var& json,
 
         if (control.fineNumber >= 0 && control.mode == ValueMode::absolute)
             control.mode = ValueMode::absolute14Bit;
+
+        if (const auto ticks = parseNumber (entry.getProperty ("ticksPerRevolution", {})))
+            control.ticksPerRevolution = juce::jmax (1, *ticks);
 
         control.inverted = static_cast<bool> (entry.getProperty ("inverted", false));
         control.requiresShift = static_cast<bool> (entry.getProperty ("shift", false));

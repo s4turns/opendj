@@ -1,0 +1,15 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=OpenDJ
+GenericName=DJ Software
+Comment=Free and open source DJ software
+Exec=opendj %F
+TryExec=opendj
+Icon=opendj
+Terminal=false
+StartupNotify=true
+StartupWMClass=OpenDJ
+Categories=AudioVideo;Audio;Player;Mixer;
+Keywords=DJ;mix;mixing;turntable;beatmatch;deck;crossfader;
+MimeType=audio/mpeg;audio/flac;audio/x-flac;audio/wav;audio/x-wav;audio/ogg;audio/x-vorbis+ogg;audio/aiff;audio/x-aiff;

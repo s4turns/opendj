@@ -22,7 +22,13 @@ enum class ValueMode
     absolute,           ///< 0 to 127 mapped onto 0 to 1
     absolute14Bit,      ///< a coarse and fine control change pair, 0 to 16383
     relativeOffset,     ///< signed, centred on 64: the DJ-202 jog wheels
-    relativeTwosComplement
+    relativeTwosComplement,
+
+    /** A 14-bit absolute position, sent as pitch bend, that wraps round rather
+        than stopping at either end: a platter, in other words. Movement is the
+        difference between one reading and the last, so the first reading after
+        a hand lands only establishes where the platter was. */
+    absolutePosition14
 };
 
 /** One physical control and what it does. */
@@ -40,6 +46,12 @@ struct MidiControl
     ValueMode mode = ValueMode::button;
     bool inverted = false;
     bool requiresShift = false;
+
+    /** For a platter, how many of its own ticks make one revolution. Zero means
+        the mapping's own figure. A wheel reporting absolute 14-bit position
+        counts in far finer steps than one sending relative ticks, so the two
+        cannot share a number. */
+    int ticksPerRevolution = 0;
 
     /** LED feedback: the note to send back, or -1 for a control with no light. */
     int feedbackNumber = -1;
@@ -65,6 +77,22 @@ public:
 
     /** Ticks the platter reports for one full revolution. */
     int jogTicksPerRevolution = 512;
+
+    /** Sent once when the device is opened.
+
+        Several controllers power up in a standalone mode in which they play
+        their own sounds and tell the computer nothing at all. The Roland DJ-202
+        is one: until it is asked, in so many words, to talk to a computer, not
+        one button on it produces a MIDI message. Keeping the request here
+        rather than in the code means the next such controller needs a file and
+        not a release. */
+    std::vector<juce::MidiMessage> initMessages;
+
+    /** Repeated to hold the device in whatever mode initMessages put it in, and
+        how often. The DJ-202 falls back to standalone about a second and a half
+        after the last one. Zero means the device needs no reminding. */
+    std::vector<juce::MidiMessage> keepAliveMessages;
+    int keepAliveIntervalMs = 0;
 
     std::vector<MidiControl> controls;
 

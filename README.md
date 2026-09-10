@@ -16,8 +16,9 @@ the same deck layout, the same workflow, the same muscle memory. The artwork, th
 and the code are entirely original and entirely open.
 
 **Status: early development, but it mixes.** Two decks with turntable platters you can scratch,
-waveforms, beat grids, automatic BPM detection and sync, key lock, a working mixer, hot cues, a
-searchable track library, and Roland DJ-202 support. No effects or sampler yet.
+waveforms, beat grids, automatic BPM detection and sync, key lock, a mixer with a filter per
+channel, hot cues, a searchable track library, and Roland DJ-202 support including its own audio
+interface and its platters. No effects, loops or sampler yet.
 
 ## Design goals
 
