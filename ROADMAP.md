@@ -224,3 +224,23 @@ it and puts the task back.
 | NSSM rather than `sc.exe` | The runner is a console program and does not speak to the service control manager. Installed directly, Windows would keep reporting it as failing to start while it worked perfectly. NSSM runs it as a child and does the service protocol for it |
 | It runs as `LocalSystem` | So it needs no stored password. That is a privileged account, and jobs it runs are equally privileged, which is worth knowing before pointing this repository's CI at code you have not read |
 | Logs in `C:\gitea-runner\logs` | Rotated at 10 MB. The service restarts itself five seconds after any exit |
+| Job workspaces in `C:\gitea-runner\work`, set in `config.yaml` | Not a tidiness preference. See below |
+
+The workspace location is the one setting here that must not be reverted to its default. A
+service running as `LocalSystem` has its home under `C:\Windows\System32`, which is where the
+runner would otherwise put each job. Visual Studio ships a **32-bit** CMake, and a 32-bit process
+reading a path under `System32` is silently redirected by WOW64 to `SysWOW64`, where the checkout
+is not. What you see is CMake reporting that the source directory does not exist, eleven seconds
+into a job whose checkout plainly succeeded into that exact directory. Nothing in the message
+hints at the cause.
+
+### Reading a failed job's log
+
+The web endpoint serves it without a token, which is quicker than clicking through the UI:
+
+```
+curl https://git.interdo.me/interdome/opendj/actions/runs/<run>/jobs/<job>/logs
+```
+
+Get both ids from `/api/v1/repos/interdome/opendj/actions/runs/<run>/jobs`. The API's own
+`/logs` route needs a token; the web one does not.
