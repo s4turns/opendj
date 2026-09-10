@@ -1,0 +1,28 @@
+# Build output
+build/
+out/
+cmake-build-*/
+_deps/
+
+# Dependency checkouts fetched at configure time
+external/
+
+# IDE / editor
+.vs/
+.vscode/
+.idea/
+*.user
+*.sln
+*.vcxproj*
+CMakeSettings.json
+compile_commands.json
+
+# OS noise
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# Local settings and caches
+*.log
+opendj-settings.xml
+analysis-cache/
