@@ -221,3 +221,156 @@ TEST_CASE ("retired tracks are only freed once the audio thread has moved on", "
     REQUIRE (fixture.deck->isLoaded());
     REQUIRE_FALSE (fixture.deck->isPlaying());   // loading always stops the deck
 }
+
+TEST_CASE ("a hand on the platter drives playback", "[deck][jog]")
+{
+    Fixture fixture;
+    fixture.deck->setJogTicksPerRevolution (512);
+    fixture.deck->seekToSeconds (2.0);
+    fixture.run (1);
+
+    // A record at 33 1/3 rpm turns once in 1.8 seconds, so half a turn of the
+    // platter should move half of that.
+    fixture.deck->setJogTouched (true);
+    fixture.deck->addJogTicks (256.0);
+    fixture.run (1);
+
+    REQUIRE_THAT (fixture.deck->getPositionSeconds(), WithinAbs (2.9, 0.01));
+}
+
+TEST_CASE ("the platter runs the track backwards", "[deck][jog]")
+{
+    Fixture fixture;
+    fixture.deck->seekToSeconds (4.0);
+    fixture.run (1);
+
+    fixture.deck->setJogTouched (true);
+    fixture.deck->addJogTicks (-256.0);
+    fixture.run (1);
+
+    REQUIRE_THAT (fixture.deck->getPositionSeconds(), WithinAbs (3.1, 0.01));
+}
+
+TEST_CASE ("a still hand on the platter holds the track still", "[deck][jog]")
+{
+    Fixture fixture;
+    fixture.deck->seekToSeconds (2.0);
+    fixture.deck->play();
+    fixture.run (5);
+
+    const auto beforeTouch = fixture.deck->getPositionSeconds();
+
+    // Touching a playing deck stops it dead, the way a hand on vinyl does.
+    fixture.deck->setJogTouched (true);
+    fixture.run (10);
+
+    REQUIRE_THAT (fixture.deck->getPositionSeconds(), WithinAbs (beforeTouch, 0.001));
+}
+
+TEST_CASE ("scratching a stopped deck is audible", "[deck][jog]")
+{
+    Fixture fixture;
+    fixture.deck->seekToSeconds (2.0);
+    fixture.run (2);
+
+    REQUIRE (fixture.buffer.getMagnitude (0, 0, blockSize) < 0.0001f);
+
+    // Keep the platter moving: a still hand is silence by design, so the audio
+    // only appears while the ticks keep coming.
+    fixture.deck->setJogTouched (true);
+
+    auto loudest = 0.0f;
+
+    for (int i = 0; i < 8; ++i)
+    {
+        fixture.deck->addJogTicks (64.0);
+        fixture.run (1);
+        loudest = juce::jmax (loudest, fixture.buffer.getMagnitude (0, 0, blockSize));
+    }
+
+    REQUIRE (loudest > 0.1f);
+}
+
+TEST_CASE ("letting go of the platter returns to the tempo fader", "[deck][jog]")
+{
+    Fixture fixture;
+    fixture.deck->seekToSeconds (2.0);
+    fixture.deck->play();
+    fixture.run (2);
+
+    fixture.deck->setJogTouched (true);
+    fixture.run (5);
+
+    fixture.deck->setJogTouched (false);
+    const auto atRelease = fixture.deck->getPositionSeconds();
+
+    const int blocks = 50;
+    fixture.run (blocks);
+
+    REQUIRE_THAT (fixture.deck->getPositionSeconds(),
+                  WithinAbs (atRelease + blocks * fixture.secondsPerBlock(), 0.005));
+}
+
+TEST_CASE ("a nudge off the platter bends the pitch and then lets go", "[deck][jog]")
+{
+    Fixture fixture;
+    fixture.deck->play();
+    fixture.run (2);
+
+    const auto beforeNudge = fixture.deck->getPositionSeconds();
+    fixture.deck->addJogTicks (100.0);
+    fixture.run (10);
+
+    const auto nudged = fixture.deck->getPositionSeconds() - beforeNudge;
+    const auto unnudged = 10 * fixture.secondsPerBlock();
+
+    // The nudge pushes it ahead, but only by a little and only briefly.
+    REQUIRE (nudged > unnudged);
+    REQUIRE (nudged < unnudged * 1.1);
+
+    // Give the bend time to decay, then confirm the deck is back at exactly the
+    // rate the tempo fader asks for.
+    fixture.run (100);
+    const auto settled = fixture.deck->getPositionSeconds();
+    fixture.run (50);
+
+    REQUIRE_THAT (fixture.deck->getPositionSeconds(),
+                  WithinAbs (settled + 50 * fixture.secondsPerBlock(), 0.002));
+}
+
+TEST_CASE ("a hot cue pad sets an empty slot and jumps to a set one", "[deck][hotcue]")
+{
+    Fixture fixture;
+
+    REQUIRE_FALSE (fixture.deck->hasHotCue (0));
+
+    fixture.deck->seekToSeconds (3.5);
+    fixture.run (1);
+    fixture.deck->hotCuePressed (0);
+
+    REQUIRE (fixture.deck->hasHotCue (0));
+    REQUIRE_THAT (fixture.deck->getHotCueSeconds (0), WithinAbs (3.5, 0.01));
+
+    fixture.deck->seekToSeconds (6.0);
+    fixture.run (1);
+
+    fixture.deck->hotCuePressed (0);
+    fixture.run (1);
+    REQUIRE_THAT (fixture.deck->getPositionSeconds(), WithinAbs (3.5, 0.01));
+
+    fixture.deck->clearHotCue (0);
+    REQUIRE_FALSE (fixture.deck->hasHotCue (0));
+}
+
+TEST_CASE ("loading a track clears the hot cues from the last one", "[deck][hotcue]")
+{
+    Fixture fixture;
+
+    fixture.deck->seekToSeconds (1.0);
+    fixture.run (1);
+    fixture.deck->hotCuePressed (3);
+    REQUIRE (fixture.deck->hasHotCue (3));
+
+    REQUIRE (fixture.deck->loadFile (fixture.temporaryFile.getFile()));
+    REQUIRE_FALSE (fixture.deck->hasHotCue (3));
+}

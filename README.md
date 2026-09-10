@@ -7,7 +7,8 @@ the same deck layout, the same workflow, the same muscle memory. The artwork, th
 and the code are entirely original and entirely open.
 
 **Status: early development.** Two decks play with waveforms, beat grids, automatic BPM
-detection and sync. The mixer works. There is no track browser and no controller support yet.
+detection and sync. The mixer works. Roland DJ-202 controllers are mapped, including the jog
+wheels and hot cue pads. There is no track browser, key lock, effects or sampler yet.
 
 ## Design goals
 
@@ -25,9 +26,9 @@ detection and sync. The mixer works. There is no track browser and no controller
 4. Scrolling and overview waveforms
 5. Mixer: gain, three-band EQ, crossfader, headphone cue
 6. BPM analysis, beatgrid and sync
-7. Track browser backed by a SQLite library
-8. MIDI mapping engine, monitor and learn panel
-9. Roland DJ-202 mapping, including jog wheel scratch
+7. MIDI mapping engine and monitor — **done**
+8. Roland DJ-202 mapping, including jog wheel scratch — **done**, pending hardware checks
+9. Track browser backed by a SQLite library
 
 Out of scope until that is finished: effects racks, four decks, stem separation, video,
 streaming services and recording.
@@ -50,6 +51,19 @@ to the other one.
 Cue follows the behaviour DJs expect. While the deck is stopped, pressing cue sets the cue
 point and previews from it, and releasing returns and stops. While it is playing, pressing
 cue drops straight back to the cue point and stops there.
+
+## Controllers
+
+Press Controller in the bottom bar to pick a MIDI device and a mapping, and to watch what the
+hardware is actually sending. Every message is listed with the control it matched, or as
+unmapped, which is how you check a mapping against real hardware or work out what an
+unsupported controller sends.
+
+Mappings are JSON files in `mappings/`, not code. Copy one, change the numbers, and your
+controller works without rebuilding anything. A control with a mistake in it is skipped with a
+warning shown in that panel, so one typo costs you one button rather than the whole device.
+
+A recognised controller is opened automatically at startup.
 
 ## Building
 
@@ -95,6 +109,20 @@ ctest --test-dir build --output-on-failure
 
 The DJ-202 is a two-deck controller with a built-in four-channel USB audio interface, which
 maps directly onto OpenDJ's master-on-1-2 and cue-on-3-4 routing.
+
+Mapped so far: play, cue, sync, headphone cue, the tempo faders, trim, all three EQ bands, the
+channel faders, the crossfader, load, shift, the platters in both scratch and nudge modes, and
+the eight pads per deck as hot cues. Shift plus a pad clears that hot cue. Touching the metal
+top of a platter halts playback and drives it from your hand at 33 1/3 rpm; moving the outer
+ring instead nudges the pitch and decays back to the fader.
+
+Not yet mapped: the deck-toggle button and decks 3 and 4, the effects section, the TR-S
+sequencer, slip and vinyl mode, key lock, and the pad modes past hot cue.
+
+**One thing still needs checking against real hardware:** the tempo faders are mapped inverted,
+on the assumption the DJ-202 sends its highest value at the bottom of the throw. If yours reads
+backwards, set `"inverted": false` on the two tempo fader entries in the mapping file. The
+Controller panel's monitor shows the raw values, so it takes about ten seconds to confirm.
 
 Set the unit's USB mode to match your platform. On Windows use **Vendor** mode with Roland's
 driver installed, which gives you ASIO. On Linux use **Generic** mode, which is USB class

@@ -10,6 +10,7 @@
 
 #include "analysis/TrackAnalysis.h"
 
+#include <array>
 #include <atomic>
 #include <memory>
 #include <vector>
@@ -87,6 +88,37 @@ public:
     float getTrim() const noexcept { return trimGain.load (std::memory_order_relaxed); }
 
     //==========================================================================
+    // Hot cues
+    //==========================================================================
+
+    static constexpr int numHotCues = 8;
+
+    /** Sets the hot cue to the current position if it is empty, or jumps to it
+        if it is not. This is the one-button behaviour pads want. */
+    void hotCuePressed (int slot);
+    void clearHotCue (int slot);
+    double getHotCueSeconds (int slot) const;
+    bool hasHotCue (int slot) const;
+
+    //==========================================================================
+    // Jog wheel
+    //==========================================================================
+
+    /** A hand on the platter. While touched the wheel drives playback outright:
+        the transport rate comes from the ticks, so the track stops when the hand
+        stops and runs backwards when the hand does. */
+    void setJogTouched (bool touched);
+    bool isJogTouched() const noexcept { return jogTouched.load (std::memory_order_relaxed); }
+
+    /** Relative movement since the last call, in controller ticks. Positive is
+        forwards. Accumulates until the audio thread consumes it. */
+    void addJogTicks (double ticks);
+
+    /** How many ticks the controller reports for one full turn of the platter.
+        The DJ-202 reports 512. */
+    void setJogTicksPerRevolution (int ticks);
+
+    //==========================================================================
     // State for the UI
     //==========================================================================
 
@@ -144,6 +176,13 @@ private:
 
     // True while the cue button is previewing, so releasing it stops playback.
     std::atomic<bool> previewingFromCue { false };
+
+    std::array<std::atomic<double>, numHotCues> hotCues;   // negative means unset
+
+    std::atomic<bool> jogTouched { false };
+    std::atomic<double> jogTicks { 0.0 };
+    std::atomic<int> jogTicksPerRevolution { 512 };
+    double pitchBend = 0.0;                                // audio thread only
 
     double readPosition = 0.0;                          // audio thread, in file samples
     double deviceSampleRate = 44100.0;

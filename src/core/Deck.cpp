@@ -44,6 +44,15 @@ namespace
 
     constexpr double gainRampSeconds = 0.005;
 
+    // A record at 33 1/3 rpm takes 1.8 seconds to go round once.
+    constexpr double vinylRevolutionSeconds = 60.0 / (100.0 / 3.0);
+
+    // A nudge off the platter is worth a small fraction of a percent per tick,
+    // and fades away over roughly a quarter of a second. A fifth of a turn is
+    // then about a five percent bend, which is the range a DJ nudges by.
+    constexpr double bendPerTick = 0.0005;
+    constexpr double bendDecayPerSecond = 0.002;
+
     // Refuse absurd files rather than exhausting memory on a mistaken load.
     constexpr double maxTrackMinutes = 30.0;
 }
@@ -51,6 +60,8 @@ namespace
 Deck::Deck (int deckIndex, juce::AudioFormatManager& formatManagerToUse)
     : index (deckIndex), formatManager (formatManagerToUse)
 {
+    for (auto& cue : hotCues)
+        cue.store (-1.0, std::memory_order_relaxed);
 }
 
 Deck::~Deck()
@@ -109,6 +120,9 @@ void Deck::publish (std::unique_ptr<Track> newTrack)
     auto* raw = newTrack.get();
     auto previous = std::move (owned);
     owned = std::move (newTrack);
+
+    for (auto& cue : hotCues)
+        cue.store (-1.0, std::memory_order_relaxed);
 
     lengthSeconds.store (seconds, std::memory_order_relaxed);
     cuePointSeconds.store (0.0, std::memory_order_relaxed);
@@ -241,6 +255,67 @@ void Deck::setTrim (float linearGain)
     trimGain.store (juce::jlimit (0.0f, 4.0f, linearGain), std::memory_order_relaxed);
 }
 
+//==============================================================================
+// Hot cues
+//==============================================================================
+
+void Deck::hotCuePressed (int slot)
+{
+    if (! juce::isPositiveAndBelow (slot, numHotCues) || ! isLoaded())
+        return;
+
+    auto& cue = hotCues[(size_t) slot];
+
+    if (cue.load (std::memory_order_relaxed) < 0.0)
+        cue.store (getPositionSeconds(), std::memory_order_relaxed);
+    else
+        seekToSeconds (cue.load (std::memory_order_relaxed));
+}
+
+void Deck::clearHotCue (int slot)
+{
+    if (juce::isPositiveAndBelow (slot, numHotCues))
+        hotCues[(size_t) slot].store (-1.0, std::memory_order_relaxed);
+}
+
+double Deck::getHotCueSeconds (int slot) const
+{
+    return juce::isPositiveAndBelow (slot, numHotCues)
+        ? hotCues[(size_t) slot].load (std::memory_order_relaxed)
+        : -1.0;
+}
+
+bool Deck::hasHotCue (int slot) const
+{
+    return getHotCueSeconds (slot) >= 0.0;
+}
+
+//==============================================================================
+// Jog wheel
+//==============================================================================
+
+void Deck::setJogTouched (bool touched)
+{
+    if (! jogTouched.exchange (touched, std::memory_order_relaxed) && touched)
+        jogTicks.store (0.0, std::memory_order_relaxed);   // start from a clean slate
+}
+
+void Deck::addJogTicks (double ticks)
+{
+    // Accumulate rather than overwrite: several MIDI messages can arrive
+    // between two audio blocks, and dropping any of them would make the platter
+    // feel like it was slipping.
+    auto current = jogTicks.load (std::memory_order_relaxed);
+
+    while (! jogTicks.compare_exchange_weak (current, current + ticks, std::memory_order_relaxed))
+        ;
+}
+
+void Deck::setJogTicksPerRevolution (int ticks)
+{
+    jogTicksPerRevolution.store (juce::jmax (1, ticks), std::memory_order_relaxed);
+}
+
 float Deck::readAndResetPeak() noexcept
 {
     return peakLevel.exchange (0.0f, std::memory_order_relaxed);
@@ -278,29 +353,63 @@ void Deck::processBlock (juce::AudioBuffer<float>& destination)
 
     const auto numSamples = static_cast<juce::int64> (track->audio.getNumSamples());
 
+    const auto scratching = jogTouched.load (std::memory_order_relaxed);
+    const auto ticks = jogTicks.exchange (0.0, std::memory_order_relaxed);
+    const auto blockSize = destination.getNumSamples();
+
+    // A hand on the platter is as good as pressing play: you can scratch a
+    // stopped deck, and you expect to hear it.
     const auto wantPlay = playing.load (std::memory_order_relaxed);
-    transportGain.setTargetValue (wantPlay ? 1.0f : 0.0f);
+    const auto audible = wantPlay || scratching;
+    transportGain.setTargetValue (audible ? 1.0f : 0.0f);
 
     // A seek that arrives mid fade-out waits for the fade to finish. Pressing
     // cue while playing should cut the audio where it is and only then send the
     // head back, rather than stamping a fragment of the cue point over the tail.
-    const auto fadingOut = ! wantPlay && transportGain.getCurrentValue() > 0.0f;
+    const auto fadingOut = ! audible && transportGain.getCurrentValue() > 0.0f;
 
     if (! fadingOut)
         if (const auto seek = pendingSeekSeconds.exchange (-1.0, std::memory_order_relaxed); seek >= 0.0)
             readPosition = seek * track->sampleRate;
 
     // Once stopped and fully faded, hold position and cost nothing.
-    if (! wantPlay && transportGain.getCurrentValue() <= 0.0f)
+    if (! audible && transportGain.getCurrentValue() <= 0.0f)
     {
+        pitchBend = 0.0;
         positionSeconds.store (readPosition / track->sampleRate, std::memory_order_relaxed);
         peakLevel.store (0.0f, std::memory_order_relaxed);
         return;
     }
 
-    const auto rate = (track->sampleRate / deviceSampleRate) * tempoRatio.load (std::memory_order_relaxed);
+    const auto tempoRate = (track->sampleRate / deviceSampleRate) * tempoRatio.load (std::memory_order_relaxed);
+    double rate = tempoRate;
+
+    if (scratching)
+    {
+        // One turn of the platter moves one turn of a record at 33 1/3 rpm, so
+        // the wheel feels like vinyl rather than like a scrub bar. The rate is
+        // whatever the hand did this block, which is why a still hand is silence
+        // and a backwards hand plays backwards.
+        const auto secondsPerTick = vinylRevolutionSeconds
+                                  / jogTicksPerRevolution.load (std::memory_order_relaxed);
+        const auto samplesToMove = ticks * secondsPerTick * track->sampleRate;
+
+        rate = samplesToMove / juce::jmax (1, blockSize);
+        pitchBend = 0.0;
+    }
+    else
+    {
+        // Off the platter, a nudge bends the pitch briefly and then decays back
+        // to the tempo fader, the way pushing the side of a record does.
+        pitchBend += ticks * bendPerTick;
+        pitchBend *= std::pow (bendDecayPerSecond, blockSize / deviceSampleRate);
+
+        if (std::abs (pitchBend) < 1.0e-5)
+            pitchBend = 0.0;
+
+        rate = tempoRate * (1.0 + pitchBend);
+    }
     const auto trim = trimGain.load (std::memory_order_relaxed);
-    const auto blockSize = destination.getNumSamples();
     const auto outChannels = juce::jmin (2, destination.getNumChannels());
 
     const float* source[2] = { track->audio.getReadPointer (0), track->audio.getReadPointer (1) };
@@ -325,16 +434,21 @@ void Deck::processBlock (juce::AudioBuffer<float>& destination)
         position += rate;
     }
 
-    // Running off either end stops the deck rather than looping.
+    // Running off either end stops playback rather than looping. Scratching
+    // just stops at the edge, since the hand is still on the platter.
     if (position >= static_cast<double> (numSamples))
     {
         position = static_cast<double> (numSamples);
-        playing.store (false, std::memory_order_relaxed);
+
+        if (! scratching)
+            playing.store (false, std::memory_order_relaxed);
     }
     else if (position < 0.0)
     {
         position = 0.0;
-        playing.store (false, std::memory_order_relaxed);
+
+        if (! scratching)
+            playing.store (false, std::memory_order_relaxed);
     }
 
     readPosition = position;

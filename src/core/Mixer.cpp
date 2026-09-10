@@ -124,6 +124,21 @@ void Mixer::setChannelCue (int channel, bool shouldMonitor)
         strips[(size_t) channel].cueEnabled.store (shouldMonitor, std::memory_order_relaxed);
 }
 
+void Mixer::toggleChannelCue (int channel)
+{
+    if (juce::isPositiveAndBelow (channel, numChannels))
+    {
+        auto& flag = strips[(size_t) channel].cueEnabled;
+        flag.store (! flag.load (std::memory_order_relaxed), std::memory_order_relaxed);
+    }
+}
+
+bool Mixer::isChannelCued (int channel) const
+{
+    return juce::isPositiveAndBelow (channel, numChannels)
+        && strips[(size_t) channel].cueEnabled.load (std::memory_order_relaxed);
+}
+
 void Mixer::setCrossfaderPosition (float position)
 {
     crossfaderPosition.store (juce::jlimit (-1.0f, 1.0f, position), std::memory_order_relaxed);

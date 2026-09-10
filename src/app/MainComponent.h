@@ -13,6 +13,8 @@
 #include <juce_audio_utils/juce_audio_utils.h>
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include "control/ActionDispatcher.h"
+#include "control/MidiControlSurface.h"
 #include "core/AudioEngine.h"
 #include "ui/DeckComponent.h"
 #include "ui/MixerComponent.h"
@@ -24,11 +26,11 @@ namespace opendj
 {
 
 /** The application shell: two decks either side of the mixer, a status bar, and
-    a button that opens the audio device settings.
+    buttons for the audio and controller setup.
 
-    Keyboard control is deliberately wired here rather than inside the deck
-    views, because it becomes one of several inputs into the action dispatcher
-    once MIDI arrives, and all of them should meet in the same place.
+    Keyboard control is wired here rather than inside the deck views, because it
+    is one of several inputs into the action dispatcher and they should all meet
+    in the same place.
 */
 class MainComponent final : public juce::Component,
                             private juce::Timer,
@@ -45,20 +47,29 @@ public:
 private:
     void timerCallback() override;
     bool keyPressed (const juce::KeyPress& key, juce::Component* origin) override;
+    bool keyStateChanged (bool isKeyDown, juce::Component* origin) override;
 
     bool isInterestedInFileDrag (const juce::StringArray& files) override;
     void filesDropped (const juce::StringArray& files, int x, int y) override;
 
     void showAudioSettings();
+    void showMidiSettings();
+    juce::File findMappingsFolder() const;
 
     AudioEngine engine;
+    ActionDispatcher dispatcher { engine };
+    MidiControlSurface midi { engine, dispatcher };
 
     std::array<std::unique_ptr<DeckComponent>, AudioEngine::numDecks> deckViews;
     std::unique_ptr<MixerComponent> mixerView;
 
-    juce::TextButton settingsButton { "Audio setup" };
+    juce::TextButton audioSettingsButton { "Audio setup" };
+    juce::TextButton midiSettingsButton { "Controller" };
     juce::Label statusLabel;
     juce::String startupError;
+
+    // Cue keys are momentary, so their press and release have to be paired up.
+    std::array<bool, AudioEngine::numDecks> cueKeyHeld { false, false };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainComponent)
 };

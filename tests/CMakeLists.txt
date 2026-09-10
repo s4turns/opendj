@@ -16,10 +16,13 @@ target_sources(opendj-tests PRIVATE
     Mixer_test.cpp
     Deck_test.cpp
     TrackAnalyser_test.cpp
+    MidiMapping_test.cpp
     ${CMAKE_SOURCE_DIR}/src/core/Mixer.cpp
     ${CMAKE_SOURCE_DIR}/src/core/Deck.cpp
     ${CMAKE_SOURCE_DIR}/src/analysis/TrackAnalysis.cpp
-    ${CMAKE_SOURCE_DIR}/src/analysis/TrackAnalyser.cpp)
+    ${CMAKE_SOURCE_DIR}/src/analysis/TrackAnalyser.cpp
+    ${CMAKE_SOURCE_DIR}/src/control/Action.cpp
+    ${CMAKE_SOURCE_DIR}/src/control/MidiMapping.cpp)
 
 target_include_directories(opendj-tests PRIVATE ${CMAKE_SOURCE_DIR}/src)
 

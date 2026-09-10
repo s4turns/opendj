@@ -41,6 +41,8 @@ public:
     void setChannelFader (int channel, float normalised);          // 0 to 1
     void setChannelEq (int channel, int band, float normalised);   // 0 to 1, 0.5 is flat
     void setChannelCue (int channel, bool shouldMonitor);
+    void toggleChannelCue (int channel);
+    bool isChannelCued (int channel) const;
 
     void setCrossfaderPosition (float position);                   // -1 (A) to +1 (B)
     void setCrossfaderCurve (CrossfaderCurve newCurve);

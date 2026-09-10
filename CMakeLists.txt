@@ -50,7 +50,12 @@ target_sources(OpenDJ PRIVATE
     src/core/Mixer.cpp
     src/analysis/TrackAnalysis.cpp
     src/analysis/TrackAnalyser.cpp
+    src/control/Action.cpp
+    src/control/ActionDispatcher.cpp
+    src/control/MidiMapping.cpp
+    src/control/MidiControlSurface.cpp
     src/ui/DeckComponent.cpp
+    src/ui/MidiSetupComponent.cpp
     src/ui/WaveformComponent.cpp
     src/ui/MixerComponent.cpp)
 

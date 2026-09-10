@@ -10,6 +10,8 @@
 
 #include "app/MainComponent.h"
 
+#include "ui/MidiSetupComponent.h"
+
 namespace opendj
 {
 
@@ -17,22 +19,38 @@ namespace
 {
     constexpr int refreshRateHz = 30;
 
-    // Deck A on the left of the keyboard, deck B on the right, which is the
-    // layout every DJ application converges on.
-    struct KeyBinding { int keyCode; int deck; enum Action { play, cue } action; };
+    // Deck A on the left of the keyboard, deck B on the right, which is where
+    // every DJ application puts them.
+    struct KeyBinding { int keyCode; int deck; Action action; };
 
     const KeyBinding keyBindings[] =
     {
-        { 'Q', 0, KeyBinding::cue },
-        { 'W', 0, KeyBinding::play },
-        { 'O', 1, KeyBinding::cue },
-        { 'P', 1, KeyBinding::play }
+        { 'Q', 0, Action::deckCue },
+        { 'W', 0, Action::deckPlayToggle },
+        { 'O', 1, Action::deckCue },
+        { 'P', 1, Action::deckPlayToggle }
     };
 }
 
 MainComponent::MainComponent()
 {
     startupError = engine.initialise();
+
+    dispatcher.onStateChanged = [safe = juce::Component::SafePointer<MainComponent> (this)]
+    {
+        // Actions arrive on the MIDI thread, so bounce the redraw to the message
+        // thread rather than touching components from there.
+        juce::MessageManager::callAsync ([safe]
+        {
+            if (safe != nullptr)
+                for (auto& view : safe->deckViews)
+                    if (view != nullptr)
+                        view->refresh();
+        });
+    };
+
+    midi.loadMappingsFromFolder (findMappingsFolder());
+    midi.openFirstRecognisedDevice();
 
     for (int i = 0; i < AudioEngine::numDecks; ++i)
     {
@@ -44,8 +62,11 @@ MainComponent::MainComponent()
     mixerView = std::make_unique<MixerComponent> (engine.getMixer());
     addAndMakeVisible (*mixerView);
 
-    settingsButton.onClick = [this] { showAudioSettings(); };
-    addAndMakeVisible (settingsButton);
+    audioSettingsButton.onClick = [this] { showAudioSettings(); };
+    addAndMakeVisible (audioSettingsButton);
+
+    midiSettingsButton.onClick = [this] { showMidiSettings(); };
+    addAndMakeVisible (midiSettingsButton);
 
     statusLabel.setColour (juce::Label::textColourId, juce::Colours::grey);
     statusLabel.setJustificationType (juce::Justification::centredLeft);
@@ -56,13 +77,31 @@ MainComponent::MainComponent()
     setWantsKeyboardFocus (true);
 
     startTimerHz (refreshRateHz);
-    setSize (1200, 720);
+    setSize (1200, 760);
 }
 
 MainComponent::~MainComponent()
 {
     stopTimer();
+    dispatcher.onStateChanged = nullptr;
     removeKeyListener (this);
+}
+
+juce::File MainComponent::findMappingsFolder() const
+{
+    // Beside the executable in an installed copy, and somewhere up the tree from
+    // the build directory while developing, so a freshly built binary finds them.
+    const auto executable = juce::File::getSpecialLocation (juce::File::currentExecutableFile);
+
+    for (auto directory = executable.getParentDirectory();
+         directory.exists() && directory != directory.getParentDirectory();
+         directory = directory.getParentDirectory())
+    {
+        if (const auto candidate = directory.getChildFile ("mappings"); candidate.isDirectory())
+            return candidate;
+    }
+
+    return {};
 }
 
 void MainComponent::timerCallback()
@@ -72,9 +111,13 @@ void MainComponent::timerCallback()
 
     mixerView->refresh();
 
-    statusLabel.setText (startupError.isNotEmpty() ? "Audio error: " + startupError
-                                                   : engine.getDeviceDescription(),
-                         juce::dontSendNotification);
+    auto status = startupError.isNotEmpty() ? "Audio error: " + startupError
+                                            : engine.getDeviceDescription();
+
+    if (midi.isOpen())
+        status << "  |  " << midi.getOpenDeviceName();
+
+    statusLabel.setText (status, juce::dontSendNotification);
 }
 
 bool MainComponent::keyPressed (const juce::KeyPress& key, juce::Component*)
@@ -84,14 +127,37 @@ bool MainComponent::keyPressed (const juce::KeyPress& key, juce::Component*)
         if (! key.isKeyCode (binding.keyCode))
             continue;
 
-        auto& deck = engine.getDeck (binding.deck);
+        if (binding.action == Action::deckCue)
+        {
+            // Key repeat would re-trigger cue over and over, so only the first
+            // press counts; keyStateChanged sends the matching release.
+            if (cueKeyHeld[(size_t) binding.deck])
+                return true;
 
-        if (binding.action == KeyBinding::play)
-            deck.togglePlay();
-        else
-            deck.cuePressed();   // a key repeat is not a hold, so no preview release
+            cueKeyHeld[(size_t) binding.deck] = true;
+        }
 
+        dispatcher.dispatch ({ binding.action, binding.deck, 0, 1.0f });
         return true;
+    }
+
+    return false;
+}
+
+bool MainComponent::keyStateChanged (bool, juce::Component*)
+{
+    for (const auto& binding : keyBindings)
+    {
+        if (binding.action != Action::deckCue)
+            continue;
+
+        auto& held = cueKeyHeld[(size_t) binding.deck];
+
+        if (held && ! juce::KeyPress::isKeyCurrentlyDown (binding.keyCode))
+        {
+            held = false;
+            dispatcher.dispatch ({ Action::deckCue, binding.deck, 0, 0.0f });
+        }
     }
 
     return false;
@@ -115,11 +181,11 @@ void MainComponent::filesDropped (const juce::StringArray& files, int x, int y)
 
     for (int i = 0; i < AudioEngine::numDecks; ++i)
     {
-        if (! deckViews[(size_t) i]->getBounds().contains (dropPoint))
-            continue;
-
-        deckViews[(size_t) i]->load (juce::File (files[0]));
-        return;
+        if (deckViews[(size_t) i]->getBounds().contains (dropPoint))
+        {
+            deckViews[(size_t) i]->load (juce::File (files[0]));
+            return;
+        }
     }
 }
 
@@ -129,7 +195,7 @@ void MainComponent::showAudioSettings()
         engine.getDeviceManager(),
         0, 0,      // no inputs yet
         2, 8,      // enough outputs for a master pair plus a cue pair
-        false,     // MIDI input list arrives with the mapping engine
+        false,     // MIDI has its own panel
         false,
         true,
         false);
@@ -146,6 +212,18 @@ void MainComponent::showAudioSettings()
     options.launchAsync();
 }
 
+void MainComponent::showMidiSettings()
+{
+    juce::DialogWindow::LaunchOptions options;
+    options.content.setOwned (new MidiSetupComponent (midi));
+    options.dialogTitle = "Controller setup";
+    options.dialogBackgroundColour = juce::Colour (0xff1c1c22);
+    options.escapeKeyTriggersCloseButton = true;
+    options.useNativeTitleBar = true;
+    options.resizable = true;
+    options.launchAsync();
+}
+
 void MainComponent::paint (juce::Graphics& g)
 {
     g.fillAll (juce::Colour (0xff111116));
@@ -156,7 +234,9 @@ void MainComponent::resized()
     auto area = getLocalBounds().reduced (10);
 
     auto footer = area.removeFromBottom (26);
-    settingsButton.setBounds (footer.removeFromLeft (110));
+    audioSettingsButton.setBounds (footer.removeFromLeft (100));
+    footer.removeFromLeft (6);
+    midiSettingsButton.setBounds (footer.removeFromLeft (94));
     footer.removeFromLeft (12);
     statusLabel.setBounds (footer);
 

@@ -1,0 +1,522 @@
+{
+  "name": "Roland DJ-202",
+  "author": "The OpenDJ contributors",
+  "description": "Two-deck mapping for the Roland DJ-202. Control assignments were taken from Roland's MIDI implementation chart and cross checked against the Mixxx community mapping by Silvio Ankermann, Sebastian Reusse and Rene Kraus (https://github.com/mixxxdj/mixxx/wiki/Roland-Dj-202), which is GPLv2 or later and so compatible with this project. Deck-toggle, effects, the TR-S sequencer and the pad modes beyond hot cue are recognised by the hardware but not yet mapped here.",
+  "deviceNameHints": [
+    "DJ-202",
+    "DJ202"
+  ],
+  "jogTicksPerRevolution": 512,
+  "controls": [
+    {
+      "name": "Deck A play",
+      "status": "0x90",
+      "number": "0x00",
+      "action": "deck.play_toggle",
+      "deck": 0,
+      "feedbackNumber": "0x00"
+    },
+    {
+      "name": "Deck A cue",
+      "status": "0x90",
+      "number": "0x01",
+      "action": "deck.cue",
+      "deck": 0,
+      "feedbackNumber": "0x01"
+    },
+    {
+      "name": "Deck A sync",
+      "status": "0x90",
+      "number": "0x02",
+      "action": "deck.sync",
+      "deck": 0,
+      "feedbackNumber": "0x02"
+    },
+    {
+      "name": "Deck A platter touch",
+      "status": "0x90",
+      "number": "0x06",
+      "action": "jog.touch",
+      "deck": 0
+    },
+    {
+      "name": "Deck A headphone cue",
+      "status": "0x90",
+      "number": "0x1B",
+      "action": "mixer.cue_toggle",
+      "deck": 0,
+      "feedbackNumber": "0x1B"
+    },
+    {
+      "name": "Deck A platter",
+      "status": "0xb0",
+      "number": "0x06",
+      "action": "jog.turn",
+      "deck": 0,
+      "mode": "relative_offset"
+    },
+    {
+      "name": "Deck A tempo fader",
+      "status": "0xb0",
+      "number": "0x09",
+      "fineNumber": "0x3B",
+      "action": "deck.tempo",
+      "deck": 0,
+      "mode": "absolute14",
+      "inverted": true
+    },
+    {
+      "name": "Deck A trim",
+      "status": "0xb0",
+      "number": "0x16",
+      "fineNumber": "0x34",
+      "action": "deck.trim",
+      "deck": 0,
+      "mode": "absolute14"
+    },
+    {
+      "name": "Deck A EQ high",
+      "status": "0xb0",
+      "number": "0x17",
+      "fineNumber": "0x35",
+      "action": "mixer.eq",
+      "deck": 0,
+      "slot": 2,
+      "mode": "absolute14"
+    },
+    {
+      "name": "Deck A EQ mid",
+      "status": "0xb0",
+      "number": "0x18",
+      "fineNumber": "0x36",
+      "action": "mixer.eq",
+      "deck": 0,
+      "slot": 1,
+      "mode": "absolute14"
+    },
+    {
+      "name": "Deck A EQ low",
+      "status": "0xb0",
+      "number": "0x19",
+      "fineNumber": "0x37",
+      "action": "mixer.eq",
+      "deck": 0,
+      "slot": 0,
+      "mode": "absolute14"
+    },
+    {
+      "name": "Deck A channel fader",
+      "status": "0xb0",
+      "number": "0x1C",
+      "fineNumber": "0x3A",
+      "action": "mixer.fader",
+      "deck": 0,
+      "mode": "absolute14"
+    },
+    {
+      "name": "Deck B play",
+      "status": "0x91",
+      "number": "0x00",
+      "action": "deck.play_toggle",
+      "deck": 1,
+      "feedbackNumber": "0x00"
+    },
+    {
+      "name": "Deck B cue",
+      "status": "0x91",
+      "number": "0x01",
+      "action": "deck.cue",
+      "deck": 1,
+      "feedbackNumber": "0x01"
+    },
+    {
+      "name": "Deck B sync",
+      "status": "0x91",
+      "number": "0x02",
+      "action": "deck.sync",
+      "deck": 1,
+      "feedbackNumber": "0x02"
+    },
+    {
+      "name": "Deck B platter touch",
+      "status": "0x91",
+      "number": "0x06",
+      "action": "jog.touch",
+      "deck": 1
+    },
+    {
+      "name": "Deck B headphone cue",
+      "status": "0x91",
+      "number": "0x1B",
+      "action": "mixer.cue_toggle",
+      "deck": 1,
+      "feedbackNumber": "0x1B"
+    },
+    {
+      "name": "Deck B platter",
+      "status": "0xb1",
+      "number": "0x06",
+      "action": "jog.turn",
+      "deck": 1,
+      "mode": "relative_offset"
+    },
+    {
+      "name": "Deck B tempo fader",
+      "status": "0xb1",
+      "number": "0x09",
+      "fineNumber": "0x3B",
+      "action": "deck.tempo",
+      "deck": 1,
+      "mode": "absolute14",
+      "inverted": true
+    },
+    {
+      "name": "Deck B trim",
+      "status": "0xb1",
+      "number": "0x16",
+      "fineNumber": "0x34",
+      "action": "deck.trim",
+      "deck": 1,
+      "mode": "absolute14"
+    },
+    {
+      "name": "Deck B EQ high",
+      "status": "0xb1",
+      "number": "0x17",
+      "fineNumber": "0x35",
+      "action": "mixer.eq",
+      "deck": 1,
+      "slot": 2,
+      "mode": "absolute14"
+    },
+    {
+      "name": "Deck B EQ mid",
+      "status": "0xb1",
+      "number": "0x18",
+      "fineNumber": "0x36",
+      "action": "mixer.eq",
+      "deck": 1,
+      "slot": 1,
+      "mode": "absolute14"
+    },
+    {
+      "name": "Deck B EQ low",
+      "status": "0xb1",
+      "number": "0x19",
+      "fineNumber": "0x37",
+      "action": "mixer.eq",
+      "deck": 1,
+      "slot": 0,
+      "mode": "absolute14"
+    },
+    {
+      "name": "Deck B channel fader",
+      "status": "0xb1",
+      "number": "0x1C",
+      "fineNumber": "0x3A",
+      "action": "mixer.fader",
+      "deck": 1,
+      "mode": "absolute14"
+    },
+    {
+      "name": "Deck A pad 1",
+      "status": "0x94",
+      "number": "0x1",
+      "action": "pad.hotcue",
+      "deck": 0,
+      "slot": 0,
+      "feedbackNumber": "0x1"
+    },
+    {
+      "name": "Deck A pad 1 clear",
+      "status": "0x94",
+      "number": "0x9",
+      "action": "pad.hotcue_clear",
+      "deck": 0,
+      "slot": 0
+    },
+    {
+      "name": "Deck A pad 2",
+      "status": "0x94",
+      "number": "0x2",
+      "action": "pad.hotcue",
+      "deck": 0,
+      "slot": 1,
+      "feedbackNumber": "0x2"
+    },
+    {
+      "name": "Deck A pad 2 clear",
+      "status": "0x94",
+      "number": "0xa",
+      "action": "pad.hotcue_clear",
+      "deck": 0,
+      "slot": 1
+    },
+    {
+      "name": "Deck A pad 3",
+      "status": "0x94",
+      "number": "0x3",
+      "action": "pad.hotcue",
+      "deck": 0,
+      "slot": 2,
+      "feedbackNumber": "0x3"
+    },
+    {
+      "name": "Deck A pad 3 clear",
+      "status": "0x94",
+      "number": "0xb",
+      "action": "pad.hotcue_clear",
+      "deck": 0,
+      "slot": 2
+    },
+    {
+      "name": "Deck A pad 4",
+      "status": "0x94",
+      "number": "0x4",
+      "action": "pad.hotcue",
+      "deck": 0,
+      "slot": 3,
+      "feedbackNumber": "0x4"
+    },
+    {
+      "name": "Deck A pad 4 clear",
+      "status": "0x94",
+      "number": "0xc",
+      "action": "pad.hotcue_clear",
+      "deck": 0,
+      "slot": 3
+    },
+    {
+      "name": "Deck A pad 5",
+      "status": "0x94",
+      "number": "0x5",
+      "action": "pad.hotcue",
+      "deck": 0,
+      "slot": 4,
+      "feedbackNumber": "0x5"
+    },
+    {
+      "name": "Deck A pad 5 clear",
+      "status": "0x94",
+      "number": "0xd",
+      "action": "pad.hotcue_clear",
+      "deck": 0,
+      "slot": 4
+    },
+    {
+      "name": "Deck A pad 6",
+      "status": "0x94",
+      "number": "0x6",
+      "action": "pad.hotcue",
+      "deck": 0,
+      "slot": 5,
+      "feedbackNumber": "0x6"
+    },
+    {
+      "name": "Deck A pad 6 clear",
+      "status": "0x94",
+      "number": "0xe",
+      "action": "pad.hotcue_clear",
+      "deck": 0,
+      "slot": 5
+    },
+    {
+      "name": "Deck A pad 7",
+      "status": "0x94",
+      "number": "0x7",
+      "action": "pad.hotcue",
+      "deck": 0,
+      "slot": 6,
+      "feedbackNumber": "0x7"
+    },
+    {
+      "name": "Deck A pad 7 clear",
+      "status": "0x94",
+      "number": "0xf",
+      "action": "pad.hotcue_clear",
+      "deck": 0,
+      "slot": 6
+    },
+    {
+      "name": "Deck A pad 8",
+      "status": "0x94",
+      "number": "0x8",
+      "action": "pad.hotcue",
+      "deck": 0,
+      "slot": 7,
+      "feedbackNumber": "0x8"
+    },
+    {
+      "name": "Deck A pad 8 clear",
+      "status": "0x94",
+      "number": "0x10",
+      "action": "pad.hotcue_clear",
+      "deck": 0,
+      "slot": 7
+    },
+    {
+      "name": "Deck B pad 1",
+      "status": "0x95",
+      "number": "0x1",
+      "action": "pad.hotcue",
+      "deck": 1,
+      "slot": 0,
+      "feedbackNumber": "0x1"
+    },
+    {
+      "name": "Deck B pad 1 clear",
+      "status": "0x95",
+      "number": "0x9",
+      "action": "pad.hotcue_clear",
+      "deck": 1,
+      "slot": 0
+    },
+    {
+      "name": "Deck B pad 2",
+      "status": "0x95",
+      "number": "0x2",
+      "action": "pad.hotcue",
+      "deck": 1,
+      "slot": 1,
+      "feedbackNumber": "0x2"
+    },
+    {
+      "name": "Deck B pad 2 clear",
+      "status": "0x95",
+      "number": "0xa",
+      "action": "pad.hotcue_clear",
+      "deck": 1,
+      "slot": 1
+    },
+    {
+      "name": "Deck B pad 3",
+      "status": "0x95",
+      "number": "0x3",
+      "action": "pad.hotcue",
+      "deck": 1,
+      "slot": 2,
+      "feedbackNumber": "0x3"
+    },
+    {
+      "name": "Deck B pad 3 clear",
+      "status": "0x95",
+      "number": "0xb",
+      "action": "pad.hotcue_clear",
+      "deck": 1,
+      "slot": 2
+    },
+    {
+      "name": "Deck B pad 4",
+      "status": "0x95",
+      "number": "0x4",
+      "action": "pad.hotcue",
+      "deck": 1,
+      "slot": 3,
+      "feedbackNumber": "0x4"
+    },
+    {
+      "name": "Deck B pad 4 clear",
+      "status": "0x95",
+      "number": "0xc",
+      "action": "pad.hotcue_clear",
+      "deck": 1,
+      "slot": 3
+    },
+    {
+      "name": "Deck B pad 5",
+      "status": "0x95",
+      "number": "0x5",
+      "action": "pad.hotcue",
+      "deck": 1,
+      "slot": 4,
+      "feedbackNumber": "0x5"
+    },
+    {
+      "name": "Deck B pad 5 clear",
+      "status": "0x95",
+      "number": "0xd",
+      "action": "pad.hotcue_clear",
+      "deck": 1,
+      "slot": 4
+    },
+    {
+      "name": "Deck B pad 6",
+      "status": "0x95",
+      "number": "0x6",
+      "action": "pad.hotcue",
+      "deck": 1,
+      "slot": 5,
+      "feedbackNumber": "0x6"
+    },
+    {
+      "name": "Deck B pad 6 clear",
+      "status": "0x95",
+      "number": "0xe",
+      "action": "pad.hotcue_clear",
+      "deck": 1,
+      "slot": 5
+    },
+    {
+      "name": "Deck B pad 7",
+      "status": "0x95",
+      "number": "0x7",
+      "action": "pad.hotcue",
+      "deck": 1,
+      "slot": 6,
+      "feedbackNumber": "0x7"
+    },
+    {
+      "name": "Deck B pad 7 clear",
+      "status": "0x95",
+      "number": "0xf",
+      "action": "pad.hotcue_clear",
+      "deck": 1,
+      "slot": 6
+    },
+    {
+      "name": "Deck B pad 8",
+      "status": "0x95",
+      "number": "0x8",
+      "action": "pad.hotcue",
+      "deck": 1,
+      "slot": 7,
+      "feedbackNumber": "0x8"
+    },
+    {
+      "name": "Deck B pad 8 clear",
+      "status": "0x95",
+      "number": "0x10",
+      "action": "pad.hotcue_clear",
+      "deck": 1,
+      "slot": 7
+    },
+    {
+      "name": "Shift",
+      "status": "0x9F",
+      "number": "0x00",
+      "action": "modifier.shift"
+    },
+    {
+      "name": "Load to deck A",
+      "status": "0x9F",
+      "number": "0x02",
+      "action": "deck.load",
+      "deck": 0
+    },
+    {
+      "name": "Load to deck B",
+      "status": "0x9F",
+      "number": "0x03",
+      "action": "deck.load",
+      "deck": 1
+    },
+    {
+      "name": "Crossfader",
+      "status": "0xBF",
+      "number": "0x08",
+      "fineNumber": "0x58",
+      "action": "mixer.crossfader",
+      "mode": "absolute14"
+    }
+  ]
+}

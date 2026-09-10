@@ -1,0 +1,56 @@
+/*
+    This file is part of OpenDJ. See LICENSE for terms (GPLv3 or later).
+    Copyright (C) 2026 The OpenDJ contributors.
+*/
+
+#pragma once
+
+#include "control/Action.h"
+#include "core/AudioEngine.h"
+
+#include <functional>
+
+namespace opendj
+{
+
+/** Executes actions against the engine.
+
+    Every input, whether a mouse click, a key or a MIDI message, ends up here.
+    That is on purpose: it means the interface and the controller cannot drift
+    apart, and adding an input device is a matter of producing ActionMessages
+    rather than reaching into the engine again.
+
+    Actions arrive on the MIDI thread as well as the message thread. Everything
+    it touches on the engine is safe to call from either.
+*/
+class ActionDispatcher
+{
+public:
+    explicit ActionDispatcher (AudioEngine& engineToUse);
+
+    void dispatch (const ActionMessage& message);
+
+    bool isShiftHeld() const noexcept { return shiftHeld.load (std::memory_order_relaxed); }
+
+    /** Called after any action that the interface should redraw for. May be
+        called from the MIDI thread, so implementations must marshal. */
+    std::function<void()> onStateChanged;
+
+    /** Asked for a file when a load action arrives. Returns an invalid file to
+        mean there is nothing selected, which is the state until the browser
+        exists. */
+    std::function<juce::File (int deck)> selectedFileProvider;
+
+    /** How far the tempo fader travels, as a percentage either side of zero. */
+    void setTempoRange (int deckIndex, double percent);
+    double getTempoRange (int deckIndex) const;
+
+private:
+    AudioEngine& engine;
+    std::atomic<bool> shiftHeld { false };
+    std::array<std::atomic<double>, AudioEngine::numDecks> tempoRangePercent;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ActionDispatcher)
+};
+
+} // namespace opendj
