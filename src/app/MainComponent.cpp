@@ -15,142 +15,163 @@ namespace opendj
 
 namespace
 {
-    // Two output pairs: master on 1-2 and headphone cue on 3-4. Controllers with
-    // a built in interface, such as the Roland DJ-202, expose exactly this.
-    constexpr int minOutputChannels = 2;
-    constexpr int maxOutputChannels = 4;
+    constexpr int refreshRateHz = 30;
+
+    // Deck A on the left of the keyboard, deck B on the right, which is the
+    // layout every DJ application converges on.
+    struct KeyBinding { int keyCode; int deck; enum Action { play, cue } action; };
+
+    const KeyBinding keyBindings[] =
+    {
+        { 'Q', 0, KeyBinding::cue },
+        { 'W', 0, KeyBinding::play },
+        { 'O', 1, KeyBinding::cue },
+        { 'P', 1, KeyBinding::play }
+    };
 }
 
 MainComponent::MainComponent()
-    : deviceSelector (deviceManager,
-                      0, 0,                                  // no inputs yet
-                      minOutputChannels, maxOutputChannels,
-                      false,                                 // no MIDI input list yet
-                      false,                                 // no MIDI output selector yet
-                      true,                                  // stereo pair channel display
-                      false)
 {
-    setAudioChannels (0, maxOutputChannels);
+    startupError = engine.initialise();
 
-    addAndMakeVisible (deviceSelector);
-
-    testToneButton.setClickingTogglesState (true);
-    testToneButton.setTooltip ("Emit a 440 Hz sine at -18 dBFS on the master pair.");
-    testToneButton.onClick = [this]
+    for (int i = 0; i < AudioEngine::numDecks; ++i)
     {
-        testToneEnabled.store (testToneButton.getToggleState(), std::memory_order_relaxed);
-    };
-    addAndMakeVisible (testToneButton);
+        deckViews[(size_t) i] = std::make_unique<DeckComponent> (engine.getDeck (i),
+                                                                 juce::String::charToString ('A' + (juce::juce_wchar) i));
+        addAndMakeVisible (*deckViews[(size_t) i]);
+    }
 
-    statusLabel.setJustificationType (juce::Justification::centredLeft);
+    mixerView = std::make_unique<MixerComponent> (engine.getMixer());
+    addAndMakeVisible (*mixerView);
+
+    settingsButton.onClick = [this] { showAudioSettings(); };
+    addAndMakeVisible (settingsButton);
+
     statusLabel.setColour (juce::Label::textColourId, juce::Colours::grey);
+    statusLabel.setJustificationType (juce::Justification::centredLeft);
+    statusLabel.setFont (juce::FontOptions (12.0f));
     addAndMakeVisible (statusLabel);
 
-    placeholderLabel.setText ("Decks land here.", juce::dontSendNotification);
-    placeholderLabel.setJustificationType (juce::Justification::centred);
-    placeholderLabel.setColour (juce::Label::textColourId, juce::Colours::darkgrey);
-    addAndMakeVisible (placeholderLabel);
+    addKeyListener (this);
+    setWantsKeyboardFocus (true);
 
-    updateDeviceStatusText();
-    setSize (1100, 700);
+    startTimerHz (refreshRateHz);
+    setSize (1200, 720);
 }
 
 MainComponent::~MainComponent()
 {
-    shutdownAudio();
+    stopTimer();
+    removeKeyListener (this);
 }
 
-void MainComponent::prepareToPlay (int, double sampleRate)
+void MainComponent::timerCallback()
 {
-    currentSampleRate = sampleRate > 0.0 ? sampleRate : 44100.0;
-    tonePhase = 0.0;
+    for (auto& view : deckViews)
+        view->refresh();
 
-    juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<MainComponent> (this)]
+    mixerView->refresh();
+
+    statusLabel.setText (startupError.isNotEmpty() ? "Audio error: " + startupError
+                                                   : engine.getDeviceDescription(),
+                         juce::dontSendNotification);
+}
+
+bool MainComponent::keyPressed (const juce::KeyPress& key, juce::Component*)
+{
+    for (const auto& binding : keyBindings)
     {
-        if (safe != nullptr)
-            safe->updateDeviceStatusText();
-    });
+        if (! key.isKeyCode (binding.keyCode))
+            continue;
+
+        auto& deck = engine.getDeck (binding.deck);
+
+        if (binding.action == KeyBinding::play)
+            deck.togglePlay();
+        else
+            deck.cuePressed();   // a key repeat is not a hold, so no preview release
+
+        return true;
+    }
+
+    return false;
 }
 
-void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& bufferToFill)
+bool MainComponent::isInterestedInFileDrag (const juce::StringArray& files)
 {
-    bufferToFill.clearActiveBufferRegion();
+    for (const auto& path : files)
+        if (engine.getFormatManager().findFormatForFileExtension (juce::File (path).getFileExtension()) != nullptr)
+            return true;
 
-    // Ramp the gain rather than gating the tone, so toggling never clicks.
-    const bool wanted = testToneEnabled.load (std::memory_order_relaxed);
-    const float target = wanted ? toneTargetGain : 0.0f;
-    float gain = testToneGain.load (std::memory_order_relaxed);
+    return false;
+}
 
-    if (juce::approximatelyEqual (gain, 0.0f) && ! wanted)
+void MainComponent::filesDropped (const juce::StringArray& files, int x, int y)
+{
+    if (files.isEmpty())
         return;
 
-    const auto numSamples = bufferToFill.numSamples;
-    const auto phaseDelta = juce::MathConstants<double>::twoPi * toneFrequencyHz / currentSampleRate;
-    const float gainStep = 1.0f / static_cast<float> (juce::jmax (1, static_cast<int> (currentSampleRate * 0.01)));
+    const juce::Point<int> dropPoint (x, y);
 
-    // Master is the first output pair only; the cue pair stays silent for now.
-    const int channelsToFill = juce::jmin (2, bufferToFill.buffer->getNumChannels());
-
-    for (int i = 0; i < numSamples; ++i)
+    for (int i = 0; i < AudioEngine::numDecks; ++i)
     {
-        gain = target > gain ? juce::jmin (target, gain + gainStep)
-                             : juce::jmax (target, gain - gainStep);
+        if (! deckViews[(size_t) i]->getBounds().contains (dropPoint))
+            continue;
 
-        const auto sample = static_cast<float> (std::sin (tonePhase)) * gain;
-        tonePhase += phaseDelta;
+        if (engine.getDeck (i).loadFile (juce::File (files[0])))
+            deckViews[(size_t) i]->refresh();
 
-        for (int ch = 0; ch < channelsToFill; ++ch)
-            bufferToFill.buffer->addSample (ch, bufferToFill.startSample + i, sample);
+        return;
     }
-
-    if (tonePhase > juce::MathConstants<double>::twoPi)
-        tonePhase -= juce::MathConstants<double>::twoPi * std::floor (tonePhase / juce::MathConstants<double>::twoPi);
-
-    testToneGain.store (gain, std::memory_order_relaxed);
 }
 
-void MainComponent::releaseResources()
+void MainComponent::showAudioSettings()
 {
-    testToneGain.store (0.0f, std::memory_order_relaxed);
-}
+    auto selector = std::make_unique<juce::AudioDeviceSelectorComponent> (
+        engine.getDeviceManager(),
+        0, 0,      // no inputs yet
+        2, 8,      // enough outputs for a master pair plus a cue pair
+        false,     // MIDI input list arrives with the mapping engine
+        false,
+        true,
+        false);
 
-void MainComponent::updateDeviceStatusText()
-{
-    if (auto* device = deviceManager.getCurrentAudioDevice())
-    {
-        const auto latencySamples = device->getOutputLatencyInSamples();
-        const auto sampleRate = device->getCurrentSampleRate();
-        const auto latencyMs = sampleRate > 0.0 ? (latencySamples / sampleRate) * 1000.0 : 0.0;
+    selector->setSize (500, 420);
 
-        statusLabel.setText (device->getTypeName() + " | " + device->getName()
-                                 + " | " + juce::String (sampleRate, 0) + " Hz"
-                                 + " | buffer " + juce::String (device->getCurrentBufferSizeSamples())
-                                 + " | output latency " + juce::String (latencyMs, 1) + " ms",
-                             juce::dontSendNotification);
-    }
-    else
-    {
-        statusLabel.setText ("No audio device open.", juce::dontSendNotification);
-    }
+    juce::DialogWindow::LaunchOptions options;
+    options.content.setOwned (selector.release());
+    options.dialogTitle = "Audio setup";
+    options.dialogBackgroundColour = juce::Colour (0xff1c1c22);
+    options.escapeKeyTriggersCloseButton = true;
+    options.useNativeTitleBar = true;
+    options.resizable = false;
+    options.launchAsync();
 }
 
 void MainComponent::paint (juce::Graphics& g)
 {
-    g.fillAll (juce::Colour (0xff141418));
+    g.fillAll (juce::Colour (0xff111116));
 }
 
 void MainComponent::resized()
 {
-    auto area = getLocalBounds().reduced (12);
+    auto area = getLocalBounds().reduced (10);
 
-    auto footer = area.removeFromBottom (28);
-    testToneButton.setBounds (footer.removeFromLeft (110));
+    auto footer = area.removeFromBottom (26);
+    settingsButton.setBounds (footer.removeFromLeft (110));
     footer.removeFromLeft (12);
     statusLabel.setBounds (footer);
 
     area.removeFromBottom (8);
-    deviceSelector.setBounds (area.removeFromLeft (juce::jmin (460, area.getWidth() / 2)));
-    placeholderLabel.setBounds (area.reduced (12));
+
+    const auto mixerWidth = juce::jlimit (220, 300, area.getWidth() / 4);
+    const auto deckWidth = (area.getWidth() - mixerWidth - 16) / 2;
+
+    deckViews[0]->setBounds (area.removeFromLeft (deckWidth));
+    area.removeFromLeft (8);
+    deckViews[1]->setBounds (area.removeFromRight (deckWidth));
+    area.removeFromRight (8);
+    mixerView->setBounds (area);
 }
 
 } // namespace opendj

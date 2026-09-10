@@ -1,0 +1,59 @@
+/*
+    This file is part of OpenDJ. See LICENSE for terms (GPLv3 or later).
+    Copyright (C) 2026 The OpenDJ contributors.
+*/
+
+#pragma once
+
+#include <juce_gui_basics/juce_gui_basics.h>
+
+#include "core/Mixer.h"
+
+#include <array>
+#include <memory>
+
+namespace opendj
+{
+
+/** The centre section: two channel strips, the crossfader and the master and
+    cue controls. */
+class MixerComponent final : public juce::Component
+{
+public:
+    explicit MixerComponent (Mixer& mixerToControl);
+
+    /** Redraws the level meters from the mixer's peak holds. */
+    void refresh();
+
+    void paint (juce::Graphics& g) override;
+    void resized() override;
+
+private:
+    struct Strip
+    {
+        juce::Label heading;
+        std::array<juce::Slider, 3> eq;      // high, mid, low, top to bottom
+        juce::Slider fader;
+        juce::TextButton cue { "Cue" };
+    };
+
+    void configureKnob (juce::Slider& knob);
+    void layOutStrip (Strip& strip, juce::Rectangle<int> area);
+
+    Mixer& mixer;
+
+    std::array<Strip, Mixer::numChannels> strips;
+    juce::Slider crossfader;
+    juce::ComboBox curveBox;
+    juce::Slider masterKnob;
+    juce::Slider cueKnob;
+    juce::Slider cueMixKnob;
+    juce::Label masterLabel, cueLabel, cueMixLabel, crossfaderLabel;
+
+    juce::Rectangle<int> meterBounds;
+    std::array<float, 2> meterLevels { 0.0f, 0.0f };
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MixerComponent)
+};
+
+} // namespace opendj

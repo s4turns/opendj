@@ -6,7 +6,8 @@ The goal is an application a VirtualDJ user can sit down at and already know how
 the same deck layout, the same workflow, the same muscle memory. The artwork, the naming
 and the code are entirely original and entirely open.
 
-**Status: early development.** The audio setup shell builds and runs. There are no decks yet.
+**Status: early development.** Two decks play, the mixer works, and you can beatmatch by
+ear with the tempo faders. There is no waveform, no BPM analysis and no controller support yet.
 
 ## Design goals
 
@@ -30,6 +31,20 @@ and the code are entirely original and entirely open.
 
 Out of scope until that is finished: effects racks, four decks, stem separation, video,
 streaming services and recording.
+
+## Using it
+
+Load a track with the Load button on either deck, or drag an audio file onto a deck. Click
+the seek strip to move through the track.
+
+| Key | Action |
+| --- | --- |
+| Q / W | Deck A cue / play |
+| O / P | Deck B cue / play |
+
+Cue follows the behaviour DJs expect. While the deck is stopped, pressing cue sets the cue
+point and previews from it, and releasing returns and stops. While it is playing, pressing
+cue drops straight back to the cue point and stops there.
 
 ## Building
 

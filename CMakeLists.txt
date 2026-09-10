@@ -44,7 +44,12 @@ juce_generate_juce_header(OpenDJ)
 
 target_sources(OpenDJ PRIVATE
     src/app/Main.cpp
-    src/app/MainComponent.cpp)
+    src/app/MainComponent.cpp
+    src/core/AudioEngine.cpp
+    src/core/Deck.cpp
+    src/core/Mixer.cpp
+    src/ui/DeckComponent.cpp
+    src/ui/MixerComponent.cpp)
 
 target_include_directories(OpenDJ PRIVATE src)
 
