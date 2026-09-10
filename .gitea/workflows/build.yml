@@ -4,6 +4,10 @@ on:
   push:
     branches: [main, testing]
   pull_request:
+  # Lets a run be started by hand from the Actions tab, which is how to retry
+  # after something outside the code went wrong: a runner that stopped, or a
+  # machine that was asleep. Without it the only way to re-run is another push.
+  workflow_dispatch:
 
 jobs:
   fedora:

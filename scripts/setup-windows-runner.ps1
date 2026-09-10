@@ -105,8 +105,15 @@ try {
     } else {
         $action = New-ScheduledTaskAction -Execute $exePath -Argument 'daemon' -WorkingDirectory $InstallDir
         $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+
+        # Restart it if it dies. It is a console program, so anything that ends
+        # the session it inherited takes it with it, and a job that was mid-flight
+        # is left with no runner and eventually fails for reasons that have
+        # nothing to do with the code.
         $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries `
-            -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero)
+            -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) `
+            -RestartCount 999 -RestartInterval ([TimeSpan]::FromMinutes(1)) `
+            -MultipleInstances IgnoreNew
 
         Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger `
             -Settings $settings -Description 'Runs Gitea Actions jobs for OpenDJ' | Out-Null

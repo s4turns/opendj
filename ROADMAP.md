@@ -152,8 +152,27 @@ scripts/build.sh --run track-a.wav track-b.wav
 
 ## Continuous integration
 
-The workflow is `.gitea/workflows/build.yml`. It runs on pushes to `main` and `testing`, and on
-pull requests.
+The workflow is `.gitea/workflows/build.yml`. It runs on pushes to `main` and `testing`, on pull
+requests, and on demand from the Actions tab.
+
+### Re-running a workflow
+
+Open the Actions tab, pick the workflow, and use **Run workflow** for a fresh run, or open a
+finished run and use its re-run button. Neither needs a commit. That matters because most
+Windows failures are not the code: the runner is a console program on a desktop machine, so it
+goes down when the session that started it does, and a job already in flight is then left with
+no runner and fails for reasons that have nothing to do with the build.
+
+If a Windows job fails or sits unclaimed, check the machine before reading the log:
+
+| Check | Command |
+| --- | --- |
+| Is the runner running? | `Get-Process act_runner` |
+| Did its task stop, and why? | `Get-ScheduledTaskInfo -TaskName 'Gitea Actions runner'` |
+| Start it again | `Start-ScheduledTask -TaskName 'Gitea Actions runner'` |
+
+A last result of `0xC000013A` means it was killed by the session ending rather than crashing.
+The task is set to restart itself once a minute if that happens.
 
 | Job | Runs on | Status |
 | --- | --- | :---: |
