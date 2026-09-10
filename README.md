@@ -131,8 +131,9 @@ Visual Studio 2022 Build Tools with the C++ workload provides everything. Its bu
 and Ninja are found and used automatically, so nothing else has to be installed.
 
 ```
-pwsh scripts/build.ps1        # configure and build
-pwsh scripts/build.ps1 -Run   # and launch it
+pwsh scripts/build.ps1         # configure and build
+pwsh scripts/build.ps1 -Test   # and run the tests
+pwsh scripts/build.ps1 -Run    # and launch it
 ```
 
 ### Any platform, by hand

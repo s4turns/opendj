@@ -43,6 +43,15 @@ target_include_directories(opendj_rubberband SYSTEM PUBLIC "${rubberband_SOURCE_
 target_compile_options(opendj_rubberband PRIVATE $<IF:$<CXX_COMPILER_ID:MSVC>,/w,-w>)
 set_target_properties(opendj_rubberband PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
+if(WIN32)
+    # windows.h defines min and max as macros, which turns every
+    # std::numeric_limits<T>::max() inside Rubber Band into a syntax error.
+    # NOMINMAX is the standard cure and the reason this target would not
+    # compile on MSVC at all.
+    target_compile_definitions(opendj_rubberband PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+    target_compile_options(opendj_rubberband PRIVATE /utf-8)
+endif()
+
 # SQLite holds the track library. The system library is used where the
 # platform has one, and the public domain amalgamation is fetched and compiled
 # in otherwise, which is the Windows case.

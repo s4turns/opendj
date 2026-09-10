@@ -68,11 +68,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo
-
-      - name: Build
-        run: cmake --build build --config RelWithDebInfo --parallel
-
-      - name: Test
-        run: ctest --test-dir build -C RelWithDebInfo --output-on-failure
+      # The build script locates the CMake, Ninja and MSVC environment that ship
+      # with Visual Studio Build Tools, so a self-hosted runner needs nothing on
+      # PATH beyond git and node. It falls back to a CMake on PATH where there is
+      # one, so this works on a GitHub-hosted image too.
+      - name: Build and test
+        shell: pwsh
+        run: ./scripts/build.ps1 -Config RelWithDebInfo -Test

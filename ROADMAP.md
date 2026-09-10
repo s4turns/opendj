@@ -32,7 +32,7 @@ check behind it, not just code that compiles.
 
 | Platform | Builds | Runs | Notes |
 | --- | :---: | :---: | --- |
-| Windows | ✅ | ✅ | Built and run with MSVC 19.44. WASAPI by default, ASIO opt-in |
+| Windows | ✅ | ✅ | Built and run with MSVC 19.44. WASAPI by default, ASIO opt-in. CI needs a self-hosted runner, see below |
 | Fedora | ✅ | ✅ | Built and run on Fedora 44 with GCC 16 and PipeWire's JACK. Decks, browser, analysis and the library all exercised |
 | Debian and Ubuntu | ✅ | ⬜ | Same, via the Debian CI job |
 | Arch | ⬜ | ⬜ | `scripts/build.sh` knows the packages, untested |
@@ -149,3 +149,36 @@ scripts/build.sh --run track-a.wav track-b.wav
 | Every input goes through `ActionDispatcher` | Mouse, keyboard and MIDI produce the same actions, so the interface and the controller cannot drift apart |
 | Analysis results are immutable and shared by pointer | The interface can hold one as long as it likes without affecting the audio thread's lifetime rules |
 | Anything touching audio gets a test that measures the output | The suite has already caught three real bugs this way, not by checking that code runs |
+
+## Continuous integration
+
+The workflow is `.gitea/workflows/build.yml`. It runs on pushes to `main` and `testing`, and on
+pull requests.
+
+| Job | Runs on | Status |
+| --- | --- | :---: |
+| fedora | `fedora:latest` container on the Linux runner | ✅ |
+| debian | the Linux runner's own image | ✅ |
+| windows | a self-hosted Windows runner | 🚧 needs a runner registered |
+
+Two things about this setup are worth knowing before changing it.
+
+| Detail | Why |
+| --- | --- |
+| The Fedora job installs `nodejs` and `git` before anything else | `actions/checkout` is a JavaScript action, and the stock Fedora image has neither. Without that step the job fails in two seconds, long before a compiler is involved |
+| The Windows job calls `scripts/build.ps1` rather than CMake directly | The script finds the CMake, Ninja and MSVC environment inside Visual Studio Build Tools, so a self-hosted machine needs nothing on PATH but git and node |
+
+### Registering the Windows runner
+
+The Linux runner advertises `ubuntu-latest` and has no MSVC, so it will never take the Windows
+job; that job is simply never scheduled until a Windows machine is registered. On the Windows
+machine, with Visual Studio Build Tools, git and Node installed:
+
+```
+pwsh scripts/setup-windows-runner.ps1 -Token <registration token>
+```
+
+Get the token from Gitea under repository Settings, then Actions, then Runners, then "Create new
+runner". The script downloads the runner, registers it with the label `windows-latest:host`, and
+starts it from a task at logon. The `:host` suffix is what makes jobs run directly on the machine
+rather than in a container.

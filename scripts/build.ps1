@@ -2,14 +2,17 @@
     Configure and build OpenDJ on Windows using the toolchain that ships with
     Visual Studio Build Tools, so nothing extra has to be installed.
 
-    Usage:  pwsh scripts/build.ps1 [-Config RelWithDebInfo] [-Clean] [-Run]
+    Usage:  pwsh scripts/build.ps1 [-Config RelWithDebInfo] [-Clean] [-Test] [-Run [files]]
 #>
 [CmdletBinding()]
 param(
     [ValidateSet('Debug', 'RelWithDebInfo', 'Release')]
     [string]$Config = 'RelWithDebInfo',
     [switch]$Clean,
-    [switch]$Run
+    [switch]$Test,
+    [switch]$Run,
+    [Parameter(ValueFromRemainingArguments = $true)]
+    [string[]]$TrackFiles
 )
 
 $ErrorActionPreference = 'Stop'
@@ -33,7 +36,10 @@ if (-not $vsPath) {
 $vsCMake = Join-Path $vsPath 'Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe'
 $vsNinja = Join-Path $vsPath 'Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja\ninja.exe'
 
+$vsCTest = Join-Path (Split-Path -Parent $vsCMake) 'ctest.exe'
+
 $cmake = if (Test-Path $vsCMake) { $vsCMake } else { (Get-Command cmake).Source }
+$ctest = if (Test-Path $vsCTest) { $vsCTest } else { (Get-Command ctest -ErrorAction SilentlyContinue).Source }
 $generatorArgs = if (Test-Path $vsNinja) {
     @('-G', 'Ninja', "-DCMAKE_MAKE_PROGRAM=$vsNinja", "-DCMAKE_BUILD_TYPE=$Config")
 } else {
@@ -64,9 +70,20 @@ if ($LASTEXITCODE -ne 0) { throw "Build failed with exit code $LASTEXITCODE." }
 
 $exe = Get-ChildItem -Path $buildDir -Filter 'OpenDJ.exe' -Recurse -ErrorAction SilentlyContinue |
     Select-Object -First 1
-if ($exe) {
-    Write-Host "Built $($exe.FullName)" -ForegroundColor Green
-    if ($Run) { & $exe.FullName }
-} else {
-    Write-Warning 'Build reported success but OpenDJ.exe was not found.'
+if (-not $exe) {
+    throw 'Build reported success but OpenDJ.exe was not found.'
+}
+
+Write-Host "Built $($exe.FullName)" -ForegroundColor Green
+
+if ($Test) {
+    if (-not $ctest) { throw 'ctest was not found alongside cmake.' }
+
+    Write-Host 'Running tests...' -ForegroundColor Cyan
+    & $ctest --test-dir $buildDir -C $Config --output-on-failure
+    if ($LASTEXITCODE -ne 0) { throw "Tests failed with exit code $LASTEXITCODE." }
+}
+
+if ($Run) {
+    if ($TrackFiles) { & $exe.FullName @TrackFiles } else { & $exe.FullName }
 }
