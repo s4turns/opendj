@@ -9,6 +9,7 @@
 
 #include <cmath>
 #include <memory>
+#include <vector>
 
 using Catch::Matchers::WithinAbs;
 
@@ -69,6 +70,22 @@ namespace
                 deck->processBlock (buffer);
         }
 
+        /** Advances the deck and keeps the left channel of everything it produced. */
+        std::vector<float> capture (int numBlocks)
+        {
+            std::vector<float> samples;
+            samples.reserve ((size_t) (numBlocks * blockSize));
+
+            for (int i = 0; i < numBlocks; ++i)
+            {
+                deck->processBlock (buffer);
+                const auto* left = buffer.getReadPointer (0);
+                samples.insert (samples.end(), left, left + blockSize);
+            }
+
+            return samples;
+        }
+
         double secondsPerBlock() const { return blockSize / deviceSampleRate; }
 
         juce::AudioFormatManager formatManager;
@@ -76,6 +93,19 @@ namespace
         std::unique_ptr<opendj::Deck> deck;
         juce::AudioBuffer<float> buffer;
     };
+
+    /** The frequency of a tone, from how often it crosses zero going up. Crude,
+        but exact enough on a sine to tell 440 Hz from 484. */
+    double measureFrequency (const std::vector<float>& samples, double sampleRate)
+    {
+        auto crossings = 0;
+
+        for (size_t i = 1; i < samples.size(); ++i)
+            if (samples[i - 1] < 0.0f && samples[i] >= 0.0f)
+                ++crossings;
+
+        return crossings / (static_cast<double> (samples.size()) / sampleRate);
+    }
 }
 
 TEST_CASE ("a loaded deck reports its length and starts at zero", "[deck]")
@@ -373,4 +403,100 @@ TEST_CASE ("loading a track clears the hot cues from the last one", "[deck][hotc
 
     REQUIRE (fixture.deck->loadFile (fixture.temporaryFile.getFile()));
     REQUIRE_FALSE (fixture.deck->hasHotCue (3));
+}
+
+TEST_CASE ("without key lock a faster tempo raises the pitch", "[deck][keylock]")
+{
+    Fixture fixture;
+    fixture.deck->setTempoRatio (1.10);
+    fixture.deck->play();
+    fixture.run (20);   // past the fade in
+
+    const auto tone = fixture.capture (100);
+    REQUIRE_THAT (measureFrequency (tone, deviceSampleRate), WithinAbs (440.0 * 1.10, 5.0));
+}
+
+TEST_CASE ("key lock keeps the pitch when the tempo changes", "[deck][keylock]")
+{
+    Fixture fixture;
+    fixture.deck->setKeyLock (true);
+    fixture.deck->setTempoRatio (1.10);
+    fixture.deck->play();
+    fixture.run (40);   // fade in, and the stretcher's own start-up
+
+    const auto tone = fixture.capture (200);
+    REQUIRE (fixture.buffer.getMagnitude (0, 0, blockSize) > 0.3f);
+    REQUIRE_THAT (measureFrequency (tone, deviceSampleRate), WithinAbs (440.0, 5.0));
+
+    // Slowing down is the other half of the fader.
+    fixture.deck->setTempoRatio (0.92);
+    fixture.run (40);
+    const auto slower = fixture.capture (200);
+    REQUIRE_THAT (measureFrequency (slower, deviceSampleRate), WithinAbs (440.0, 5.0));
+}
+
+TEST_CASE ("key lock still consumes the track at the tempo rate", "[deck][keylock]")
+{
+    Fixture fixture;
+    fixture.deck->setKeyLock (true);
+    fixture.deck->setTempoRatio (1.10);
+    fixture.deck->play();
+
+    const int blocks = 100;
+    fixture.run (blocks);
+
+    REQUIRE_THAT (fixture.deck->getPositionSeconds(),
+                  WithinAbs (blocks * fixture.secondsPerBlock() * 1.10, 0.005));
+}
+
+TEST_CASE ("key lock at the recorded speed is transparent", "[deck][keylock]")
+{
+    Fixture fixture;
+    fixture.deck->setKeyLock (true);
+    fixture.deck->play();
+    fixture.run (20);
+
+    const auto tone = fixture.capture (100);
+    REQUIRE_THAT (measureFrequency (tone, deviceSampleRate), WithinAbs (440.0, 3.0));
+    REQUIRE_THAT (fixture.deck->getPositionSeconds(), WithinAbs (120 * fixture.secondsPerBlock(), 0.005));
+}
+
+TEST_CASE ("key lock is bypassed while a hand is on the platter", "[deck][keylock][jog]")
+{
+    Fixture fixture;
+    fixture.deck->setKeyLock (true);
+    fixture.deck->setTempoRatio (1.10);
+    fixture.deck->play();
+    fixture.run (40);
+
+    // A hand moving the platter at exactly record speed plays the tone at its
+    // recorded pitch through the plain path, and the deck follows the hand.
+    fixture.deck->setJogTouched (true);
+    const auto ticksPerBlock = 512.0 * fixture.secondsPerBlock() / 1.8;
+
+    for (int i = 0; i < 20; ++i)
+    {
+        fixture.deck->addJogTicks (ticksPerBlock);
+        fixture.run (1);
+    }
+
+    const auto before = fixture.deck->getPositionSeconds();
+    std::vector<float> tone;
+
+    for (int i = 0; i < 100; ++i)
+    {
+        fixture.deck->addJogTicks (ticksPerBlock);
+        const auto block = fixture.capture (1);
+        tone.insert (tone.end(), block.begin(), block.end());
+    }
+
+    REQUIRE_THAT (measureFrequency (tone, deviceSampleRate), WithinAbs (440.0, 5.0));
+    REQUIRE_THAT (fixture.deck->getPositionSeconds() - before,
+                  WithinAbs (100 * fixture.secondsPerBlock(), 0.01));
+
+    // Letting go hands back to the stretcher at the fader's tempo, still in key.
+    fixture.deck->setJogTouched (false);
+    fixture.run (40);
+    const auto after = fixture.capture (200);
+    REQUIRE_THAT (measureFrequency (after, deviceSampleRate), WithinAbs (440.0, 5.0));
 }

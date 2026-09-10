@@ -52,7 +52,7 @@ install_dependencies() {
 
         sudo dnf install -y \
             gcc-c++ cmake ninja-build git pkgconf-pkg-config \
-            alsa-lib-devel "$jack_package" \
+            alsa-lib-devel "$jack_package" sqlite-devel \
             freetype-devel fontconfig-devel \
             libX11-devel libXext-devel libXinerama-devel \
             libXrandr-devel libXcursor-devel libXcomposite-devel \
@@ -63,7 +63,7 @@ install_dependencies() {
         sudo apt-get update
         sudo apt-get install -y --no-install-recommends \
             build-essential cmake ninja-build git pkg-config \
-            libasound2-dev libjack-jackd2-dev \
+            libasound2-dev libjack-jackd2-dev libsqlite3-dev \
             libfreetype-dev libfontconfig1-dev \
             libx11-dev libxext-dev libxinerama-dev \
             libxrandr-dev libxcursor-dev libxcomposite-dev \
@@ -73,7 +73,7 @@ install_dependencies() {
         # Arch and derivatives.
         sudo pacman -S --needed --noconfirm \
             base-devel cmake ninja git pkgconf \
-            alsa-lib jack2 freetype2 fontconfig \
+            alsa-lib jack2 sqlite freetype2 fontconfig \
             libx11 libxext libxinerama libxrandr libxcursor libxcomposite mesa
 
     else
@@ -81,8 +81,11 @@ install_dependencies() {
 No supported package manager found (dnf, apt-get or pacman).
 
 Install the equivalents of these by hand: a C++20 compiler, CMake 3.22 or newer,
-Ninja, pkg-config, and the development headers for ALSA, JACK, FreeType,
+Ninja, pkg-config, and the development headers for ALSA, JACK, SQLite, FreeType,
 Fontconfig, libX11, Xext, Xinerama, Xrandr, Xcursor, Xcomposite and OpenGL.
+
+SQLite is optional: without it the build fetches and compiles the public domain
+amalgamation instead, which is what happens on Windows.
 MESSAGE
         exit 1
     fi

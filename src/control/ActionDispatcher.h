@@ -37,9 +37,12 @@ public:
     std::function<void()> onStateChanged;
 
     /** Asked for a file when a load action arrives. Returns an invalid file to
-        mean there is nothing selected, which is the state until the browser
-        exists. */
+        mean there is nothing selected. The browser provides this. */
     std::function<juce::File (int deck)> selectedFileProvider;
+
+    /** Moves the browser's selection by a number of rows, negative for up.
+        May be called from the MIDI thread, so implementations must marshal. */
+    std::function<void (int rows)> browseScrollHandler;
 
     /** How far the tempo fader travels, as a percentage either side of zero. */
     void setTempoRange (int deckIndex, double percent);

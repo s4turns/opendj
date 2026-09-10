@@ -29,6 +29,8 @@ enum class Action
     deckSync,
     deckLoadSelected,
 
+    deckKeyLockToggle,  ///< tempo changes stop shifting the pitch
+
     // Continuous deck controls, value normalised 0 to 1 unless noted.
     deckTempo,          ///< 0 is the slowest end of the fader, 1 the fastest
     deckTrim,
@@ -52,6 +54,9 @@ enum class Action
     masterGain,
     cueGain,
     cueMix,
+
+    // Track browser. deck and slot are unused.
+    browseScroll,       ///< value is signed rows to move the selection, not normalised
 
     // Modifier, held rather than toggled.
     shift

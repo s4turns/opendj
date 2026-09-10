@@ -6,6 +6,9 @@
 #include "core/Deck.h"
 
 #include "analysis/TrackAnalyser.h"
+#include "analysis/TrackDecoder.h"
+
+#include <rubberband/RubberBandStretcher.h>
 
 #include <algorithm>
 #include <cmath>
@@ -53,8 +56,22 @@ namespace
     constexpr double bendPerTick = 0.0005;
     constexpr double bendDecayPerSecond = 0.002;
 
-    // Refuse absurd files rather than exhausting memory on a mistaken load.
-    constexpr double maxTrackMinutes = 30.0;
+    // Key lock. The R2 engine is the one that keeps up with a tempo fader in
+    // real time at a cost of a few percent of a core per deck; R3
+    // (OptionEngineFiner) sounds better on sustained material but wants several
+    // times the CPU and adds latency. Swap the engine flag to try it.
+    constexpr int stretchOptions = RubberBand::RubberBandStretcher::OptionProcessRealTime
+                                 | RubberBand::RubberBandStretcher::OptionEngineFaster
+                                 | RubberBand::RubberBandStretcher::OptionPitchHighConsistency;
+
+    // How much audio the stretcher is handed at a time. Its maximum, so the
+    // stretcher can size its own buffers once and never again.
+    constexpr int stretchChunkSize = 1024;
+
+    // Bounds on how many feed and retrieve rounds one block may take. The loop
+    // always terminates on its own; this is the guarantee that it does so
+    // within a bounded time even if the stretcher misbehaves.
+    constexpr int stretchRoundsPerBlock = 64;
 }
 
 Deck::Deck (int deckIndex, juce::AudioFormatManager& formatManagerToUse)
@@ -75,34 +92,30 @@ Deck::~Deck()
 // Loading
 //==============================================================================
 
-bool Deck::loadFile (const juce::File& file)
+bool Deck::loadFile (const juce::File& file, const KnownTrack* known)
 {
-    std::unique_ptr<juce::AudioFormatReader> reader (formatManager.createReaderFor (file));
+    auto decoded = TrackDecoder::decode (formatManager, file);
 
-    if (reader == nullptr || reader->numChannels == 0 || reader->lengthInSamples <= 0)
-        return false;
-
-    const auto seconds = static_cast<double> (reader->lengthInSamples) / reader->sampleRate;
-
-    if (seconds > maxTrackMinutes * 60.0)
+    if (decoded == nullptr)
         return false;
 
     auto track = std::make_unique<Track>();
     track->file = file;
-    track->sampleRate = reader->sampleRate;
-    track->title = file.getFileNameWithoutExtension();
-    track->audio.setSize (2, static_cast<int> (reader->lengthInSamples));
-
-    if (! reader->read (&track->audio, 0, static_cast<int> (reader->lengthInSamples), 0, true, true))
-        return false;
-
-    // A mono file reads into channel 0 only, so mirror it across.
-    if (reader->numChannels == 1)
-        track->audio.copyFrom (1, 0, track->audio, 0, 0, track->audio.getNumSamples());
+    track->sampleRate = decoded->sampleRate;
+    track->audio = std::move (decoded->audio);
+    track->title = known != nullptr && known->title.isNotEmpty()
+        ? (known->artist.isNotEmpty() ? known->artist + " - " + known->title : known->title)
+        : file.getFileNameWithoutExtension();
 
     // Waveform peaks and the beat grid are built here, on whichever thread is
     // doing the loading, so the track is fully described the moment it appears.
-    auto analysis = TrackAnalyser::analyse (track->audio, track->sampleRate);
+    // A track the library has seen before skips the tempo pass, which is the
+    // slow part.
+    auto analysis = known != nullptr && known->analysed
+        ? TrackAnalyser::withKnownTempo (track->audio, track->sampleRate,
+                                         known->bpm, known->firstBeatSeconds,
+                                         known->tempoConfidence, {})
+        : TrackAnalyser::analyse (track->audio, track->sampleRate);
 
     publish (std::move (track));
     analysisData.store (std::move (analysis));
@@ -255,6 +268,16 @@ void Deck::setTrim (float linearGain)
     trimGain.store (juce::jlimit (0.0f, 4.0f, linearGain), std::memory_order_relaxed);
 }
 
+void Deck::setKeyLock (bool shouldLock)
+{
+    keyLock.store (shouldLock, std::memory_order_relaxed);
+}
+
+void Deck::toggleKeyLock()
+{
+    keyLock.store (! keyLock.load (std::memory_order_relaxed), std::memory_order_relaxed);
+}
+
 //==============================================================================
 // Hot cues
 //==============================================================================
@@ -330,11 +353,21 @@ void Deck::prepare (double sampleRate, int)
     deviceSampleRate = sampleRate > 0.0 ? sampleRate : 44100.0;
     transportGain.reset (deviceSampleRate, gainRampSeconds);
     transportGain.setCurrentAndTargetValue (0.0f);
+
+    // Built here, before the device starts, so that processBlock() never has to.
+    stretcher = std::make_unique<RubberBand::RubberBandStretcher> (
+        static_cast<size_t> (deviceSampleRate), 2, stretchOptions, 1.0, 1.0);
+    stretcher->setMaxProcessSize (static_cast<size_t> (stretchChunkSize));
+
+    stretchInput.setSize (2, stretchChunkSize);
+    stretchDiscard.setSize (2, stretchChunkSize);
+    stretchPrimed = false;
 }
 
 void Deck::releaseResources()
 {
     transportGain.setCurrentAndTargetValue (0.0f);
+    stretchPrimed = false;
 }
 
 void Deck::processBlock (juce::AudioBuffer<float>& destination)
@@ -348,6 +381,7 @@ void Deck::processBlock (juce::AudioBuffer<float>& destination)
     {
         transportGain.setCurrentAndTargetValue (0.0f);
         peakLevel.store (0.0f, std::memory_order_relaxed);
+        stretchPrimed = false;
         return;
     }
 
@@ -369,19 +403,26 @@ void Deck::processBlock (juce::AudioBuffer<float>& destination)
     const auto fadingOut = ! audible && transportGain.getCurrentValue() > 0.0f;
 
     if (! fadingOut)
+    {
         if (const auto seek = pendingSeekSeconds.exchange (-1.0, std::memory_order_relaxed); seek >= 0.0)
+        {
             readPosition = seek * track->sampleRate;
+            stretchPrimed = false;   // whatever the stretcher holds is from the old place
+        }
+    }
 
     // Once stopped and fully faded, hold position and cost nothing.
     if (! audible && transportGain.getCurrentValue() <= 0.0f)
     {
         pitchBend = 0.0;
+        stretchPrimed = false;
         positionSeconds.store (readPosition / track->sampleRate, std::memory_order_relaxed);
         peakLevel.store (0.0f, std::memory_order_relaxed);
         return;
     }
 
-    const auto tempoRate = (track->sampleRate / deviceSampleRate) * tempoRatio.load (std::memory_order_relaxed);
+    const auto fileToDevice = track->sampleRate / deviceSampleRate;
+    const auto tempoRate = fileToDevice * tempoRatio.load (std::memory_order_relaxed);
     double rate = tempoRate;
 
     if (scratching)
@@ -409,10 +450,25 @@ void Deck::processBlock (juce::AudioBuffer<float>& destination)
 
         rate = tempoRate * (1.0 + pitchBend);
     }
+
     const auto trim = trimGain.load (std::memory_order_relaxed);
     const auto outChannels = juce::jmin (2, destination.getNumChannels());
 
     const float* source[2] = { track->audio.getReadPointer (0), track->audio.getReadPointer (1) };
+
+    // Key lock is bypassed on the platter, and if it would have nothing to do:
+    // at exactly the recorded speed the stretcher is a delay line, and a delay
+    // that comes and goes with the fader is worse than a pitch that does.
+    const auto stretching = keyLock.load (std::memory_order_relaxed)
+                         && ! scratching
+                         && stretcher != nullptr
+                         && outChannels == 2
+                         && std::abs (rate - fileToDevice) > 1.0e-6;
+
+    if (stretching)
+        renderStretched (*track, destination, rate, fileToDevice);
+    else
+        stretchPrimed = false;
 
     auto position = readPosition;
     auto peak = 0.0f;
@@ -420,15 +476,16 @@ void Deck::processBlock (juce::AudioBuffer<float>& destination)
     for (int i = 0; i < blockSize; ++i)
     {
         const auto gain = transportGain.getNextValue() * trim;
+        const auto inRange = position >= 0.0 && position < static_cast<double> (numSamples);
 
-        if (position >= 0.0 && position < static_cast<double> (numSamples))
+        for (int ch = 0; ch < outChannels; ++ch)
         {
-            for (int ch = 0; ch < outChannels; ++ch)
-            {
-                const auto sample = interpolate (source[ch], numSamples, position) * gain;
-                destination.setSample (ch, i, sample);
-                peak = juce::jmax (peak, std::abs (sample));
-            }
+            const auto sample = stretching
+                ? destination.getSample (ch, i) * gain
+                : (inRange ? interpolate (source[ch], numSamples, position) * gain : 0.0f);
+
+            destination.setSample (ch, i, sample);
+            peak = juce::jmax (peak, std::abs (sample));
         }
 
         position += rate;
@@ -455,6 +512,97 @@ void Deck::processBlock (juce::AudioBuffer<float>& destination)
     positionSeconds.store (position / track->sampleRate, std::memory_order_relaxed);
     peakLevel.store (juce::jmax (peak, peakLevel.load (std::memory_order_relaxed)),
                      std::memory_order_relaxed);
+}
+
+//==============================================================================
+// Key lock
+//==============================================================================
+
+void Deck::feedStretcher (const Track& track, double fileToDevice)
+{
+    // The stretcher says how much it wants; give it that, within the chunk it
+    // was told to expect. Zero means it is full and only needs draining, but a
+    // small top-up is harmless and keeps the loop moving.
+    const auto required = static_cast<int> (stretcher->getSamplesRequired());
+    const auto count = juce::jlimit (1, stretchChunkSize, required > 0 ? required : 64);
+    const auto numSamples = static_cast<juce::int64> (track.audio.getNumSamples());
+
+    // The input is the track resampled to the device rate at the recorded
+    // speed, so the stretcher sees audio at its own sample rate and at the
+    // original pitch. Off either end the read is silence, which is what a
+    // stretcher should be fed there.
+    for (int ch = 0; ch < 2; ++ch)
+    {
+        auto* out = stretchInput.getWritePointer (ch);
+        auto position = feedPosition;
+
+        for (int i = 0; i < count; ++i)
+        {
+            out[i] = interpolate (track.audio.getReadPointer (ch), numSamples, position);
+            position += fileToDevice;
+        }
+    }
+
+    feedPosition += count * fileToDevice;
+
+    const float* inputs[2] = { stretchInput.getReadPointer (0), stretchInput.getReadPointer (1) };
+    stretcher->process (inputs, static_cast<size_t> (count), false);
+}
+
+void Deck::renderStretched (const Track& track, juce::AudioBuffer<float>& destination,
+                            double rate, double fileToDevice)
+{
+    // Output samples per input sample. Each output sample must consume `rate`
+    // file samples, and each input sample is fileToDevice of them.
+    stretcher->setTimeRatio (juce::jlimit (0.25, 4.0, fileToDevice / rate));
+
+    auto rounds = stretchRoundsPerBlock;
+
+    if (! stretchPrimed)
+    {
+        // Line the stretcher up with the audible position. Its first
+        // getStartDelay() output samples are warm-up, so produce and discard
+        // them here; from then on the output is the track from readPosition.
+        stretcher->reset();
+        feedPosition = readPosition;
+
+        auto toDiscard = static_cast<int> (stretcher->getStartDelay());
+
+        while (toDiscard > 0 && rounds-- > 0)
+        {
+            if (stretcher->available() <= 0)
+            {
+                feedStretcher (track, fileToDevice);
+                continue;
+            }
+
+            const auto count = juce::jmin (stretcher->available(), toDiscard, stretchChunkSize);
+            float* outputs[2] = { stretchDiscard.getWritePointer (0), stretchDiscard.getWritePointer (1) };
+            toDiscard -= static_cast<int> (stretcher->retrieve (outputs, static_cast<size_t> (count)));
+        }
+
+        stretchPrimed = true;
+    }
+
+    const auto blockSize = destination.getNumSamples();
+    auto written = 0;
+
+    while (written < blockSize && rounds-- > 0)
+    {
+        if (stretcher->available() <= 0)
+        {
+            feedStretcher (track, fileToDevice);
+            continue;
+        }
+
+        const auto count = juce::jmin (stretcher->available(), blockSize - written);
+        float* outputs[2] = { destination.getWritePointer (0) + written,
+                              destination.getWritePointer (1) + written };
+        written += static_cast<int> (stretcher->retrieve (outputs, static_cast<size_t> (count)));
+    }
+
+    // If the rounds ran out the rest of the block is the silence it was cleared
+    // to, which is a dropout, and a dropout beats a stalled audio thread.
 }
 
 } // namespace opendj

@@ -43,8 +43,10 @@ public:
     }
 };
 
-/** One deck: the two waveform views, transport, tempo and sync. */
-class DeckComponent final : public juce::Component
+/** One deck: the two waveform views, transport, tempo and sync. Also a drop
+    target for rows dragged out of the browser. */
+class DeckComponent final : public juce::Component,
+                            public juce::DragAndDropTarget
 {
 public:
     DeckComponent (AudioEngine& engineToUse, int deckIndex, const juce::String& deckName);
@@ -59,6 +61,11 @@ public:
 
     void paint (juce::Graphics& g) override;
     void resized() override;
+
+    bool isInterestedInDragSource (const SourceDetails& details) override;
+    void itemDragEnter (const SourceDetails&) override;
+    void itemDragExit (const SourceDetails&) override;
+    void itemDropped (const SourceDetails& details) override;
 
 private:
     void loadButtonClicked();
@@ -77,6 +84,7 @@ private:
     juce::TextButton loadButton { "Load" };
     juce::TextButton playButton { "Play" };
     juce::TextButton syncButton { "Sync" };
+    juce::TextButton keyLockButton { "Key" };
     MomentaryButton cueButton { "Cue" };
     juce::Slider tempoSlider;
     juce::Label tempoLabel;
@@ -89,6 +97,7 @@ private:
     std::unique_ptr<juce::FileChooser> fileChooser;
     std::shared_ptr<const TrackAnalysis> shownAnalysis;
     bool wasLoading = false;
+    bool dragHovering = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (DeckComponent)
 };

@@ -65,6 +65,10 @@ DeckComponent::DeckComponent (AudioEngine& engineToUse, int deckIndex, const juc
     };
     addAndMakeVisible (syncButton);
 
+    keyLockButton.setTooltip ("Key lock: the tempo fader stops changing the pitch");
+    keyLockButton.onClick = [this] { deck.toggleKeyLock(); refresh(); };
+    addAndMakeVisible (keyLockButton);
+
     tempoSlider.setSliderStyle (juce::Slider::LinearVertical);
     tempoSlider.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
     tempoSlider.setRange (-1.0, 1.0, 0.0);
@@ -190,6 +194,9 @@ void DeckComponent::refresh()
     syncButton.setEnabled (engine.getEffectiveBpm (index) > 0.0
                            && engine.getEffectiveBpm (1 - index) > 0.0);
 
+    keyLockButton.setColour (juce::TextButton::buttonColourId,
+                             deck.isKeyLockEnabled() ? accentColour.darker (0.4f) : juce::Colour (0xff2c2c34));
+
     updateTempoReadout();
 
     if (loading != wasLoading)
@@ -199,10 +206,41 @@ void DeckComponent::refresh()
     }
 }
 
+bool DeckComponent::isInterestedInDragSource (const SourceDetails& details)
+{
+    // The browser hands over a path; anything else is someone else's drag.
+    return details.description.isString() && juce::File (details.description.toString()).existsAsFile();
+}
+
+void DeckComponent::itemDragEnter (const SourceDetails&)
+{
+    dragHovering = true;
+    repaint();
+}
+
+void DeckComponent::itemDragExit (const SourceDetails&)
+{
+    dragHovering = false;
+    repaint();
+}
+
+void DeckComponent::itemDropped (const SourceDetails& details)
+{
+    dragHovering = false;
+    repaint();
+    load (juce::File (details.description.toString()));
+}
+
 void DeckComponent::paint (juce::Graphics& g)
 {
     g.setColour (panelColour);
     g.fillRoundedRectangle (getLocalBounds().toFloat(), 6.0f);
+
+    if (dragHovering)
+    {
+        g.setColour (accentColour);
+        g.drawRoundedRectangle (getLocalBounds().toFloat().reduced (1.5f), 6.0f, 3.0f);
+    }
 }
 
 void DeckComponent::resized()
@@ -253,7 +291,7 @@ void DeckComponent::resized()
     // Spelled out, because the cue button is a different type to the others.
     const std::initializer_list<juce::Button*> transportButtons
     {
-        &loadButton, &cueButton, &playButton, &syncButton
+        &loadButton, &cueButton, &playButton, &syncButton, &keyLockButton
     };
 
     for (auto* button : transportButtons)

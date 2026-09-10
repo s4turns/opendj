@@ -34,6 +34,11 @@ namespace
 
 MainComponent::MainComponent()
 {
+    if (const auto opened = library.open (Library::defaultFile()); opened.failed())
+        libraryError = opened.getErrorMessage();
+    else
+        engine.setAnalysisCache (&library);
+
     startupError = engine.initialise();
 
     dispatcher.onStateChanged = [safe = juce::Component::SafePointer<MainComponent> (this)]
@@ -52,15 +57,55 @@ MainComponent::MainComponent()
     midi.loadMappingsFromFolder (findMappingsFolder());
     midi.openFirstRecognisedDevice();
 
+    addAndMakeVisible (deckRow);
+
     for (int i = 0; i < AudioEngine::numDecks; ++i)
     {
         deckViews[(size_t) i] = std::make_unique<DeckComponent> (
             engine, i, juce::String::charToString ('A' + (juce::juce_wchar) i));
-        addAndMakeVisible (*deckViews[(size_t) i]);
+        deckRow.addAndMakeVisible (*deckViews[(size_t) i]);
     }
 
     mixerView = std::make_unique<MixerComponent> (engine.getMixer());
-    addAndMakeVisible (*mixerView);
+    deckRow.addAndMakeVisible (*mixerView);
+
+    deckRow.onResized = [this] (juce::Rectangle<int> area)
+    {
+        const auto mixerWidth = juce::jlimit (220, 300, area.getWidth() / 4);
+        const auto deckWidth = (area.getWidth() - mixerWidth - 16) / 2;
+
+        deckViews[0]->setBounds (area.removeFromLeft (deckWidth));
+        area.removeFromLeft (8);
+        deckViews[1]->setBounds (area.removeFromRight (deckWidth));
+        area.removeFromRight (8);
+        mixerView->setBounds (area);
+    };
+
+    browser = std::make_unique<BrowserComponent> (library, scanner);
+    browser->onLoad = [this] (const juce::File& file, int deckIndex) { loadOntoDeck (file, deckIndex); };
+    addAndMakeVisible (*browser);
+
+    // The controller's browse encoder and load buttons reach the browser through
+    // the dispatcher, the same way every other input does.
+    dispatcher.selectedFileProvider = [this] (int) { return browser->getSelectedFile(); };
+    dispatcher.browseScrollHandler = [safe = juce::Component::SafePointer<MainComponent> (this)] (int rowsToMove)
+    {
+        juce::MessageManager::callAsync ([safe, rowsToMove]
+        {
+            if (safe != nullptr && safe->browser != nullptr)
+                safe->browser->moveSelection (rowsToMove);
+        });
+    };
+
+    // Decks and mixer on top, browser underneath, and a bar between to drag.
+    verticalLayout.setItemLayout (0, 320, -1.0, -0.62);
+    verticalLayout.setItemLayout (1, 6, 6, 6);
+    verticalLayout.setItemLayout (2, 140, -1.0, -0.38);
+    resizerBar = std::make_unique<juce::StretchableLayoutResizerBar> (&verticalLayout, 1, false);
+    addAndMakeVisible (*resizerBar);
+
+    if (! library.getFolders().empty())
+        scanner.start();
 
     audioSettingsButton.onClick = [this] { showAudioSettings(); };
     addAndMakeVisible (audioSettingsButton);
@@ -77,14 +122,43 @@ MainComponent::MainComponent()
     setWantsKeyboardFocus (true);
 
     startTimerHz (refreshRateHz);
-    setSize (1200, 760);
+    setSize (1280, 960);
 }
 
 MainComponent::~MainComponent()
 {
     stopTimer();
     dispatcher.onStateChanged = nullptr;
+    dispatcher.selectedFileProvider = nullptr;
+    dispatcher.browseScrollHandler = nullptr;
     removeKeyListener (this);
+
+    scanner.stop();
+    engine.setAnalysisCache (nullptr);
+}
+
+void MainComponent::loadOntoDeck (const juce::File& file, int deckIndex)
+{
+    if (deckIndex < 0)
+    {
+        // A double-click goes to a deck that is not playing. With both decks in
+        // the mix there is no safe answer, so nothing happens rather than the
+        // wrong thing.
+        for (int i = 0; i < AudioEngine::numDecks; ++i)
+        {
+            if (! engine.getDeck (i).isPlaying())
+            {
+                deckIndex = i;
+                break;
+            }
+        }
+
+        if (deckIndex < 0)
+            return;
+    }
+
+    if (juce::isPositiveAndBelow (deckIndex, AudioEngine::numDecks))
+        deckViews[(size_t) deckIndex]->load (file);
 }
 
 juce::File MainComponent::findMappingsFolder() const
@@ -132,6 +206,9 @@ void MainComponent::timerCallback()
 
     if (midi.isOpen())
         status << "  |  " << midi.getOpenDeviceName();
+
+    if (libraryError.isNotEmpty())
+        status << "  |  Library error: " << libraryError;
 
     statusLabel.setText (status, juce::dontSendNotification);
 }
@@ -197,7 +274,7 @@ void MainComponent::filesDropped (const juce::StringArray& files, int x, int y)
 
     for (int i = 0; i < AudioEngine::numDecks; ++i)
     {
-        if (deckViews[(size_t) i]->getBounds().contains (dropPoint))
+        if (deckViews[(size_t) i]->getBounds().contains (deckRow.getLocalPoint (this, dropPoint)))
         {
             deckViews[(size_t) i]->load (juce::File (files[0]));
             return;
@@ -258,14 +335,9 @@ void MainComponent::resized()
 
     area.removeFromBottom (8);
 
-    const auto mixerWidth = juce::jlimit (220, 300, area.getWidth() / 4);
-    const auto deckWidth = (area.getWidth() - mixerWidth - 16) / 2;
-
-    deckViews[0]->setBounds (area.removeFromLeft (deckWidth));
-    area.removeFromLeft (8);
-    deckViews[1]->setBounds (area.removeFromRight (deckWidth));
-    area.removeFromRight (8);
-    mixerView->setBounds (area);
+    juce::Component* rows[] = { &deckRow, resizerBar.get(), browser.get() };
+    verticalLayout.layOutComponents (rows, 3, area.getX(), area.getY(), area.getWidth(), area.getHeight(),
+                                     true, true);
 }
 
 } // namespace opendj

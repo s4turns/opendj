@@ -150,7 +150,158 @@ namespace
         float confidence = 0.0f;
     };
 
+    /** How well a train of pulses at this spacing explains the envelope, at its
+        best alignment: the mean envelope value under a pulse.
+
+        This is the measurement that separates a real tempo from a metrical
+        impostor. Autocorrelation at three quarters of the beat is contaminated
+        by the beat itself, so a 128 BPM track scores well at 170.7 too; a pulse
+        train at 170.7 lands on a beat only once every four pulses, and the mean
+        falls to a quarter. Dividing by the number of pulses rather than summing
+        is what makes periods of different lengths comparable.
+    */
+    struct PulseFit
+    {
+        int offset = 0;
+        float mean = 0.0f;
+
+        /** The level most pulses reach, rather than the level they average.
+
+            This is the number that tells a tempo from a metrical impostor. A
+            train at four thirds of the true tempo lands on a beat only once
+            every four pulses, and a train at two thirds alternates between the
+            beat and the offbeat; both can average well, because the pulses that
+            do land land on something loud. Asking instead what the weakest
+            quarter of the pulses found makes a train that misses most of the
+            time score badly however loud its hits are.
+        */
+        float strength = 0.0f;
+    };
+
+    /** The envelope at a pulse, allowing for a beat that falls between frames. */
+    float sampleAround (const std::vector<float>& envelope, double frame)
+    {
+        const auto centre = static_cast<size_t> (frame);
+        auto value = envelope[centre];
+
+        if (centre > 0)
+            value = juce::jmax (value, envelope[centre - 1]);
+
+        if (centre + 1 < envelope.size())
+            value = juce::jmax (value, envelope[centre + 1]);
+
+        return value;
+    }
+
+    PulseFit fitPulseTrain (const std::vector<float>& envelope, double periodFrames)
+    {
+        PulseFit fit;
+
+        if (periodFrames < 2.0 || envelope.empty())
+            return fit;
+
+        const auto period = static_cast<int> (std::round (periodFrames));
+        const auto lastFrame = static_cast<double> (envelope.size());
+
+        // The train is aligned in windows of a few bars rather than once for the
+        // whole track. A rigid grid laid over five minutes drifts off the beat
+        // long before the end, from the fraction of a frame the period is out
+        // by and from the track's own timing, and a drifting grid scores a
+        // correct tempo as a miss.
+        const auto windowFrames = periodFrames * 8.0;
+
+        std::vector<float> hits;
+        auto sum = 0.0f;
+
+        for (double windowStart = 0.0; windowStart < lastFrame; windowStart += windowFrames)
+        {
+            const auto windowEnd = juce::jmin (lastFrame, windowStart + windowFrames);
+
+            // A window with barely a beat in it says nothing; leave it out
+            // rather than let it vote.
+            if (windowEnd - windowStart < periodFrames * 2.0)
+                break;
+
+            auto bestOffset = 0;
+            auto bestMean = -1.0f;
+
+            for (int offset = 0; offset < period; ++offset)
+            {
+                auto windowSum = 0.0f;
+                auto count = 0;
+
+                for (double frame = windowStart + offset; frame < windowEnd; frame += periodFrames)
+                {
+                    windowSum += sampleAround (envelope, frame);
+                    ++count;
+                }
+
+                if (const auto mean = count > 0 ? windowSum / static_cast<float> (count) : 0.0f;
+                    mean > bestMean)
+                {
+                    bestMean = mean;
+                    bestOffset = offset;
+                }
+            }
+
+            // The first window starts at zero, so its offset is the phase of the
+            // whole grid and is what the beat anchor is taken from.
+            if (hits.empty())
+                fit.offset = bestOffset;
+
+            for (double frame = windowStart + bestOffset; frame < windowEnd; frame += periodFrames)
+            {
+                const auto value = sampleAround (envelope, frame);
+                hits.push_back (value);
+                sum += value;
+            }
+        }
+
+        if (hits.empty())
+            return fit;
+
+        fit.mean = sum / static_cast<float> (hits.size());
+
+        // A quarter of the way up the sorted pulses: low enough that a
+        // breakdown or a dropped beat does not condemn a correct tempo, high
+        // enough that a train missing three pulses in four cannot hide.
+        const auto quarter = hits.size() / 4;
+        std::nth_element (hits.begin(), hits.begin() + static_cast<long> (quarter), hits.end());
+        fit.strength = hits[quarter];
+
+        return fit;
+    }
+
+    /** How likely a tempo is before anything has been listened to.
+
+        Autocorrelation cannot tell a tempo from half or twice it: a pulse train
+        at half the tempo lands on every second beat, and every one of those is
+        still a beat. Only a prior breaks that tie, so this is where the
+        assumption lives, in one line, rather than being spread through the
+        search. Centred on 130 and wide enough that 90 and 175 are both
+        comfortably reachable.
+    */
+    double tempoPrior (double bpm)
+    {
+        constexpr double centreBpm = 130.0;
+        constexpr double width = 0.7;   // octaves
+
+        const auto octaves = std::log2 (bpm / centreBpm) / width;
+        return std::exp (-0.5 * octaves * octaves);
+    }
+
+    /** The mean of an envelope, as the scale its pulse scores are measured in. */
+    float meanOf (const std::vector<float>& envelope)
+    {
+        if (envelope.empty())
+            return 0.0f;
+
+        return std::accumulate (envelope.begin(), envelope.end(), 0.0f)
+             / static_cast<float> (envelope.size());
+    }
+
     TempoEstimate estimateTempo (const std::vector<float>& envelope,
+                                 const std::vector<float>& lowEnvelope,
                                  double framesPerSecond,
                                  double minimumBpm,
                                  double maximumBpm)
@@ -167,9 +318,16 @@ namespace
         if (longestLag <= shortestLag)
             return {};
 
-        std::vector<float> correlation (static_cast<size_t> (longestLag + 1), 0.0f);
+        // Correlate well past the slowest tempo on offer, so that a candidate at
+        // the fast end still has its own multiples to be judged against. With
+        // the window stopping at the slowest tempo, a 128 BPM peak had neither
+        // of its harmonics in range while its impostors did.
+        const auto correlationLimit = juce::jmin (static_cast<int> (envelope.size() / 2),
+                                                  longestLag * 4);
 
-        for (int lag = shortestLag; lag <= longestLag; ++lag)
+        std::vector<float> correlation (static_cast<size_t> (correlationLimit + 1), 0.0f);
+
+        for (int lag = shortestLag; lag <= correlationLimit; ++lag)
         {
             float sum = 0.0f;
 
@@ -190,42 +348,132 @@ namespace
             {
                 const auto harmonic = lag * multiple;
 
-                if (harmonic <= longestLag)
+                if (harmonic <= correlationLimit)
                     scored[(size_t) lag] += correlation[(size_t) harmonic] * 0.5f;
             }
         }
 
-        const auto best = std::max_element (scored.begin() + shortestLag,
-                                            scored.begin() + longestLag + 1);
+        // Every lag that beats both its neighbours is worth considering, rather
+        // than only the single highest: the tallest peak is regularly a
+        // multiple or a fraction of the tempo a listener would tap.
+        std::vector<int> candidates;
 
-        if (best == scored.begin() + longestLag + 1 || *best <= 0.0f)
+        for (int lag = shortestLag + 1; lag < longestLag; ++lag)
+            if (scored[(size_t) lag] > scored[(size_t) lag - 1]
+                && scored[(size_t) lag] >= scored[(size_t) lag + 1]
+                && scored[(size_t) lag] > 0.0f)
+                candidates.push_back (lag);
+
+        if (candidates.empty())
             return {};
 
-        const auto bestLag = static_cast<int> (std::distance (scored.begin(), best));
+        std::sort (candidates.begin(), candidates.end(),
+                   [&scored] (int a, int b) { return scored[(size_t) a] > scored[(size_t) b]; });
 
-        // Refine the peak with a parabola through its neighbours, which recovers
-        // the fraction of a frame that integer lags throw away.
-        auto refinedLag = static_cast<double> (bestLag);
+        if (candidates.size() > 12)
+            candidates.resize (12);
 
-        if (bestLag > shortestLag && bestLag < longestLag)
+        // Each peak brings its metrical relatives along, so that the right
+        // answer is on the list even when it never showed up as a peak of its
+        // own. The thirds are what a triplet feel or a 4/3 error hides behind.
+        std::vector<int> toTest;
+
+        for (const auto lag : candidates)
         {
-            const auto left = scored[(size_t) bestLag - 1];
-            const auto centre = scored[(size_t) bestLag];
-            const auto right = scored[(size_t) bestLag + 1];
-            const auto denominator = left - 2.0f * centre + right;
+            for (const double ratio : { 0.5, 2.0 / 3.0, 0.75, 1.0, 4.0 / 3.0, 1.5, 2.0 })
+            {
+                const auto related = static_cast<int> (std::round (lag * ratio));
 
-            if (std::abs (denominator) > 1.0e-9f)
-                refinedLag += 0.5 * (left - right) / denominator;
+                if (related >= shortestLag && related <= longestLag)
+                    toTest.push_back (related);
+            }
         }
 
-        const auto mean = std::accumulate (scored.begin() + shortestLag,
-                                           scored.begin() + longestLag + 1, 0.0f)
-                        / static_cast<float> (longestLag - shortestLag + 1);
+        std::sort (toTest.begin(), toTest.end());
+        toTest.erase (std::unique (toTest.begin(), toTest.end()), toTest.end());
+
+        // A whole number of frames is too coarse to lay a grid with: at 128 BPM
+        // the beat is 80.75 frames, and rounding that to 81 walks ten frames off
+        // the beat over a single track. Interpolating the correlation peak
+        // recovers the fraction before anything is measured with it.
+        const auto refine = [&scored, shortestLag, longestLag] (int lag)
+        {
+            if (lag <= shortestLag || lag >= longestLag)
+                return static_cast<double> (lag);
+
+            const auto left = scored[(size_t) lag - 1];
+            const auto centre = scored[(size_t) lag];
+            const auto right = scored[(size_t) lag + 1];
+            const auto denominator = left - 2.0f * centre + right;
+
+            if (denominator >= -1.0e-9f)
+                return static_cast<double> (lag);
+
+            return lag + juce::jlimit (-0.5, 0.5, 0.5 * (double) (left - right) / denominator);
+        };
+
+        // How far a pulse train stands out from the envelope it is laid over.
+        // Dividing by the envelope's own mean makes the two bands comparable,
+        // so they can be added rather than arbitrated between.
+        const auto fullScale = meanOf (envelope);
+        const auto lowScale = meanOf (lowEnvelope);
+        const auto useLowBand = lowScale > 0.0f;
+
+        const auto scoreFor = [&] (double lag)
+        {
+            const auto bpm = 60.0 * framesPerSecond / lag;
+
+            auto contrast = fullScale > 0.0f ? fitPulseTrain (envelope, lag).strength / fullScale : 0.0f;
+
+            // The kick is what a dancer hears as the beat, so the low band gets
+            // the louder vote. Judged on the bass alone a track without any is
+            // lost, so the full spectrum still has a say.
+            if (useLowBand)
+                contrast = contrast + 2.0f * (fitPulseTrain (lowEnvelope, lag).strength / lowScale);
+
+            return contrast * tempoPrior (bpm);
+        };
+
+        auto refinedLag = 0.0;
+        auto bestScore = 0.0;
+
+        for (const auto lag : toTest)
+        {
+            const auto candidate = refine (lag);
+
+            if (const auto score = scoreFor (candidate); score > bestScore)
+            {
+                bestScore = score;
+                refinedLag = candidate;
+            }
+        }
+
+        if (refinedLag <= 0.0 || bestScore <= 0.0)
+            return {};
+
+        // Confidence is how far clear the winner finished of the nearest tempo
+        // that is not simply a rounding of it. A track with two equally good
+        // readings should say so rather than claiming certainty.
+        const auto winnerBpm = 60.0 * framesPerSecond / refinedLag;
+        auto runnerUp = 0.0;
+
+        for (const auto lag : toTest)
+        {
+            const auto candidate = refine (lag);
+            const auto bpm = 60.0 * framesPerSecond / candidate;
+
+            if (std::abs (bpm - winnerBpm) / winnerBpm < 0.03)
+                continue;
+
+            runnerUp = juce::jmax (runnerUp, scoreFor (candidate));
+        }
 
         TempoEstimate estimate;
         estimate.periodFrames = refinedLag;
-        estimate.bpm = 60.0 * framesPerSecond / refinedLag;
-        estimate.confidence = mean > 0.0f ? juce::jlimit (0.0f, 1.0f, (*best / mean - 1.0f) * 0.25f) : 0.0f;
+        estimate.bpm = winnerBpm;
+        estimate.confidence = runnerUp > 0.0
+            ? (float) juce::jlimit (0.0, 1.0, (1.0 - runnerUp / bestScore) * 2.5)
+            : 1.0f;
 
         return estimate;
     }
@@ -236,24 +484,7 @@ namespace
         if (periodFrames < 2.0 || envelope.empty())
             return 0.0;
 
-        const auto period = static_cast<int> (std::round (periodFrames));
-
-        int bestOffset = 0;
-        float bestScore = -1.0f;
-
-        for (int offset = 0; offset < period; ++offset)
-        {
-            float score = 0.0f;
-
-            for (double frame = offset; frame < static_cast<double> (envelope.size()); frame += periodFrames)
-                score += envelope[static_cast<size_t> (frame)];
-
-            if (score > bestScore)
-            {
-                bestScore = score;
-                bestOffset = offset;
-            }
-        }
+        const auto bestOffset = fitPulseTrain (envelope, periodFrames).offset;
 
         // A frame is timestamped by where its window starts, but the Hann window
         // weights the middle, so flux peaks about half a window before the onset
@@ -316,23 +547,61 @@ WaveformPeaks TrackAnalyser::buildPeaks (const juce::AudioBuffer<float>& audio, 
     return peaks;
 }
 
+namespace
+{
+    /** The waveforms and sample rate, which every analysis starts with.
+        Returns false when there is nothing to analyse. */
+    bool buildWaveforms (TrackAnalysis& analysis,
+                         const juce::AudioBuffer<float>& audio,
+                         double sampleRate,
+                         const TrackAnalyser::Options& options)
+    {
+        analysis.sampleRate = sampleRate;
+
+        const auto numSamples = audio.getNumSamples();
+
+        if (numSamples <= 0 || sampleRate <= 0.0)
+            return false;
+
+        const auto overviewBucket = juce::jmax (1, numSamples / juce::jmax (1, options.overviewBuckets));
+        const auto detailBucket = juce::jmax (1, static_cast<int> (sampleRate * options.detailBucketMs / 1000.0));
+
+        analysis.overview = TrackAnalyser::buildPeaks (audio, overviewBucket);
+        analysis.detail = TrackAnalyser::buildPeaks (audio, detailBucket);
+        return true;
+    }
+}
+
+std::shared_ptr<const TrackAnalysis> TrackAnalyser::withKnownTempo (const juce::AudioBuffer<float>& audio,
+                                                                    double sampleRate,
+                                                                    double bpm,
+                                                                    double firstBeatSeconds,
+                                                                    float confidence,
+                                                                    Options options)
+{
+    auto analysis = std::make_shared<TrackAnalysis>();
+
+    if (! buildWaveforms (*analysis, audio, sampleRate, options))
+        return analysis;
+
+    if (bpm > 0.0)
+    {
+        analysis->bpm = bpm;
+        analysis->firstBeatSeconds = juce::jmax (0.0, firstBeatSeconds);
+        analysis->confidence = juce::jlimit (0.0f, 1.0f, confidence);
+    }
+
+    return analysis;
+}
+
 std::shared_ptr<const TrackAnalysis> TrackAnalyser::analyse (const juce::AudioBuffer<float>& audio,
                                                              double sampleRate,
                                                              Options options)
 {
     auto analysis = std::make_shared<TrackAnalysis>();
-    analysis->sampleRate = sampleRate;
 
-    const auto numSamples = audio.getNumSamples();
-
-    if (numSamples <= 0 || sampleRate <= 0.0)
+    if (! buildWaveforms (*analysis, audio, sampleRate, options))
         return analysis;
-
-    const auto overviewBucket = juce::jmax (1, numSamples / juce::jmax (1, options.overviewBuckets));
-    const auto detailBucket = juce::jmax (1, static_cast<int> (sampleRate * options.detailBucketMs / 1000.0));
-
-    analysis->overview = buildPeaks (audio, overviewBucket);
-    analysis->detail = buildPeaks (audio, detailBucket);
 
     const auto envelopes = onsetEnvelopes (toMono (audio), sampleRate);
     const auto& envelope = envelopes.full;
@@ -341,7 +610,8 @@ std::shared_ptr<const TrackAnalysis> TrackAnalyser::analyse (const juce::AudioBu
         return analysis;
 
     const auto framesPerSecond = sampleRate / hopSize;
-    const auto tempo = estimateTempo (envelope, framesPerSecond, options.minimumBpm, options.maximumBpm);
+    const auto tempo = estimateTempo (envelope, envelopes.low, framesPerSecond,
+                                      options.minimumBpm, options.maximumBpm);
 
     if (tempo.bpm <= 0.0)
         return analysis;

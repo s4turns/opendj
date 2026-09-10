@@ -407,6 +407,9 @@ bool MidiControlSurface::feedbackStateFor (const MidiControl& control) const
         case Action::deckSync:
             return const_cast<AudioEngine&> (engine).getEffectiveBpm (deckIndex) > 0.0;
 
+        case Action::deckKeyLockToggle:
+            return deck.isKeyLockEnabled();
+
         case Action::hotCue:
             return deck.hasHotCue (control.slot);
 

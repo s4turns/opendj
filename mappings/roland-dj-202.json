@@ -1,7 +1,7 @@
 {
   "name": "Roland DJ-202",
   "author": "The OpenDJ contributors",
-  "description": "Two-deck mapping for the Roland DJ-202. Control assignments were taken from Roland's MIDI implementation chart and cross checked against the Mixxx community mapping by Silvio Ankermann, Sebastian Reusse and Rene Kraus (https://github.com/mixxxdj/mixxx/wiki/Roland-Dj-202), which is GPLv2 or later and so compatible with this project. Deck-toggle, effects, the TR-S sequencer and the pad modes beyond hot cue are recognised by the hardware but not yet mapped here.",
+  "description": "Two-deck mapping for the Roland DJ-202. Control assignments were taken from Roland's MIDI implementation chart and cross checked against the Mixxx community mapping by Silvio Ankermann, Sebastian Reusse and Rene Kraus (https://github.com/mixxxdj/mixxx/wiki/Roland-Dj-202), which is GPLv2 or later and so compatible with this project. The browse encoder scrolls the library and the load buttons put the selected track on a deck. Deck-toggle, effects, the TR-S sequencer and the pad modes beyond hot cue are recognised by the hardware but not yet mapped here.",
   "deviceNameHints": [
     "DJ-202",
     "DJ202"
@@ -46,6 +46,14 @@
       "action": "mixer.cue_toggle",
       "deck": 0,
       "feedbackNumber": "0x1B"
+    },
+    {
+      "name": "Deck A key lock",
+      "status": "0x90",
+      "number": "0x0D",
+      "action": "deck.keylock_toggle",
+      "deck": 0,
+      "feedbackNumber": "0x0D"
     },
     {
       "name": "Deck A platter",
@@ -151,6 +159,14 @@
       "action": "mixer.cue_toggle",
       "deck": 1,
       "feedbackNumber": "0x1B"
+    },
+    {
+      "name": "Deck B key lock",
+      "status": "0x91",
+      "number": "0x0D",
+      "action": "deck.keylock_toggle",
+      "deck": 1,
+      "feedbackNumber": "0x0D"
     },
     {
       "name": "Deck B platter",
@@ -495,6 +511,13 @@
       "status": "0x9F",
       "number": "0x00",
       "action": "modifier.shift"
+    },
+    {
+      "name": "Browse",
+      "status": "0xBF",
+      "number": "0x00",
+      "action": "browse.scroll",
+      "mode": "relative_twos"
     },
     {
       "name": "Load to deck A",

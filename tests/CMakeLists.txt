@@ -18,24 +18,25 @@ target_sources(opendj-tests PRIVATE
     TrackAnalyser_test.cpp
     MidiMapping_test.cpp
     AngleMath_test.cpp
-    ${CMAKE_SOURCE_DIR}/src/core/Mixer.cpp
-    ${CMAKE_SOURCE_DIR}/src/core/Deck.cpp
-    ${CMAKE_SOURCE_DIR}/src/analysis/TrackAnalysis.cpp
-    ${CMAKE_SOURCE_DIR}/src/analysis/TrackAnalyser.cpp
-    ${CMAKE_SOURCE_DIR}/src/control/Action.cpp
-    ${CMAKE_SOURCE_DIR}/src/control/MidiMapping.cpp)
+    Library_test.cpp
+    TagReader_test.cpp
+    ${OPENDJ_ENGINE_SOURCES})
 
 target_include_directories(opendj-tests PRIVATE ${CMAKE_SOURCE_DIR}/src)
 
 target_compile_definitions(opendj-tests PRIVATE
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0
+    JUCE_USE_MP3AUDIOFORMAT=1
     JUCE_STANDALONE_APPLICATION=1)
 
 target_link_libraries(opendj-tests PRIVATE
     Catch2::Catch2WithMain
+    juce::juce_audio_devices
     juce::juce_audio_formats
     juce::juce_dsp
+    opendj_rubberband
+    opendj_sqlite3
     PUBLIC
     juce::juce_recommended_config_flags
     juce::juce_recommended_warning_flags)

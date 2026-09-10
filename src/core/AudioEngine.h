@@ -8,6 +8,7 @@
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <juce_audio_formats/juce_audio_formats.h>
 
+#include "analysis/AnalysisCache.h"
 #include "core/Deck.h"
 #include "core/Mixer.h"
 
@@ -51,6 +52,14 @@ public:
     void loadTrackAsync (int deckIndex, const juce::File& file,
                          std::function<void (bool)> onComplete = {});
 
+    /** Somewhere to ask whether a file was analysed before, and to report the
+        result when it was not. Optional; without one every load runs the full
+        analysis. The cache must outlive the engine or be cleared with null. */
+    void setAnalysisCache (AnalysisCache* cache) noexcept
+    {
+        analysisCache.store (cache, std::memory_order_release);
+    }
+
     /** Matches one deck's tempo and beat phase to the other. Returns false when
         either deck has no usable beat grid, which is the honest answer for
         material the analyser could not read. */
@@ -91,6 +100,7 @@ private:
 
     juce::ThreadPool loaderPool { juce::ThreadPoolOptions{}.withNumberOfThreads (numDecks) };
     std::array<std::atomic<bool>, numDecks> loading {};
+    std::atomic<AnalysisCache*> analysisCache { nullptr };
 
     std::array<juce::AudioBuffer<float>, numDecks> deckBuffers;
     juce::AudioBuffer<float> masterBuffer;

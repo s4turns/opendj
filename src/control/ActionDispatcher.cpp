@@ -82,6 +82,17 @@ void ActionDispatcher::dispatch (const ActionMessage& message)
                     engine.loadTrackAsync (deckIndex, file);
             break;
 
+        case Action::deckKeyLockToggle:
+            if (pressed)
+                deck.toggleKeyLock();
+            break;
+
+        case Action::browseScroll:
+            if (browseScrollHandler != nullptr)
+                browseScrollHandler (juce::roundToInt (message.value));
+            notify = false;   // the browser redraws itself
+            break;
+
         case Action::deckTempo:
         {
             // A fader at the top is faster, so the normalised value is inverted

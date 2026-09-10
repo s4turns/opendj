@@ -7,8 +7,8 @@ the same deck layout, the same workflow, the same muscle memory. The artwork, th
 and the code are entirely original and entirely open.
 
 **Status: early development, but it mixes.** Two decks with turntable platters you can scratch,
-waveforms, beat grids, automatic BPM detection and sync, a working mixer, hot cues, and Roland
-DJ-202 support. No track browser, key lock, effects or sampler yet.
+waveforms, beat grids, automatic BPM detection and sync, key lock, a working mixer, hot cues, a
+searchable track library, and Roland DJ-202 support. No effects or sampler yet.
 
 ## Design goals
 
@@ -21,13 +21,14 @@ DJ-202 support. No track browser, key lock, effects or sampler yet.
 ## Roadmap
 
 See [ROADMAP.md](ROADMAP.md) for what is done, what is left, and where to start. The short
-version: the decks, platters, mixer, waveforms, beat grids, sync, hot cues and controller
-support all work. Key lock and the track browser are the two gaps in the first milestone.
+version: everything in the first milestone now works. Effects, loops, a sampler and four decks
+are the next things worth having.
 
 ## Using it
 
-Load a track with the Load button on either deck, drag an audio file onto a deck, or name
-files on the command line to start with them already loaded. Decoding
+Load a track from the library underneath, with the Load button on either deck, by dragging an
+audio file in from a file manager, or by naming files on the command line to start with them
+already loaded. Decoding
 and analysis run in the background, so the interface stays responsive on a long file. Click the
 overview waveform to move through the track.
 
@@ -41,6 +42,11 @@ as if you had a hand on the record, and drag the outer ring to nudge the pitch w
 playback. The rim flashes on every beat, which is a second way to see two decks drifting apart
 without reading the waveforms.
 
+Key lock is the `Key` button on each deck. With it on, the tempo fader changes the speed and
+leaves the pitch where the record put it; it steps out of the way while you have a hand on the
+platter, because a time stretcher cannot follow a scratch and nobody expects a scratch to be in
+key.
+
 | Key | Action |
 | --- | --- |
 | Q / W | Deck A cue / play |
@@ -49,6 +55,24 @@ without reading the waveforms.
 Cue follows the behaviour DJs expect. While the deck is stopped, pressing cue sets the cue
 point and previews from it, and releasing returns and stops. While it is playing, pressing
 cue drops straight back to the cue point and stops there.
+
+## The library
+
+Point OpenDJ at a folder with **Add folder** and it reads the tags of everything inside, which
+takes seconds rather than minutes because it parses ID3 directly instead of opening a decoder
+for every file. It then works through the collection in the background, at low priority, finding
+the tempo and beat grid of each track and remembering it, so a track you load later is on the
+deck immediately instead of being analysed again.
+
+Search matches every word you type against the artist, title, album and path, so `boys noize
+2007` narrows as you would expect. Click a column to sort, double-click a row to load it onto a
+deck that is not playing, or drag it onto the deck you meant.
+
+The database is a single SQLite file, in `~/.config/OpenDJ` on Linux. Deleting it costs you the
+analysis and nothing else.
+
+Tempo detection was checked against 60 tracks from a 13,000 track techno collection, and agrees
+with Mixxx on 57 of them; [ROADMAP.md](ROADMAP.md) has the detail and the method.
 
 ## Controllers
 
@@ -85,7 +109,7 @@ On **Fedora** the dependencies are:
 ```
 sudo dnf install -y \
     gcc-c++ cmake ninja-build git pkgconf-pkg-config \
-    alsa-lib-devel pipewire-jack-audio-connection-kit-devel \
+    alsa-lib-devel pipewire-jack-audio-connection-kit-devel sqlite-devel \
     freetype-devel fontconfig-devel \
     libX11-devel libXext-devel libXinerama-devel \
     libXrandr-devel libXcursor-devel libXcomposite-devel \
@@ -140,8 +164,8 @@ ctest --test-dir build --output-on-failure
 The DJ-202 is a two-deck controller with a built-in four-channel USB audio interface, which
 maps directly onto OpenDJ's master-on-1-2 and cue-on-3-4 routing.
 
-Mapped so far: play, cue, sync, headphone cue, the tempo faders, trim, all three EQ bands, the
-channel faders, the crossfader, load, shift, the platters in both scratch and nudge modes, and
+Mapped so far: play, cue, sync, key lock, headphone cue, the tempo faders, trim, all three EQ
+bands, the channel faders, the crossfader, browse, load, shift, the platters in both scratch and nudge modes, and
 the eight pads per deck as hot cues. Shift plus a pad clears that hot cue. Touching the metal
 top of a platter halts playback and drives it from your hand at 33 1/3 rpm; moving the outer
 ring instead nudges the pitch and decays back to the fader.

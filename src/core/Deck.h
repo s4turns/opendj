@@ -8,12 +8,15 @@
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <juce_audio_basics/juce_audio_basics.h>
 
+#include "analysis/AnalysisCache.h"
 #include "analysis/TrackAnalysis.h"
 
 #include <array>
 #include <atomic>
 #include <memory>
 #include <vector>
+
+namespace RubberBand { class RubberBandStretcher; }
 
 namespace opendj
 {
@@ -44,8 +47,9 @@ public:
     //==========================================================================
 
     /** Decodes a file and swaps it in. Returns false if it could not be read,
-        leaving whatever was loaded before untouched. */
-    bool loadFile (const juce::File& file);
+        leaving whatever was loaded before untouched. Pass what the library
+        already knows to skip the tempo pass and use the tagged title. */
+    bool loadFile (const juce::File& file, const KnownTrack* known = nullptr);
 
     void unload();
 
@@ -79,10 +83,17 @@ public:
     void seekToSeconds (double seconds);
     void seekToFraction (double proportion);
 
-    /** 1.0 plays at the recorded speed. Pitch follows tempo for now; key lock
-        arrives with the time stretcher. */
+    /** 1.0 plays at the recorded speed. Pitch follows tempo unless key lock is on. */
     void setTempoRatio (double ratio);
     double getTempoRatio() const noexcept { return tempoRatio.load (std::memory_order_relaxed); }
+
+    /** With key lock on, a tempo change goes through a time stretcher and the
+        pitch stays where the record put it. It is bypassed while a hand is on
+        the platter: a stretcher cannot follow a scratch, and nobody expects a
+        scratch to be in key. */
+    void setKeyLock (bool shouldLock);
+    void toggleKeyLock();
+    bool isKeyLockEnabled() const noexcept { return keyLock.load (std::memory_order_relaxed); }
 
     void setTrim (float linearGain);
     float getTrim() const noexcept { return trimGain.load (std::memory_order_relaxed); }
@@ -183,6 +194,20 @@ private:
     std::atomic<double> jogTicks { 0.0 };
     std::atomic<int> jogTicksPerRevolution { 512 };
     double pitchBend = 0.0;                                // audio thread only
+
+    // Key lock. The stretcher is built in prepare(), so the audio thread only
+    // ever uses it and never allocates it. It is fed from feedPosition, which
+    // runs ahead of the audible readPosition by the stretcher's own delay.
+    std::atomic<bool> keyLock { false };
+    std::unique_ptr<RubberBand::RubberBandStretcher> stretcher;
+    juce::AudioBuffer<float> stretchInput;                 // one chunk fed to the stretcher
+    juce::AudioBuffer<float> stretchDiscard;               // where its warm-up output goes
+    double feedPosition = 0.0;                             // audio thread, in file samples
+    bool stretchPrimed = false;                            // audio thread only
+
+    void renderStretched (const Track& track, juce::AudioBuffer<float>& destination,
+                          double rate, double fileToDevice);
+    void feedStretcher (const Track& track, double fileToDevice);
 
     double readPosition = 0.0;                          // audio thread, in file samples
     double deviceSampleRate = 44100.0;

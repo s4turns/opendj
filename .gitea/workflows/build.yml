@@ -16,7 +16,7 @@ jobs:
         run: >
           dnf install -y
           gcc-c++ cmake ninja-build git pkgconf-pkg-config
-          alsa-lib-devel pipewire-jack-audio-connection-kit-devel
+          alsa-lib-devel pipewire-jack-audio-connection-kit-devel sqlite-devel
           freetype-devel fontconfig-devel
           libX11-devel libXext-devel libXinerama-devel
           libXrandr-devel libXcursor-devel libXcomposite-devel
@@ -40,7 +40,7 @@ jobs:
         run: >
           sudo apt-get update && sudo apt-get install -y --no-install-recommends
           build-essential cmake ninja-build git pkg-config
-          libasound2-dev libjack-jackd2-dev
+          libasound2-dev libjack-jackd2-dev libsqlite3-dev
           libfreetype-dev libfontconfig1-dev
           libx11-dev libxext-dev libxinerama-dev
           libxrandr-dev libxcursor-dev libxcomposite-dev

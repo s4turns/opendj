@@ -16,6 +16,9 @@
 #include "control/ActionDispatcher.h"
 #include "control/MidiControlSurface.h"
 #include "core/AudioEngine.h"
+#include "library/Library.h"
+#include "library/LibraryScanner.h"
+#include "ui/BrowserComponent.h"
 #include "ui/DeckComponent.h"
 #include "ui/MixerComponent.h"
 
@@ -25,14 +28,15 @@
 namespace opendj
 {
 
-/** The application shell: two decks either side of the mixer, a status bar, and
-    buttons for the audio and controller setup.
+/** The application shell: two decks either side of the mixer, the browser
+    underneath, a status bar, and buttons for the audio and controller setup.
 
     Keyboard control is wired here rather than inside the deck views, because it
     is one of several inputs into the action dispatcher and they should all meet
     in the same place.
 */
 class MainComponent final : public juce::Component,
+                            public juce::DragAndDropContainer,
                             private juce::Timer,
                             private juce::KeyListener,
                             private juce::FileDragAndDropTarget
@@ -58,14 +62,34 @@ private:
 
     void showAudioSettings();
     void showMidiSettings();
+    void loadOntoDeck (const juce::File& file, int deckIndex);
     juce::File findMappingsFolder() const;
+
+    // Declared before the engine so they outlive it: its loader threads use
+    // the library as their analysis cache right up until they are joined.
+    Library library;
+    LibraryScanner scanner { library };
+    juce::String libraryError;
 
     AudioEngine engine;
     ActionDispatcher dispatcher { engine };
     MidiControlSurface midi { engine, dispatcher };
 
+    /** The decks and mixer as one component, so the shell can split the window
+        between them and the browser with a draggable bar. */
+    struct DeckRow final : public juce::Component
+    {
+        std::function<void (juce::Rectangle<int>)> onResized;
+        void resized() override { if (onResized != nullptr) onResized (getLocalBounds()); }
+    };
+
+    DeckRow deckRow;
     std::array<std::unique_ptr<DeckComponent>, AudioEngine::numDecks> deckViews;
     std::unique_ptr<MixerComponent> mixerView;
+    std::unique_ptr<BrowserComponent> browser;
+
+    juce::StretchableLayoutManager verticalLayout;
+    std::unique_ptr<juce::StretchableLayoutResizerBar> resizerBar;
 
     juce::TextButton audioSettingsButton { "Audio setup" };
     juce::TextButton midiSettingsButton { "Controller" };

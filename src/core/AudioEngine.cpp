@@ -60,7 +60,18 @@ void AudioEngine::loadTrackAsync (int deckIndex, const juce::File& file,
 
     loaderPool.addJob ([this, deckIndex, file, onComplete = std::move (onComplete)]
     {
-        const auto succeeded = decks[(size_t) deckIndex]->loadFile (file);
+        auto& deck = *decks[(size_t) deckIndex];
+        auto* cache = analysisCache.load (std::memory_order_acquire);
+
+        const auto known = cache != nullptr ? cache->lookup (file) : std::nullopt;
+        const auto succeeded = deck.loadFile (file, known.has_value() ? &*known : nullptr);
+
+        // Only what was worked out here goes back; a cached answer is not
+        // written over itself.
+        if (succeeded && cache != nullptr && ! (known.has_value() && known->analysed))
+            if (const auto analysis = deck.getAnalysis(); analysis != nullptr)
+                cache->store (file, *analysis, deck.getLengthSeconds());
+
         loading[(size_t) deckIndex].store (false, std::memory_order_relaxed);
 
         if (onComplete != nullptr)

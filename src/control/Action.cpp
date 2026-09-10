@@ -16,7 +16,7 @@ namespace
 
     // One table, read in both directions, so a name can never disagree with
     // itself between the parser and the writer.
-    constexpr std::array<Entry, 22> actionNames
+    constexpr std::array<Entry, 24> actionNames
     {{
         { Action::deckPlayToggle,   "deck.play_toggle" },
         { Action::deckPlay,         "deck.play" },
@@ -24,6 +24,7 @@ namespace
         { Action::deckCue,          "deck.cue" },
         { Action::deckSync,         "deck.sync" },
         { Action::deckLoadSelected, "deck.load" },
+        { Action::deckKeyLockToggle, "deck.keylock_toggle" },
         { Action::deckTempo,        "deck.tempo" },
         { Action::deckTrim,         "deck.trim" },
         { Action::deckSeek,         "deck.seek" },
@@ -39,6 +40,7 @@ namespace
         { Action::masterGain,       "mixer.master" },
         { Action::cueGain,          "mixer.phones" },
         { Action::cueMix,           "mixer.cue_mix" },
+        { Action::browseScroll,     "browse.scroll" },
         { Action::shift,            "modifier.shift" }
     }};
 }
@@ -75,6 +77,7 @@ bool isContinuous (Action action)
         case Action::masterGain:
         case Action::cueGain:
         case Action::cueMix:
+        case Action::browseScroll:
             return true;
 
         default:
