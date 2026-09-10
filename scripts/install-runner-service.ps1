@@ -136,11 +136,33 @@ if (Get-Service -Name $ServiceName -ErrorAction SilentlyContinue) {
 }
 
 $logDir = Join-Path $InstallDir 'logs'
-New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+$workDir = Join-Path $InstallDir 'work'
+New-Item -ItemType Directory -Force -Path $logDir, $workDir | Out-Null
+
+# ---------------------------------------------------------------------------
+# Keep the job workspace out of the LocalSystem profile
+#
+# A service running as LocalSystem has its home under C:\Windows\System32, and
+# that is where the runner would put each job by default. Visual Studio ships a
+# 32-bit CMake, and a 32-bit process reading a path under System32 is silently
+# redirected by WOW64 to SysWOW64, where the checkout is not. CMake then reports
+# that the source directory does not exist, seconds into a job whose checkout
+# plainly succeeded. Putting the workspace beside the runner avoids the whole
+# mechanism, and keeps paths short into the bargain.
+# ---------------------------------------------------------------------------
+$configPath = Join-Path $InstallDir 'config.yaml'
+@"
+log:
+  level: info
+runner:
+  capacity: 1
+host:
+  workdir_parent: $($workDir -replace '\\', '/')
+"@ | Set-Content -Path $configPath -Encoding UTF8
 
 $settings = @(
     @('Application',        $exePath),
-    @('AppParameters',      'daemon'),
+    @('AppParameters',      "daemon --config `"$configPath`""),
     @('AppDirectory',       $InstallDir),
     @('DisplayName',        'Gitea Actions runner'),
     @('Description',        'Runs Gitea Actions jobs for OpenDJ'),

@@ -169,7 +169,10 @@ If a Windows job fails or sits unclaimed, check the machine before reading the l
 | --- | --- |
 | Is the service running? | `Get-Service GiteaRunner` |
 | Start or restart it | `Restart-Service GiteaRunner` |
-| What did it say? | `Get-Content C:\gitea-runner\logs\runner.log -Tail 40` |
+| What did it say? | `Get-Content C:\gitea-runner\logs\runner.err.log -Tail 40` |
+
+The runner writes its ordinary progress to stderr, so `runner.err.log` is the interesting file
+and `runner.log` stays empty. An empty `runner.log` is not a sign that anything is wrong.
 
 A last result of `0xC000013A` means it was killed by the session ending rather than crashing.
 
