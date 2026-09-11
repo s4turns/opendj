@@ -1,7 +1,7 @@
 {
   "name": "Roland DJ-202",
   "author": "The OpenDJ contributors",
-  "description": "Two-deck mapping for the Roland DJ-202. Control assignments were taken from Roland's MIDI implementation chart and cross checked against the Mixxx community mapping by Silvio Ankermann, Sebastian Reusse and Rene Kraus (https://github.com/mixxxdj/mixxx/wiki/Roland-Dj-202), which is GPLv2 or later and so compatible with this project. The DJ-202 powers up in a standalone mode in which it sends nothing at all; initMessages asks it to talk to a computer, and keepAlive holds it there, since it falls back after about a second and a half without one. The platters report relative ticks on CC 0x06, centred on 64. They also stream 14-bit absolute position as pitch bend on 0xE0/0xE1, but that flows whenever a hand merely rests on the wheel, so it is deliberately left unmapped. Pressing DECK moves a side onto MIDI channels 3 and 4; those are routed back to the same decks, so a stray press cannot leave one dead. The browse encoder scrolls the library and the load buttons put the selected track on a deck. Deck-toggle, effects, the TR-S sequencer and the pad modes beyond hot cue are recognised by the hardware but not yet mapped here.",
+  "description": "Two-deck mapping for the Roland DJ-202. Control assignments were taken from Roland's MIDI implementation chart and cross checked against the Mixxx community mapping by Silvio Ankermann, Sebastian Reusse and Rene Kraus (https://github.com/mixxxdj/mixxx/wiki/Roland-Dj-202), which is GPLv2 or later and so compatible with this project. The DJ-202 powers up in a standalone mode in which it sends nothing at all; initMessages asks it to talk to a computer, and keepAlive holds it there, since it falls back after about a second and a half without one. The platters report relative ticks on CC 0x06, centred on 64. They also stream 14-bit absolute position as pitch bend on 0xE0/0xE1, but that flows whenever a hand merely rests on the wheel, so it is deliberately left unmapped. Pressing DECK moves a side onto MIDI channels 3 and 4; those are routed back to the same decks, so a stray press cannot leave one dead. LOOP IN and LOOP OUT set a loop by hand, and the parameter buttons beside them halve and double it. The browse encoder scrolls the library and the load buttons put the selected track on a deck. Deck-toggle, effects, the TR-S sequencer and the pad modes beyond hot cue are recognised by the hardware but not yet mapped here.",
   "deviceNameHints": [
     "DJ-202",
     "DJ202"
@@ -1047,6 +1047,122 @@
       "status": "0xB3",
       "number": "0x1A",
       "action": "mixer.filter",
+      "deck": 1
+    },
+    {
+      "name": "Deck A loop in",
+      "status": "0x94",
+      "number": "0x15",
+      "action": "loop.in",
+      "deck": 0,
+      "feedbackNumber": "0x15"
+    },
+    {
+      "name": "Deck A loop in (deck toggled)",
+      "status": "0x96",
+      "number": "0x15",
+      "action": "loop.in",
+      "deck": 0
+    },
+    {
+      "name": "Deck A loop out",
+      "status": "0x94",
+      "number": "0x16",
+      "action": "loop.out",
+      "deck": 0,
+      "feedbackNumber": "0x16"
+    },
+    {
+      "name": "Deck A loop out (deck toggled)",
+      "status": "0x96",
+      "number": "0x16",
+      "action": "loop.out",
+      "deck": 0
+    },
+    {
+      "name": "Deck A loop halve (parameter -)",
+      "status": "0x94",
+      "number": "0x45",
+      "action": "loop.halve",
+      "deck": 0
+    },
+    {
+      "name": "Deck A loop halve (parameter -) (deck toggled)",
+      "status": "0x96",
+      "number": "0x45",
+      "action": "loop.halve",
+      "deck": 0
+    },
+    {
+      "name": "Deck A loop double (parameter +)",
+      "status": "0x94",
+      "number": "0x46",
+      "action": "loop.double",
+      "deck": 0
+    },
+    {
+      "name": "Deck A loop double (parameter +) (deck toggled)",
+      "status": "0x96",
+      "number": "0x46",
+      "action": "loop.double",
+      "deck": 0
+    },
+    {
+      "name": "Deck B loop in",
+      "status": "0x95",
+      "number": "0x15",
+      "action": "loop.in",
+      "deck": 1,
+      "feedbackNumber": "0x15"
+    },
+    {
+      "name": "Deck B loop in (deck toggled)",
+      "status": "0x97",
+      "number": "0x15",
+      "action": "loop.in",
+      "deck": 1
+    },
+    {
+      "name": "Deck B loop out",
+      "status": "0x95",
+      "number": "0x16",
+      "action": "loop.out",
+      "deck": 1,
+      "feedbackNumber": "0x16"
+    },
+    {
+      "name": "Deck B loop out (deck toggled)",
+      "status": "0x97",
+      "number": "0x16",
+      "action": "loop.out",
+      "deck": 1
+    },
+    {
+      "name": "Deck B loop halve (parameter -)",
+      "status": "0x95",
+      "number": "0x45",
+      "action": "loop.halve",
+      "deck": 1
+    },
+    {
+      "name": "Deck B loop halve (parameter -) (deck toggled)",
+      "status": "0x97",
+      "number": "0x45",
+      "action": "loop.halve",
+      "deck": 1
+    },
+    {
+      "name": "Deck B loop double (parameter +)",
+      "status": "0x95",
+      "number": "0x46",
+      "action": "loop.double",
+      "deck": 1
+    },
+    {
+      "name": "Deck B loop double (parameter +) (deck toggled)",
+      "status": "0x97",
+      "number": "0x46",
+      "action": "loop.double",
       "deck": 1
     }
   ]

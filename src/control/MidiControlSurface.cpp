@@ -617,6 +617,13 @@ bool MidiControlSurface::feedbackStateFor (const MidiControl& control) const
         case Action::deckKeyLockToggle:
             return deck.isKeyLockEnabled();
 
+        case Action::loopIn:
+        case Action::loopOut:
+        case Action::loopToggle:
+            // Both ends of the loop section light while a loop is running, so
+            // the state is visible without looking at the screen.
+            return deck.isLoopEnabled();
+
         case Action::hotCue:
             return deck.hasHotCue (control.slot);
 

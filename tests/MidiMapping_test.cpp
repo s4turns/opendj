@@ -377,3 +377,44 @@ TEST_CASE ("the shipped DJ-202 mapping covers the platters and the toggled decks
         }
     }
 }
+
+TEST_CASE ("the shipped DJ-202 mapping reaches the loop section", "[midi][mapping][dj202]")
+{
+    const auto file = findShippedMapping();
+
+    if (! file.existsAsFile())
+        SUCCEED ("mapping file not found beside the test binary");
+    else
+    {
+        opendj::MidiMapping mapping;
+        juce::StringArray warnings;
+        REQUIRE (opendj::MidiMapping::loadFromFile (file, mapping, warnings).wasOk());
+        INFO (warnings.joinIntoString ("; "));
+        REQUIRE (warnings.isEmpty());
+
+        struct Expected { int status, number; opendj::Action action; };
+
+        // The pads are on 0x94 and 0x95, and the loop section sits with them.
+        const Expected expected[]
+        {
+            { 0x94, 0x15, opendj::Action::loopIn },
+            { 0x94, 0x16, opendj::Action::loopOut },
+            { 0x94, 0x45, opendj::Action::loopHalve },
+            { 0x94, 0x46, opendj::Action::loopDouble },
+            { 0x95, 0x15, opendj::Action::loopIn },
+            { 0x95, 0x16, opendj::Action::loopOut },
+        };
+
+        for (const auto& e : expected)
+        {
+            INFO (juce::String::toHexString (e.status) << " " << juce::String::toHexString (e.number));
+            const auto* control = mapping.findControl (e.status, e.number, false);
+            REQUIRE (control != nullptr);
+            REQUIRE (control->action == e.action);
+        }
+
+        // And a stray press of DECK must not take the loop section away either.
+        REQUIRE (mapping.findControl (0x96, 0x15, false) != nullptr);
+        REQUIRE (mapping.findControl (0x97, 0x16, false) != nullptr);
+    }
+}
