@@ -36,6 +36,7 @@ private:
         juce::Slider filter;                 // centred: low pass down, high pass up
         juce::Slider echo;                   // off at the bottom
         juce::ComboBox echoBeats;            // how long one repeat lasts
+        juce::Slider reverb;                 // off at the bottom
         juce::Slider fader;
         juce::TextButton cue { "Cue" };
     };

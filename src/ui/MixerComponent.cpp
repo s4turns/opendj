@@ -80,6 +80,16 @@ MixerComponent::MixerComponent (AudioEngine& engineToUse, Mixer& mixerToControl)
         };
         addAndMakeVisible (strip.echoBeats);
 
+        configureKnob (strip.reverb);
+        strip.reverb.setValue (0.0, juce::dontSendNotification);
+        strip.reverb.setDoubleClickReturnValue (true, 0.0);
+        strip.reverb.setTooltip ("Reverb: off at the bottom");
+        strip.reverb.onValueChange = [this, channel, &strip]
+        {
+            mixer.setChannelReverb (channel, static_cast<float> (strip.reverb.getValue()));
+        };
+        addAndMakeVisible (strip.reverb);
+
         strip.fader.setSliderStyle (juce::Slider::LinearVertical);
         strip.fader.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
         strip.fader.setRange (0.0, 1.0, 0.0);
@@ -197,6 +207,7 @@ void MixerComponent::refresh()
 
         follow (strip.filter, mixer.getChannelFilter (channel));
         follow (strip.echo, mixer.getChannelEcho (channel));
+        follow (strip.reverb, mixer.getChannelReverb (channel));
 
         strip.cue.setToggleState (mixer.isChannelCued (channel), juce::dontSendNotification);
     }
@@ -247,6 +258,7 @@ void MixerComponent::layOutStrip (Strip& strip, juce::Rectangle<int> area)
     strip.filter.setBounds (area.removeFromTop (44).reduced (4, 2));
     strip.echo.setBounds (area.removeFromTop (44).reduced (4, 2));
     strip.echoBeats.setBounds (area.removeFromTop (20).reduced (4, 1));
+    strip.reverb.setBounds (area.removeFromTop (44).reduced (4, 2));
 
     strip.cue.setBounds (area.removeFromBottom (24).reduced (4, 2));
     strip.fader.setBounds (area.reduced (10, 6));

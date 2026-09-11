@@ -61,6 +61,12 @@ public:
         by the engine, since the mixer has no idea what tempo anything is. */
     void setChannelEchoTime (int channel, double seconds);
     double getChannelEchoTime (int channel) const noexcept;
+
+    /** A reverb per channel, on one knob. Silent at zero, and the tail that is
+        already ringing when it is turned down is allowed to finish rather than
+        being cut off. */
+    void setChannelReverb (int channel, float amount);
+    float getChannelReverb (int channel) const noexcept;
     void toggleChannelCue (int channel);
     bool isChannelCued (int channel) const;
 
@@ -125,6 +131,16 @@ private:
 
         std::atomic<float> echoAmount { 0.0f };
         std::atomic<double> echoSeconds { 0.5 };
+
+        // Reverb runs on a block rather than a sample at a time, which is why
+        // the channel is built into a buffer first and mixed down afterwards.
+        // It is fed at full wet into its own buffer and mixed in per sample
+        // with a smoothed gain, so the knob cannot click and a tail already
+        // ringing is never cut off.
+        juce::Reverb reverb;
+        juce::AudioBuffer<float> shapedBuffer, reverbBuffer;
+        juce::SmoothedValue<float> reverbWet;
+        std::atomic<float> reverbAmount { 0.0f };
 
         std::array<juce::SmoothedValue<float>, 3> bandGain;
         juce::SmoothedValue<float> faderGain;

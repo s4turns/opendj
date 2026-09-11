@@ -500,3 +500,182 @@ TEST_CASE ("the echo on one channel leaves the other alone", "[mixer][echo]")
         REQUIRE (master.getMagnitude (0, 0, blockSize) < 0.001f);
     }
 }
+
+//==============================================================================
+// Reverb
+//==============================================================================
+
+namespace
+{
+    /** A click through one channel with the reverb at `amount`, returning the
+        master output so the tail can be measured rather than assumed. */
+    std::vector<float> reverbImpulseResponse (float amount, int blocks)
+    {
+        opendj::Mixer mixer;
+        juce::AudioBuffer<float> deckA (2, blockSize), deckB (2, blockSize);
+        juce::AudioBuffer<float> master (2, blockSize), cue (2, blockSize);
+
+        mixer.prepare (sampleRate, blockSize);
+        mixer.setMasterGain (1.0f);
+        mixer.setChannelFader (0, 1.0f);
+        mixer.setCrossfaderCurve (opendj::Mixer::CrossfaderCurve::linear);
+        mixer.setCrossfaderPosition (-1.0f);
+        mixer.setChannelReverb (0, amount);
+
+        for (int b = 0; b <= blocksToSettle; ++b)
+        {
+            deckA.clear();
+            deckB.clear();
+            std::array<juce::AudioBuffer<float>*, 2> decks { &deckA, &deckB };
+            mixer.processBlock (decks, master, cue);
+        }
+
+        std::vector<float> out;
+
+        for (int b = 0; b < blocks; ++b)
+        {
+            deckA.clear();
+            deckB.clear();
+
+            if (b == 0)
+                for (int ch = 0; ch < 2; ++ch)
+                    deckA.setSample (ch, 0, 0.5f);
+
+            std::array<juce::AudioBuffer<float>*, 2> decks { &deckA, &deckB };
+            mixer.processBlock (decks, master, cue);
+
+            for (int i = 0; i < blockSize; ++i)
+                out.push_back (master.getSample (0, i));
+        }
+
+        return out;
+    }
+}
+
+TEST_CASE ("the reverb is silent until it is turned up", "[mixer][reverb]")
+{
+    const auto dry = reverbImpulseResponse (0.0f, 60);
+
+    // The click arrives and nothing rings on after it.
+    REQUIRE (peakNear (dry, 0, 300) > 0.01f);
+
+    auto tail = 0.0f;
+
+    for (size_t i = dry.size() / 4; i < dry.size(); ++i)
+        tail = juce::jmax (tail, std::abs (dry[i]));
+
+    INFO ("tail with the knob at zero: " << tail);
+    REQUIRE (tail < 0.0005f);
+}
+
+TEST_CASE ("the reverb rings on after the sound stops", "[mixer][reverb]")
+{
+    const auto wet = reverbImpulseResponse (1.0f, 60);
+
+    // A quarter of a second later there is still something there, which is the
+    // whole point, and it is not simply the click smeared: it is later than any
+    // filter delay could account for.
+    const auto quarterSecond = (int) (sampleRate * 0.25);
+    const auto ringing = peakNear (wet, quarterSecond, 2000);
+
+    INFO ("level a quarter of a second after the click: " << ringing);
+    REQUIRE (ringing > 0.0005f);
+}
+
+TEST_CASE ("the reverb decays rather than sustaining", "[mixer][reverb]")
+{
+    const auto wet = reverbImpulseResponse (1.0f, 400);        // about four seconds
+
+    const auto early = peakNear (wet, (int) (sampleRate * 0.2), 4000);
+    const auto late  = peakNear (wet, (int) (sampleRate * 3.5), 4000);
+
+    INFO ("early " << early << ", late " << late);
+    REQUIRE (early > late);
+    REQUIRE (late < 0.001f);
+}
+
+TEST_CASE ("turning the reverb down does not cut the tail off", "[mixer][reverb]")
+{
+    // The knob controls how much of the tail is heard, not whether the reverb
+    // is running. Cutting a tail dead is the one thing a reverb must not do.
+    opendj::Mixer mixer;
+    juce::AudioBuffer<float> deckA (2, blockSize), deckB (2, blockSize);
+    juce::AudioBuffer<float> master (2, blockSize), cue (2, blockSize);
+
+    mixer.prepare (sampleRate, blockSize);
+    mixer.setMasterGain (1.0f);
+    mixer.setChannelFader (0, 1.0f);
+    mixer.setCrossfaderCurve (opendj::Mixer::CrossfaderCurve::linear);
+    mixer.setCrossfaderPosition (-1.0f);
+    mixer.setChannelReverb (0, 1.0f);
+
+    std::array<juce::AudioBuffer<float>*, 2> decks { &deckA, &deckB };
+
+    for (int b = 0; b <= blocksToSettle; ++b)
+    {
+        deckA.clear(); deckB.clear();
+        mixer.processBlock (decks, master, cue);
+    }
+
+    // Click, let it ring, then close the knob.
+    deckA.clear(); deckB.clear();
+    for (int ch = 0; ch < 2; ++ch) deckA.setSample (ch, 0, 0.5f);
+    mixer.processBlock (decks, master, cue);
+
+    for (int b = 0; b < 10; ++b)
+    {
+        deckA.clear(); deckB.clear();
+        mixer.processBlock (decks, master, cue);
+    }
+
+    mixer.setChannelReverb (0, 0.0f);
+
+    // Immediately after, the tail is fading rather than gone: the smoothing
+    // takes it down over milliseconds, not in one block.
+    deckA.clear(); deckB.clear();
+    mixer.processBlock (decks, master, cue);
+
+    const auto justAfter = master.getMagnitude (0, 0, blockSize);
+    INFO ("level in the block after the knob closed: " << justAfter);
+    REQUIRE (justAfter > 0.0f);
+}
+
+TEST_CASE ("the reverb on one channel leaves the other alone", "[mixer][reverb]")
+{
+    opendj::Mixer mixer;
+    juce::AudioBuffer<float> deckA (2, blockSize), deckB (2, blockSize);
+    juce::AudioBuffer<float> master (2, blockSize), cue (2, blockSize);
+
+    mixer.prepare (sampleRate, blockSize);
+    mixer.setMasterGain (1.0f);
+    mixer.setChannelFader (0, 1.0f);
+    mixer.setChannelFader (1, 1.0f);
+    mixer.setCrossfaderCurve (opendj::Mixer::CrossfaderCurve::linear);
+    mixer.setCrossfaderPosition (1.0f);        // hard over on B
+    mixer.setChannelReverb (0, 1.0f);          // and the reverb is on A
+
+    std::array<juce::AudioBuffer<float>*, 2> decks { &deckA, &deckB };
+
+    for (int b = 0; b < 60 + blocksToSettle; ++b)
+    {
+        deckA.clear();
+        deckB.clear();
+
+        if (b == blocksToSettle)
+            for (int ch = 0; ch < 2; ++ch)
+                deckA.setSample (ch, 0, 0.5f);
+
+        mixer.processBlock (decks, master, cue);
+        REQUIRE (master.getMagnitude (0, 0, blockSize) < 0.001f);
+    }
+}
+
+TEST_CASE ("an out of range channel is answered, not written past", "[mixer][reverb]")
+{
+    opendj::Mixer mixer;
+    mixer.prepare (sampleRate, blockSize);
+
+    mixer.setChannelReverb (9, 1.0f);
+    REQUIRE (mixer.getChannelReverb (9) == 0.0f);
+    REQUIRE (mixer.getChannelReverb (-1) == 0.0f);
+}

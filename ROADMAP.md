@@ -215,6 +215,22 @@ is sampled where each repeat is due and halfway between. Loud on the beat and qu
 what having the right delay length means, and neither half alone would show it, since a wash is
 loud everywhere and silence is quiet everywhere.
 
+## The reverb
+
+One knob per channel, under the echo. At zero it is silent, and turning it up moves the channel
+from dry into a room without changing its level.
+
+| Decision | Why |
+| --- | --- |
+| The reverb runs at full wet into its own buffer | The knob is then a gain on that buffer. It cannot click, and turning it down leaves a tail ringing out instead of cutting it off mid-decay |
+| It runs a block at a time, not a sample at a time | `juce::Reverb` is written that way, so the mixer does its EQ, filter and echo per sample into a shaped buffer, reverberates that buffer, and mixes the two in the final pass |
+| The room is fixed and fairly large | A DJ reverb is one gesture, not a plugin. One knob that always sounds like the same room is more useful behind a mix than five that need setting up |
+| It sits after the echo | So repeats fall into the room, which is the order a send chain has on hardware |
+
+The tests measure the output. A burst goes in and the level is read after it stops: silent at
+zero, ringing on afterwards, quieter later than earlier rather than sustaining, still ringing
+after the knob comes down, and nothing crossing from one channel into the other.
+
 ## Beyond milestone 1
 
 | Item | Status | Notes |
@@ -223,7 +239,7 @@ loud everywhere and silence is quiet everywhere.
 | Key detection | ✅ | `src/analysis/KeyDetector.*`, shown in the browser's Key column. See above |
 | Four decks | ⬜ | `AudioEngine::numDecks` is a constant the mixer sizes itself from, so the engine mostly follows. The interface and the DJ-202 deck-toggle button are the work |
 | Loops and loop rolls | ✅ | `Deck::setLoopBeats` and friends, with a loop row on each deck. See above |
-| Effects | 🚧 | Filter and a beat-synced echo are done, one knob and a length each on the channel strip. Reverb is not. The DJ-202 effects section is on MIDI channels 9 and 10, unmapped |
+| Effects | ✅ | A filter, a beat-synced echo and a reverb on every channel strip. The DJ-202 effects section is on MIDI channels 9 and 10, still unmapped |
 | Sampler | ⬜ | The DJ-202 pads send sampler notes on 0x21 to 0x30, unmapped |
 | Record the master output | ✅ | `src/core/SetRecorder.*`, with a tracklist written beside the audio. See above |
 | Stem separation | ✅ | `src/analysis/StemSeparator.*` and `StemDsp.*`, with a knob per stem on each deck |

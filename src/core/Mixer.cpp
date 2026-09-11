@@ -124,6 +124,25 @@ void Mixer::ChannelStrip::prepare (const juce::dsp::ProcessSpec& spec)
     filterLow.setResonance (0.8f);
     filterHigh.setResonance (0.8f);
 
+    const auto maxBlock = (int) juce::jmax ((juce::uint32) 1, spec.maximumBlockSize);
+    shapedBuffer.setSize (2, maxBlock, false, true, true);
+    reverbBuffer.setSize (2, maxBlock, false, true, true);
+
+    reverb.setSampleRate (spec.sampleRate);
+
+    // Fed at full wet into its own buffer; the dry path is the channel itself,
+    // and how much of the wet is heard is a gain applied afterwards.
+    juce::Reverb::Parameters params;
+    params.roomSize = 0.72f;
+    params.damping = 0.4f;
+    params.width = 1.0f;
+    params.wetLevel = 1.0f;
+    params.dryLevel = 0.0f;
+    params.freezeMode = 0.0f;
+    reverb.setParameters (params);
+
+    reverbWet.reset (spec.sampleRate, smoothingSeconds);
+
     echo.setMaximumDelayInSamples (juce::jmax (2, (int) (maxEchoSeconds * spec.sampleRate)));
     echo.prepare (spec);
 
@@ -156,6 +175,7 @@ void Mixer::ChannelStrip::reset()
     filterLow.reset();
     filterHigh.reset();
     echo.reset();
+    reverb.reset();
 }
 
 //==============================================================================
@@ -237,6 +257,20 @@ double Mixer::getChannelEchoTime (int channel) const noexcept
     return juce::isPositiveAndBelow (channel, numChannels)
         ? strips[(size_t) channel].echoSeconds.load (std::memory_order_relaxed)
         : 0.0;
+}
+
+void Mixer::setChannelReverb (int channel, float amount)
+{
+    if (juce::isPositiveAndBelow (channel, numChannels))
+        strips[(size_t) channel].reverbAmount.store (juce::jlimit (0.0f, 1.0f, amount),
+                                                     std::memory_order_relaxed);
+}
+
+float Mixer::getChannelReverb (int channel) const noexcept
+{
+    return juce::isPositiveAndBelow (channel, numChannels)
+        ? strips[(size_t) channel].reverbAmount.load (std::memory_order_relaxed)
+        : 0.0f;
 }
 
 float Mixer::getChannelFilter (int channel) const noexcept
@@ -415,15 +449,18 @@ void Mixer::processBlock (const std::array<juce::AudioBuffer<float>*, numChannel
         strip.faderGain.setTargetValue (strip.targetFaderGain.load (std::memory_order_relaxed));
         strip.crossfaderGain.setTargetValue (strip.targetCrossfaderGain.load (std::memory_order_relaxed));
 
+        strip.reverbWet.setTargetValue (strip.reverbAmount.load (std::memory_order_relaxed));
+
         const auto monitoring = strip.cueEnabled.load (std::memory_order_relaxed);
 
+        // The channel is built into a buffer first, because the reverb works on
+        // a block rather than a sample at a time. The fader and crossfader are
+        // applied afterwards, on the way out.
         for (int i = 0; i < numSamples; ++i)
         {
             const auto gLow  = strip.bandGain[0].getNextValue();
             const auto gMid  = strip.bandGain[1].getNextValue();
             const auto gHigh = strip.bandGain[2].getNextValue();
-            const auto gFader = strip.faderGain.getNextValue();
-            const auto gCross = strip.crossfaderGain.getNextValue();
 
             strip.filterLow.setCutoffFrequency (strip.filterLowCutoff.getNextValue());
             strip.filterHigh.setCutoffFrequency (strip.filterHighCutoff.getNextValue());
@@ -457,6 +494,31 @@ void Mixer::processBlock (const std::array<juce::AudioBuffer<float>*, numChannel
                 const auto delayed = strip.echo.popSample ((int) ch);
                 strip.echo.pushSample ((int) ch, shaped + delayed * feedback);
                 shaped += delayed * wet;
+
+                strip.shapedBuffer.setSample (ch, i, shaped);
+            }
+        }
+
+        // Reverb over the whole block, at full wet into its own buffer. It runs
+        // every block whatever the knob says, so a tail already ringing when it
+        // is turned down finishes rather than being cut off.
+        for (int ch = 0; ch < 2; ++ch)
+            strip.reverbBuffer.copyFrom (ch, 0, strip.shapedBuffer, ch, 0, numSamples);
+
+        strip.reverb.processStereo (strip.reverbBuffer.getWritePointer (0),
+                                    strip.reverbBuffer.getWritePointer (1),
+                                    numSamples);
+
+        for (int i = 0; i < numSamples; ++i)
+        {
+            const auto gFader = strip.faderGain.getNextValue();
+            const auto gCross = strip.crossfaderGain.getNextValue();
+            const auto gReverb = strip.reverbWet.getNextValue();
+
+            for (int ch = 0; ch < 2; ++ch)
+            {
+                const auto shaped = strip.shapedBuffer.getSample (ch, i)
+                                  + strip.reverbBuffer.getSample (ch, i) * gReverb;
 
                 // The cue bus is pre-fader and pre-crossfader, so a track can be
                 // lined up in headphones before it is brought into the mix.

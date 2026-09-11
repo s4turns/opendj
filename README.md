@@ -15,9 +15,9 @@ and the code are entirely original and entirely open.
 
 **Status: early development, but it mixes.** Two decks with turntable platters you can scratch,
 waveforms, beat grids, automatic BPM and key detection, sync, key lock, beat-locked loops and
-rolls, stem separation with a knob per stem, a mixer with a filter and a beat-synced echo per channel, hot cues, a
+rolls, stem separation with a knob per stem, a mixer with a filter, a beat-synced echo and a reverb per channel, hot cues, a
 searchable track library, set recording with a tracklist, and Roland DJ-202 support including its
-own audio interface and its platters. No reverb or sampler yet.
+own audio interface and its platters. No sampler yet.
 
 ## Design goals
 
@@ -30,8 +30,8 @@ own audio interface and its platters. No reverb or sampler yet.
 ## Roadmap
 
 See [ROADMAP.md](ROADMAP.md) for what is done, what is left, and where to start. The short
-version: everything in the first milestone now works. Effects, loops, a sampler and four decks
-are the next things worth having.
+version: everything in the first milestone now works, along with effects and loops. A sampler
+and four decks are the next things worth having.
 
 ## Using it
 
