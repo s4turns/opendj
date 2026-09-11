@@ -23,7 +23,9 @@ namespace
 
     // Deck A on the left of the keyboard, deck B on the right, which is where
     // every DJ application puts them.
-    struct KeyBinding { int keyCode; int deck; Action action; };
+    // The deck here is a side of the window, not a deck index: with the swap
+    // button in play, Q and W mean whichever deck is on the left at the time.
+    struct KeyBinding { int keyCode; int side; Action action; };
 
     const KeyBinding keyBindings[] =
     {
@@ -92,20 +94,33 @@ MainComponent::MainComponent()
     {
         deckViews[(size_t) i] = std::make_unique<DeckComponent> (
             engine, i, juce::String::charToString ('A' + (juce::juce_wchar) i));
-        deckRow.addAndMakeVisible (*deckViews[(size_t) i]);
+        deckRow.addChildComponent (*deckViews[(size_t) i]);
+
+        // A deck can be swapped for the one behind it: A for C on the left, B
+        // for D on the right. Four decks side by side would leave each of them
+        // too narrow to read a waveform on, which is the thing a deck is for.
+        deckViews[(size_t) i]->onSwapRequested = [this, i]
+        {
+            showDeck (i < 2 ? i + 2 : i - 2);
+        };
     }
+
+    showDeck (0);
+    showDeck (1);
 
     mixerView = std::make_unique<MixerComponent> (engine, engine.getMixer());
     deckRow.addAndMakeVisible (*mixerView);
 
     deckRow.onResized = [this] (juce::Rectangle<int> area)
     {
-        const auto mixerWidth = juce::jlimit (220, 300, area.getWidth() / 4);
+        // Four strips need about twice the centre section two did, but not at
+        // the cost of the waveforms, so it grows with the window instead.
+        const auto mixerWidth = juce::jlimit (320, 460, area.getWidth() * 3 / 8);
         const auto deckWidth = (area.getWidth() - mixerWidth - 16) / 2;
 
-        deckViews[0]->setBounds (area.removeFromLeft (deckWidth));
+        deckViews[(size_t) visibleDecks[0]]->setBounds (area.removeFromLeft (deckWidth));
         area.removeFromLeft (8);
-        deckViews[1]->setBounds (area.removeFromRight (deckWidth));
+        deckViews[(size_t) visibleDecks[1]]->setBounds (area.removeFromRight (deckWidth));
         area.removeFromRight (8);
         mixerView->setBounds (area);
     };
@@ -181,17 +196,21 @@ void MainComponent::loadOntoDeck (const juce::File& file, int deckIndex)
 {
     if (deckIndex < 0)
     {
-        // A double-click goes to a deck that is not playing. With both decks in
-        // the mix there is no safe answer, so nothing happens rather than the
-        // wrong thing.
-        for (int i = 0; i < AudioEngine::numDecks; ++i)
-        {
-            if (! engine.getDeck (i).isPlaying())
+        // A double-click goes to a deck that is not playing, and to one that is
+        // on screen before one that is not: loading a track onto something the
+        // user cannot see would look like nothing happened. With every visible
+        // deck in the mix there is no safe answer, so nothing happens rather
+        // than the wrong thing.
+        for (const auto candidate : visibleDecks)
+            if (! engine.getDeck (candidate).isPlaying())
             {
-                deckIndex = i;
+                deckIndex = candidate;
                 break;
             }
-        }
+
+        for (int i = 0; i < AudioEngine::numDecks && deckIndex < 0; ++i)
+            if (! engine.getDeck (i).isPlaying())
+                deckIndex = i;
 
         if (deckIndex < 0)
             return;
@@ -311,17 +330,19 @@ bool MainComponent::keyPressed (const juce::KeyPress& key, juce::Component*)
         if (! key.isKeyCode (binding.keyCode))
             continue;
 
+        const auto deckIndex = visibleDecks[(size_t) binding.side];
+
         if (binding.action == Action::deckCue)
         {
             // Key repeat would re-trigger cue over and over, so only the first
             // press counts; keyStateChanged sends the matching release.
-            if (cueKeyHeld[(size_t) binding.deck])
+            if (cueKeyHeld[(size_t) deckIndex] != 0)
                 return true;
 
-            cueKeyHeld[(size_t) binding.deck] = true;
+            cueKeyHeld[(size_t) deckIndex] = binding.keyCode;
         }
 
-        dispatcher.dispatch ({ binding.action, binding.deck, 0, 1.0f });
+        dispatcher.dispatch ({ binding.action, deckIndex, 0, 1.0f });
         return true;
     }
 
@@ -346,12 +367,17 @@ bool MainComponent::keyStateChanged (bool, juce::Component*)
         if (binding.action != Action::deckCue)
             continue;
 
-        auto& held = cueKeyHeld[(size_t) binding.deck];
-
-        if (held && ! juce::KeyPress::isKeyCurrentlyDown (binding.keyCode))
+        // Released against the deck it was pressed on, so swapping decks with
+        // a cue key held down does not leave that deck stuck in preview.
+        for (int deckIndex = 0; deckIndex < AudioEngine::numDecks; ++deckIndex)
         {
-            held = false;
-            dispatcher.dispatch ({ Action::deckCue, binding.deck, 0, 0.0f });
+            auto& heldBy = cueKeyHeld[(size_t) deckIndex];
+
+            if (heldBy == binding.keyCode && ! juce::KeyPress::isKeyCurrentlyDown (heldBy))
+            {
+                heldBy = 0;
+                dispatcher.dispatch ({ Action::deckCue, deckIndex, 0, 0.0f });
+            }
         }
     }
 
@@ -374,7 +400,9 @@ void MainComponent::filesDropped (const juce::StringArray& files, int x, int y)
 
     const juce::Point<int> dropPoint (x, y);
 
-    for (int i = 0; i < AudioEngine::numDecks; ++i)
+    // Only the decks on screen, since a hidden one keeps the bounds it had
+    // when it was swapped out and would swallow a drop meant for its replacement.
+    for (const auto i : visibleDecks)
     {
         if (deckViews[(size_t) i]->getBounds().contains (deckRow.getLocalPoint (this, dropPoint)))
         {
@@ -382,6 +410,27 @@ void MainComponent::filesDropped (const juce::StringArray& files, int x, int y)
             return;
         }
     }
+}
+
+void MainComponent::showDeck (int deckIndex)
+{
+    if (! juce::isPositiveAndBelow (deckIndex, AudioEngine::numDecks))
+        return;
+
+    const auto side = deckIndex % 2;
+    const auto other = deckIndex < 2 ? deckIndex + 2 : deckIndex - 2;
+
+    visibleDecks[(size_t) side] = deckIndex;
+
+    for (int i = 0; i < AudioEngine::numDecks; ++i)
+        deckViews[(size_t) i]->setVisible (i == visibleDecks[0] || i == visibleDecks[1]);
+
+    // The button names the deck it would bring on, so it reads as an answer
+    // rather than as a label for where you already are.
+    deckViews[(size_t) deckIndex]->setSwapTarget (
+        juce::String::charToString ('A' + (juce::juce_wchar) other));
+
+    deckRow.resized();
 }
 
 void MainComponent::showAudioSettings()

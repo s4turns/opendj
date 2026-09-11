@@ -106,10 +106,17 @@ public:
 
     StemSeparator& getStemSeparator() noexcept { return stemSeparator; }
 
-    /** Matches one deck's tempo and beat phase to the other. Returns false when
+    /** Matches one deck's tempo and beat phase to another. Returns false when
         either deck has no usable beat grid, which is the honest answer for
         material the analyser could not read. */
     bool syncDeck (int followerIndex, int leaderIndex);
+
+    /** The deck a sync should follow, or -1 when there is nothing to follow.
+
+        With two decks this was never a question. With four it is the whole of
+        the feature: the answer is the deck that is playing, has a grid, and is
+        nearest, which is what somebody pressing sync means by "the other one". */
+    int findSyncLeader (int followerIndex) const;
 
     /** The deck's analysed tempo scaled by its tempo fader, or 0 with no grid. */
     double getEffectiveBpm (int deckIndex) const;

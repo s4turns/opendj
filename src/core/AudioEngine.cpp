@@ -265,6 +265,35 @@ void AudioEngine::separateDeckAsync (int deckIndex, std::function<void (bool)> o
     });
 }
 
+int AudioEngine::findSyncLeader (int followerIndex) const
+{
+    if (! juce::isPositiveAndBelow (followerIndex, numDecks))
+        return -1;
+
+    auto best = -1;
+    auto bestDistance = numDecks + 1;
+
+    for (int i = 0; i < numDecks; ++i)
+    {
+        if (i == followerIndex || ! decks[(size_t) i]->isPlaying())
+            continue;
+
+        const auto analysis = decks[(size_t) i]->getAnalysis();
+
+        if (analysis == nullptr || ! analysis->hasTempo())
+            continue;
+
+        // Ties go to the lower deck, which is the one on the left.
+        if (const auto distance = std::abs (i - followerIndex); distance < bestDistance)
+        {
+            bestDistance = distance;
+            best = i;
+        }
+    }
+
+    return best;
+}
+
 bool AudioEngine::syncDeck (int followerIndex, int leaderIndex)
 {
     if (! juce::isPositiveAndBelow (followerIndex, numDecks)

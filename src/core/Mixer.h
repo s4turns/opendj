@@ -23,7 +23,20 @@ namespace opendj
 class Mixer
 {
 public:
-    static constexpr int numChannels = 2;
+    static constexpr int numChannels = 4;
+
+    /** Which side of the crossfader a channel answers to.
+
+        Two channels and a crossfader needs no such switch, because A and B are
+        the only answers. Four does: the two extra decks are usually wanted at
+        full level regardless of where the crossfader sits, which is what
+        `thru` means and why it is the default for channels C and D. */
+    enum class CrossfaderAssign
+    {
+        a,
+        thru,   ///< ignores the crossfader entirely
+        b
+    };
 
     enum class CrossfaderCurve
     {
@@ -41,6 +54,10 @@ public:
     void setChannelFader (int channel, float normalised);          // 0 to 1
     void setChannelEq (int channel, int band, float normalised);   // 0 to 1, 0.5 is flat
     void setChannelCue (int channel, bool shouldMonitor);
+
+    /** Which side of the crossfader a channel follows, or neither. */
+    void setChannelCrossfaderAssign (int channel, CrossfaderAssign assign);
+    CrossfaderAssign getChannelCrossfaderAssign (int channel) const noexcept;
 
     /** One knob per channel, centred at 0.5 and doing nothing there. Turned
         down it is a low pass sweeping out of the top; turned up, a high pass
@@ -154,6 +171,7 @@ private:
         std::atomic<float> faderPosition { 0.0f };
         std::atomic<float> filterPosition { 0.5f };
         std::atomic<float> targetCrossfaderGain { 1.0f };
+        std::atomic<CrossfaderAssign> crossfaderAssign { CrossfaderAssign::thru };
         std::atomic<bool> cueEnabled { false };
     };
 

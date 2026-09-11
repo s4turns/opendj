@@ -15,7 +15,7 @@
 namespace opendj
 {
 
-/** The centre section: two channel strips, the crossfader and the master and
+/** The centre section: one strip per deck, the crossfader and the master and
     cue controls. */
 class MixerComponent final : public juce::Component
 {
@@ -37,6 +37,7 @@ private:
         juce::Slider echo;                   // off at the bottom
         juce::ComboBox echoBeats;            // how long one repeat lasts
         juce::Slider reverb;                 // off at the bottom
+        juce::ComboBox assign;               // which side of the crossfader
         juce::Slider fader;
         juce::TextButton cue { "Cue" };
     };

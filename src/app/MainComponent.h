@@ -61,6 +61,10 @@ private:
     bool isInterestedInFileDrag (const juce::StringArray& files) override;
     void filesDropped (const juce::StringArray& files, int x, int y) override;
 
+    /** Puts a deck on screen in place of the one it shares a side with, and
+        tells both of them which letter their swap button should carry. */
+    void showDeck (int deckIndex);
+
     void showAudioSettings();
     void showMidiSettings();
     void toggleRecording();
@@ -88,6 +92,10 @@ private:
 
     DeckRow deckRow;
     std::array<std::unique_ptr<DeckComponent>, AudioEngine::numDecks> deckViews;
+
+    /** Which deck is on screen on each side. A and B to start with, which is
+        where somebody who never presses the swap button stays. */
+    std::array<int, 2> visibleDecks { 0, 1 };
     std::unique_ptr<MixerComponent> mixerView;
     std::unique_ptr<BrowserComponent> browser;
     std::unique_ptr<SamplerComponent> samplerView;
@@ -102,7 +110,9 @@ private:
     juce::String startupError;
 
     // Cue keys are momentary, so their press and release have to be paired up.
-    std::array<bool, AudioEngine::numDecks> cueKeyHeld { false, false };
+    // The key code is kept rather than a flag, because a deck can be swapped
+    // out from under a held key and still has to be released by the right one.
+    std::array<int, AudioEngine::numDecks> cueKeyHeld {};
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainComponent)
 };

@@ -57,6 +57,14 @@ public:
         than each deck running one of its own. */
     void refresh();
 
+    /** Asked for when the swap button is pressed, so the shell can put the
+        deck behind this one on screen in its place. Without one the button is
+        not shown at all. */
+    std::function<void()> onSwapRequested;
+
+    /** The letter on the swap button: the deck this one gives way to. */
+    void setSwapTarget (const juce::String& letter);
+
     /** Starts a background load and analysis of the given file. */
     void load (const juce::File& file);
 
@@ -84,6 +92,7 @@ private:
     juce::Label titleLabel;
     juce::Label timeLabel;
     juce::Label bpmLabel;
+    juce::TextButton swapButton;
     juce::TextButton loadButton { "Load" };
     juce::TextButton playButton { "Play" };
     juce::TextButton syncButton { "Sync" };

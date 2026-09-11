@@ -252,13 +252,30 @@ start, a stop that fades, both gains scaling, the headphone send, two slots at o
 44.1 kHz sound playing for its own length out of a 48 kHz device rather than eight per cent
 fast.
 
+## Four decks
+
+Decks A to D, four strips on the mixer, and two decks on screen at a time. The button beside a
+deck's clock swaps it for the one behind it: A for C on the left, B for D on the right.
+
+| Decision | Why |
+| --- | --- |
+| Two decks on screen, not four | Four side by side leaves each one too narrow to read a waveform on, and reading the waveform is what a deck is for. The swap button costs one click and keeps both of them full size |
+| The crossfader is assignable per channel | With four channels, A and B are no longer the only answers. C and D default to running past the crossfader, which is how a third deck is nearly always used |
+| Sync follows the nearest playing deck with a grid | With two decks "the other one" needed no definition. With four it is the whole feature, and a deck that is stopped or ungridded is not what anybody means |
+| Q, W, O and P follow the side, not the deck | They mean the deck on the left and the deck on the right, so the keys keep working after a swap. A cue key held across a swap is released against the deck it was pressed on |
+| The engine needed almost nothing | `AudioEngine::numDecks` was already `Mixer::numChannels`, and both the mixer and the engine loop over their strips. Raising the constant did most of it, which is what that constant was for |
+
+Five tests cover the mixer half: that there is a strip per deck, that C and D ignore the
+crossfader by default, that any channel can be put on either side of it, that the defaults read
+back, and that all four channels reach the master at once rather than two of them being dropped.
+
 ## Beyond milestone 1
 
 | Item | Status | Notes |
 | --- | :---: | --- |
 | Slip mode | ✅ | `Deck::setSlipEnabled`, sharing the shadow playhead with loop rolls. Action `deck.slip_toggle` for the DJ-202's note 0x07 |
 | Key detection | ✅ | `src/analysis/KeyDetector.*`, shown in the browser's Key column. See above |
-| Four decks | ⬜ | `AudioEngine::numDecks` is a constant the mixer sizes itself from, so the engine mostly follows. The interface and the DJ-202 deck-toggle button are the work |
+| Four decks | ✅ | Four decks, four mixer strips, a crossfader assignment per channel and a swap button per side. See above. The DJ-202 deck-toggle button is still unmapped |
 | Loops and loop rolls | ✅ | `Deck::setLoopBeats` and friends, with a loop row on each deck. See above |
 | Effects | ✅ | A filter, a beat-synced echo and a reverb on every channel strip. The DJ-202 effects section is on MIDI channels 9 and 10, still unmapped |
 | Sampler | ✅ | `src/core/Sampler.*`, eight slots on a row of pads under the browser. See above. The DJ-202 pads send sampler notes on 0x21 to 0x30, still unmapped |

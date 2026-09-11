@@ -44,6 +44,10 @@ DeckComponent::DeckComponent (AudioEngine& engineToUse, int deckIndex, const juc
     titleLabel.setFont (juce::FontOptions (16.0f, juce::Font::bold));
     addAndMakeVisible (titleLabel);
 
+    swapButton.setTooltip ("Put the other deck on this side");
+    swapButton.onClick = [this] { if (onSwapRequested != nullptr) onSwapRequested(); };
+    addChildComponent (swapButton);
+
     timeLabel.setColour (juce::Label::textColourId, juce::Colours::grey);
     timeLabel.setJustificationType (juce::Justification::centredRight);
     addAndMakeVisible (timeLabel);
@@ -456,11 +460,20 @@ void DeckComponent::paint (juce::Graphics& g)
     }
 }
 
+void DeckComponent::setSwapTarget (const juce::String& letter)
+{
+    swapButton.setButtonText (letter);
+    swapButton.setVisible (letter.isNotEmpty());
+    resized();
+}
+
 void DeckComponent::resized()
 {
     auto area = getLocalBounds().reduced (10);
 
     auto header = area.removeFromTop (24);
+    swapButton.setBounds (header.removeFromRight (34).reduced (1, 1));
+    header.removeFromRight (4);
     timeLabel.setBounds (header.removeFromRight (130));
     bpmLabel.setBounds (header.removeFromRight (90));
     titleLabel.setBounds (header);

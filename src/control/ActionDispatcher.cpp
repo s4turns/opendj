@@ -73,7 +73,8 @@ void ActionDispatcher::dispatch (const ActionMessage& message)
 
         case Action::deckSync:
             if (pressed)
-                engine.syncDeck (deckIndex, AudioEngine::numDecks - 1 - deckIndex);
+                if (const auto leader = engine.findSyncLeader (deckIndex); leader >= 0)
+                    engine.syncDeck (deckIndex, leader);
             break;
 
         case Action::deckLoadSelected:

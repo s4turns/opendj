@@ -23,7 +23,7 @@ namespace
 MixerComponent::MixerComponent (AudioEngine& engineToUse, Mixer& mixerToControl)
     : engine (engineToUse), mixer (mixerToControl)
 {
-    const char* headings[] = { "A", "B" };
+    const char* headings[] = { "A", "B", "C", "D" };
 
     for (size_t c = 0; c < strips.size(); ++c)
     {
@@ -89,6 +89,21 @@ MixerComponent::MixerComponent (AudioEngine& engineToUse, Mixer& mixerToControl)
             mixer.setChannelReverb (channel, static_cast<float> (strip.reverb.getValue()));
         };
         addAndMakeVisible (strip.reverb);
+
+        // Three positions rather than a switch with two, because the useful
+        // answer for a third deck is neither side of the crossfader.
+        strip.assign.addItemList ({ "X:A", "X:-", "X:B" }, 1);
+        strip.assign.setSelectedId (channel == 0 ? 1 : channel == 1 ? 3 : 2,
+                                    juce::dontSendNotification);
+        strip.assign.setTooltip ("Which side of the crossfader this channel answers to");
+        strip.assign.onChange = [this, channel, &strip]
+        {
+            mixer.setChannelCrossfaderAssign (channel,
+                strip.assign.getSelectedId() == 1 ? Mixer::CrossfaderAssign::a
+              : strip.assign.getSelectedId() == 3 ? Mixer::CrossfaderAssign::b
+                                                  : Mixer::CrossfaderAssign::thru);
+        };
+        addAndMakeVisible (strip.assign);
 
         strip.fader.setSliderStyle (juce::Slider::LinearVertical);
         strip.fader.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
@@ -210,6 +225,13 @@ void MixerComponent::refresh()
         follow (strip.reverb, mixer.getChannelReverb (channel));
 
         strip.cue.setToggleState (mixer.isChannelCued (channel), juce::dontSendNotification);
+
+        const auto assign = mixer.getChannelCrossfaderAssign (channel);
+        const auto assignId = assign == Mixer::CrossfaderAssign::a ? 1
+                            : assign == Mixer::CrossfaderAssign::b ? 3 : 2;
+
+        if (strip.assign.getSelectedId() != assignId)
+            strip.assign.setSelectedId (assignId, juce::dontSendNotification);
     }
 
     follow (crossfader, mixer.getCrossfaderPosition());
@@ -259,6 +281,8 @@ void MixerComponent::layOutStrip (Strip& strip, juce::Rectangle<int> area)
     strip.echo.setBounds (area.removeFromTop (44).reduced (4, 2));
     strip.echoBeats.setBounds (area.removeFromTop (20).reduced (4, 1));
     strip.reverb.setBounds (area.removeFromTop (44).reduced (4, 2));
+
+    strip.assign.setBounds (area.removeFromTop (20).reduced (4, 1));
 
     strip.cue.setBounds (area.removeFromBottom (24).reduced (4, 2));
     strip.fader.setBounds (area.reduced (10, 6));

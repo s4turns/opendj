@@ -13,7 +13,7 @@ The goal is an application a VirtualDJ user can sit down at and already know how
 the same deck layout, the same workflow, the same muscle memory. The artwork, the naming
 and the code are entirely original and entirely open.
 
-**Status: early development, but it mixes.** Two decks with turntable platters you can scratch,
+**Status: early development, but it mixes.** Four decks with turntable platters you can scratch,
 waveforms, beat grids, automatic BPM and key detection, sync, key lock, beat-locked loops and
 rolls, stem separation with a knob per stem, a mixer with a filter, a beat-synced echo and a reverb per channel, hot cues, an eight slot sampler, a
 searchable track library, set recording with a tracklist, and Roland DJ-202 support including its
@@ -30,8 +30,8 @@ own audio interface and its platters.
 ## Roadmap
 
 See [ROADMAP.md](ROADMAP.md) for what is done, what is left, and where to start. The short
-version: everything in the first milestone now works, along with effects, loops and a sampler.
-Four decks are the next thing worth having.
+version: everything in the first milestone now works, along with effects, loops, a sampler and
+four decks.
 
 ## Using it
 
@@ -64,6 +64,20 @@ key.
 Cue follows the behaviour DJs expect. While the deck is stopped, pressing cue sets the cue
 point and previews from it, and releasing returns and stops. While it is playing, pressing
 cue drops straight back to the cue point and stops there.
+
+## Four decks
+
+There are four decks, A to D, and two of them are on screen at a time. The button beside a
+deck's clock swaps it for the one behind it, A for C on the left and B for D on the right, so
+both visible decks stay wide enough to read a waveform on.
+
+Each deck has its own mixer strip. The small box on the strip says which side of the crossfader
+that channel answers to: A, B, or neither. C and D start on neither, which is how a third deck
+is usually used, and any channel can be moved onto either side.
+
+Q, W, O and P follow the side rather than the deck, so they keep meaning the deck on the left
+and the deck on the right after a swap. Sync matches the nearest deck that is playing and has a
+beat grid.
 
 ## The sampler
 

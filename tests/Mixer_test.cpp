@@ -5,6 +5,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include "core/AudioEngine.h"
 #include "core/Mixer.h"
 
 #include <array>
@@ -67,7 +68,7 @@ namespace
                 fillSine (deckA, frequency, phaseA, amplitude);
                 fillSine (deckB, frequency, phaseB, 0.0f);
 
-                std::array<juce::AudioBuffer<float>*, 2> decks { &deckA, &deckB };
+                std::array<juce::AudioBuffer<float>*, opendj::Mixer::numChannels> decks { &deckA, &deckB };
                 mixer.processBlock (decks, master, cue);
 
                 rms = master.getRMSLevel (0, 0, blockSize);
@@ -106,7 +107,7 @@ namespace
             fillSine (deckA, 1000.0, phaseA, 0.5f);
             deckB.clear();
 
-            std::array<juce::AudioBuffer<float>*, 2> decks { &deckA, &deckB };
+            std::array<juce::AudioBuffer<float>*, opendj::Mixer::numChannels> decks { &deckA, &deckB };
             mixer.processBlock (decks, master, cue);
             peakA = master.getMagnitude (0, 0, blockSize);
         }
@@ -116,7 +117,7 @@ namespace
             deckA.clear();
             fillSine (deckB, 1000.0, phaseB, 0.5f);
 
-            std::array<juce::AudioBuffer<float>*, 2> decks { &deckA, &deckB };
+            std::array<juce::AudioBuffer<float>*, opendj::Mixer::numChannels> decks { &deckA, &deckB };
             mixer.processBlock (decks, master, cue);
             peakB = master.getMagnitude (0, 0, blockSize);
         }
@@ -234,7 +235,7 @@ TEST_CASE ("the cue bus ignores the channel fader and the crossfader", "[mixer][
         fillSine (deckA, 1000.0, phase, 0.5f);
         deckB.clear();
 
-        std::array<juce::AudioBuffer<float>*, 2> decks { &deckA, &deckB };
+        std::array<juce::AudioBuffer<float>*, opendj::Mixer::numChannels> decks { &deckA, &deckB };
         mixer.processBlock (decks, master, cue);
 
         masterPeak = master.getMagnitude (0, 0, blockSize);
@@ -343,7 +344,7 @@ namespace
         {
             deckA.clear();
             deckB.clear();
-            std::array<juce::AudioBuffer<float>*, 2> decks { &deckA, &deckB };
+            std::array<juce::AudioBuffer<float>*, opendj::Mixer::numChannels> decks { &deckA, &deckB };
             mixer.processBlock (decks, master, cue);
         }
 
@@ -360,7 +361,7 @@ namespace
                 for (int ch = 0; ch < 2; ++ch)
                     deckA.setSample (ch, 0, 0.5f);
 
-            std::array<juce::AudioBuffer<float>*, 2> decks { &deckA, &deckB };
+            std::array<juce::AudioBuffer<float>*, opendj::Mixer::numChannels> decks { &deckA, &deckB };
             mixer.processBlock (decks, master, cue);
 
             for (int i = 0; i < blockSize; ++i)
@@ -494,7 +495,7 @@ TEST_CASE ("the echo on one channel leaves the other alone", "[mixer][echo]")
             for (int ch = 0; ch < 2; ++ch)
                 deckA.setSample (ch, 0, 0.5f);
 
-        std::array<juce::AudioBuffer<float>*, 2> decks { &deckA, &deckB };
+        std::array<juce::AudioBuffer<float>*, opendj::Mixer::numChannels> decks { &deckA, &deckB };
         mixer.processBlock (decks, master, cue);
 
         REQUIRE (master.getMagnitude (0, 0, blockSize) < 0.001f);
@@ -526,7 +527,7 @@ namespace
         {
             deckA.clear();
             deckB.clear();
-            std::array<juce::AudioBuffer<float>*, 2> decks { &deckA, &deckB };
+            std::array<juce::AudioBuffer<float>*, opendj::Mixer::numChannels> decks { &deckA, &deckB };
             mixer.processBlock (decks, master, cue);
         }
 
@@ -541,7 +542,7 @@ namespace
                 for (int ch = 0; ch < 2; ++ch)
                     deckA.setSample (ch, 0, 0.5f);
 
-            std::array<juce::AudioBuffer<float>*, 2> decks { &deckA, &deckB };
+            std::array<juce::AudioBuffer<float>*, opendj::Mixer::numChannels> decks { &deckA, &deckB };
             mixer.processBlock (decks, master, cue);
 
             for (int i = 0; i < blockSize; ++i)
@@ -609,7 +610,7 @@ TEST_CASE ("turning the reverb down does not cut the tail off", "[mixer][reverb]
     mixer.setCrossfaderPosition (-1.0f);
     mixer.setChannelReverb (0, 1.0f);
 
-    std::array<juce::AudioBuffer<float>*, 2> decks { &deckA, &deckB };
+    std::array<juce::AudioBuffer<float>*, opendj::Mixer::numChannels> decks { &deckA, &deckB };
 
     for (int b = 0; b <= blocksToSettle; ++b)
     {
@@ -654,7 +655,7 @@ TEST_CASE ("the reverb on one channel leaves the other alone", "[mixer][reverb]"
     mixer.setCrossfaderPosition (1.0f);        // hard over on B
     mixer.setChannelReverb (0, 1.0f);          // and the reverb is on A
 
-    std::array<juce::AudioBuffer<float>*, 2> decks { &deckA, &deckB };
+    std::array<juce::AudioBuffer<float>*, opendj::Mixer::numChannels> decks { &deckA, &deckB };
 
     for (int b = 0; b < 60 + blocksToSettle; ++b)
     {
@@ -678,4 +679,130 @@ TEST_CASE ("an out of range channel is answered, not written past", "[mixer][rev
     mixer.setChannelReverb (9, 1.0f);
     REQUIRE (mixer.getChannelReverb (9) == 0.0f);
     REQUIRE (mixer.getChannelReverb (-1) == 0.0f);
+}
+
+//==============================================================================
+// Four channels, and which of them the crossfader reaches.
+
+namespace
+{
+    /** The level one channel reaches the master at, with the crossfader parked
+        where the test wants it. */
+    float measureChannelGain (int channel, float crossfaderPosition,
+                              opendj::Mixer::CrossfaderAssign assign)
+    {
+        opendj::Mixer mixer;
+        mixer.prepare (sampleRate, blockSize);
+        mixer.setMasterGain (1.0f);
+        mixer.setChannelFader (channel, 1.0f);
+        mixer.setChannelCrossfaderAssign (channel, assign);
+        mixer.setCrossfaderCurve (opendj::Mixer::CrossfaderCurve::linear);
+        mixer.setCrossfaderPosition (crossfaderPosition);
+
+        juce::AudioBuffer<float> source (2, blockSize), master (2, blockSize), cue (2, blockSize);
+
+        std::array<juce::AudioBuffer<float>*, opendj::Mixer::numChannels> decks {};
+        decks[(size_t) channel] = &source;
+
+        double phase = 0.0;
+        auto peak = 0.0f;
+
+        for (int block = 0; block <= blocksToSettle; ++block)
+        {
+            fillSine (source, 1000.0, phase, 0.5f);
+            mixer.processBlock (decks, master, cue);
+            peak = master.getMagnitude (0, 0, blockSize);
+        }
+
+        return peak / 0.5f;
+    }
+}
+
+TEST_CASE ("the mixer has a strip for every deck", "[mixer]")
+{
+    REQUIRE (opendj::Mixer::numChannels == 4);
+    REQUIRE (opendj::AudioEngine::numDecks == opendj::Mixer::numChannels);
+}
+
+TEST_CASE ("C and D ignore the crossfader unless they are told not to", "[mixer][crossfader]")
+{
+    // The default for the third and fourth channels, which is what makes them
+    // useful as an addition to a mix rather than one side of it.
+    REQUIRE_THAT (measureChannelGain (2, -1.0f, opendj::Mixer::CrossfaderAssign::thru),
+                  WithinAbs (1.0f, 0.02f));
+    REQUIRE_THAT (measureChannelGain (2, 1.0f, opendj::Mixer::CrossfaderAssign::thru),
+                  WithinAbs (1.0f, 0.02f));
+}
+
+TEST_CASE ("any channel can be put on either side of the crossfader", "[mixer][crossfader]")
+{
+    // Channel C assigned to the A side is silent at the far end of the throw
+    // and at full level at the near one, exactly as channel A would be.
+    REQUIRE_THAT (measureChannelGain (2, -1.0f, opendj::Mixer::CrossfaderAssign::a),
+                  WithinAbs (1.0f, 0.02f));
+    REQUIRE_THAT (measureChannelGain (2, 1.0f, opendj::Mixer::CrossfaderAssign::a),
+                  WithinAbs (0.0f, 0.002f));
+
+    REQUIRE_THAT (measureChannelGain (3, 1.0f, opendj::Mixer::CrossfaderAssign::b),
+                  WithinAbs (1.0f, 0.02f));
+    REQUIRE_THAT (measureChannelGain (3, -1.0f, opendj::Mixer::CrossfaderAssign::b),
+                  WithinAbs (0.0f, 0.002f));
+}
+
+TEST_CASE ("the assignment survives being read back", "[mixer][crossfader]")
+{
+    opendj::Mixer mixer;
+
+    // The two the crossfader was built for start on it; the two that were added
+    // start beside it.
+    REQUIRE (mixer.getChannelCrossfaderAssign (0) == opendj::Mixer::CrossfaderAssign::a);
+    REQUIRE (mixer.getChannelCrossfaderAssign (1) == opendj::Mixer::CrossfaderAssign::b);
+    REQUIRE (mixer.getChannelCrossfaderAssign (2) == opendj::Mixer::CrossfaderAssign::thru);
+    REQUIRE (mixer.getChannelCrossfaderAssign (3) == opendj::Mixer::CrossfaderAssign::thru);
+
+    mixer.setChannelCrossfaderAssign (3, opendj::Mixer::CrossfaderAssign::a);
+    REQUIRE (mixer.getChannelCrossfaderAssign (3) == opendj::Mixer::CrossfaderAssign::a);
+
+    // And a channel that does not exist is answered rather than crashed into.
+    mixer.setChannelCrossfaderAssign (99, opendj::Mixer::CrossfaderAssign::b);
+    REQUIRE (mixer.getChannelCrossfaderAssign (99) == opendj::Mixer::CrossfaderAssign::thru);
+}
+
+TEST_CASE ("all four channels reach the master at once", "[mixer]")
+{
+    opendj::Mixer mixer;
+    mixer.prepare (sampleRate, blockSize);
+    mixer.setMasterGain (1.0f);
+    mixer.setCrossfaderCurve (opendj::Mixer::CrossfaderCurve::linear);
+    mixer.setCrossfaderPosition (0.0f);
+
+    std::array<juce::AudioBuffer<float>, opendj::Mixer::numChannels> sources;
+    std::array<juce::AudioBuffer<float>*, opendj::Mixer::numChannels> decks {};
+
+    for (size_t c = 0; c < sources.size(); ++c)
+    {
+        sources[c].setSize (2, blockSize);
+        decks[c] = &sources[c];
+        mixer.setChannelFader ((int) c, 1.0f);
+
+        // Off the crossfader, so this measures four channels and not the curve.
+        mixer.setChannelCrossfaderAssign ((int) c, opendj::Mixer::CrossfaderAssign::thru);
+    }
+
+    juce::AudioBuffer<float> master (2, blockSize), cue (2, blockSize);
+    std::array<double, opendj::Mixer::numChannels> phases {};
+    auto peak = 0.0f;
+
+    for (int block = 0; block <= blocksToSettle; ++block)
+    {
+        for (size_t c = 0; c < sources.size(); ++c)
+            fillSine (sources[c], 1000.0, phases[c], 0.2f);
+
+        mixer.processBlock (decks, master, cue);
+        peak = master.getMagnitude (0, 0, blockSize);
+    }
+
+    // Four identical tones at 0.2 sum to 0.8, which the soft clipper leaves
+    // alone. Two channels working and two ignored would read half of it.
+    REQUIRE_THAT (peak, WithinAbs (0.8f, 0.03f));
 }

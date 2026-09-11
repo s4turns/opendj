@@ -190,6 +190,12 @@ Mixer::Mixer()
             g.store (1.0f, std::memory_order_relaxed);
     }
 
+    // A and B sit on the crossfader because that is what a crossfader is for.
+    // C and D run through it, since a third deck is nearly always an addition
+    // to the mix rather than one side of it. Any of the four can be reassigned.
+    strips[0].crossfaderAssign.store (CrossfaderAssign::a, std::memory_order_relaxed);
+    strips[1].crossfaderAssign.store (CrossfaderAssign::b, std::memory_order_relaxed);
+
     recalculateCrossfader();
 }
 
@@ -320,6 +326,22 @@ void Mixer::setCrossfaderCurve (CrossfaderCurve newCurve)
     recalculateCrossfader();
 }
 
+void Mixer::setChannelCrossfaderAssign (int channel, CrossfaderAssign assign)
+{
+    if (! juce::isPositiveAndBelow (channel, numChannels))
+        return;
+
+    strips[(size_t) channel].crossfaderAssign.store (assign, std::memory_order_relaxed);
+    recalculateCrossfader();
+}
+
+Mixer::CrossfaderAssign Mixer::getChannelCrossfaderAssign (int channel) const noexcept
+{
+    return juce::isPositiveAndBelow (channel, numChannels)
+         ? strips[(size_t) channel].crossfaderAssign.load (std::memory_order_relaxed)
+         : CrossfaderAssign::thru;
+}
+
 void Mixer::recalculateCrossfader()
 {
     // Position runs -1 to +1; x runs 0 (hard A) to 1 (hard B).
@@ -348,8 +370,15 @@ void Mixer::recalculateCrossfader()
             break;
     }
 
-    strips[0].targetCrossfaderGain.store (gainA, std::memory_order_relaxed);
-    strips[1].targetCrossfaderGain.store (gainB, std::memory_order_relaxed);
+    for (auto& strip : strips)
+    {
+        const auto gain = strip.crossfaderAssign.load (std::memory_order_relaxed);
+
+        strip.targetCrossfaderGain.store (gain == CrossfaderAssign::a ? gainA
+                                        : gain == CrossfaderAssign::b ? gainB
+                                                                      : 1.0f,
+                                          std::memory_order_relaxed);
+    }
 }
 
 void Mixer::setMasterGain (float normalised)
