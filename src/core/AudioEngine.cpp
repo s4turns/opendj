@@ -155,6 +155,12 @@ void AudioEngine::loadTrackAsync (int deckIndex, const juce::File& file,
             if (const auto analysis = deck.getAnalysis(); analysis != nullptr)
                 cache->store (file, *analysis, deck.getLengthSeconds());
 
+        // A track separated on some earlier day costs only a decode, so the
+        // stems are there the moment it starts playing.
+        if (succeeded && stemSeparator.isAvailable())
+            if (auto cached = stemSeparator.loadFromCache (formatManager, file))
+                deck.setSeparation (std::move (cached), file);
+
         loading[(size_t) deckIndex].store (false, std::memory_order_relaxed);
 
         if (onComplete != nullptr)
@@ -174,6 +180,44 @@ double AudioEngine::getEffectiveBpm (int deckIndex) const
         return 0.0;
 
     return analysis->bpm * deck.getTempoRatio();
+}
+
+void AudioEngine::separateDeckAsync (int deckIndex, std::function<void (bool)> onComplete)
+{
+    if (! juce::isPositiveAndBelow (deckIndex, numDecks) || ! stemSeparator.isAvailable())
+        return;
+
+    const auto file = decks[(size_t) deckIndex]->getLoadedFile();
+
+    if (! file.existsAsFile())
+        return;
+
+    // One separation at a time, per deck and across the pool: it is minutes of
+    // work on every core the machine has, and two at once would starve both.
+    if (separating[(size_t) deckIndex].exchange (true, std::memory_order_relaxed))
+        return;
+
+    separationProgress[(size_t) deckIndex].store (0.0f, std::memory_order_relaxed);
+
+    separatorPool.addJob ([this, deckIndex, file, onComplete = std::move (onComplete)]
+    {
+        auto separation = stemSeparator.separate (formatManager, file,
+                                                  [this, deckIndex] (float progress)
+        {
+            separationProgress[(size_t) deckIndex].store (progress, std::memory_order_relaxed);
+        });
+
+        if (separation != nullptr)
+            decks[(size_t) deckIndex]->setSeparation (separation, file);
+
+        separating[(size_t) deckIndex].store (false, std::memory_order_relaxed);
+
+        if (onComplete != nullptr)
+        {
+            const auto succeeded = separation != nullptr;
+            juce::MessageManager::callAsync ([onComplete, succeeded] { onComplete (succeeded); });
+        }
+    });
 }
 
 bool AudioEngine::syncDeck (int followerIndex, int leaderIndex)

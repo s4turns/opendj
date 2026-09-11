@@ -143,6 +143,57 @@ DeckComponent::DeckComponent (AudioEngine& engineToUse, int deckIndex, const juc
     tempoLabel.setColour (juce::Label::textColourId, juce::Colours::grey);
     addAndMakeVisible (tempoLabel);
 
+    // Stems: a knob each, and the button that asks for a separation.
+    stemControls.separate.setTooltip ("Separate this track into drums, bass, other and vocals");
+    stemControls.separate.onClick = [this]
+    {
+        if (deck.hasStems() || engine.isDeckSeparating (index))
+            return;
+
+        engine.separateDeckAsync (index, [safe = juce::Component::SafePointer<DeckComponent> (this)] (bool ok)
+        {
+            if (safe == nullptr)
+                return;
+
+            if (! ok)
+                juce::NativeMessageBox::showMessageBoxAsync (
+                    juce::MessageBoxIconType::WarningIcon,
+                    "Could not separate the track",
+                    safe->engine.getStemSeparator().getStatusDescription());
+
+            safe->refresh();
+        });
+
+        refresh();
+    };
+    addAndMakeVisible (stemControls.separate);
+
+    for (int stem = 0; stem < numStems; ++stem)
+    {
+        auto& knob = stemControls.knobs[(size_t) stem];
+        knob.setSliderStyle (juce::Slider::RotaryVerticalDrag);
+        knob.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
+        knob.setRange (0.0, 1.0, 0.0);
+        knob.setValue (1.0, juce::dontSendNotification);
+        knob.setDoubleClickReturnValue (true, 1.0);
+        knob.setEnabled (false);
+        knob.onValueChange = [this, stem]
+        {
+            deck.setStemGain (static_cast<Stem> (stem),
+                              (float) stemControls.knobs[(size_t) stem].getValue());
+        };
+        addAndMakeVisible (knob);
+
+        auto& label = stemControls.labels[(size_t) stem];
+        label.setText (juce::String (toString (static_cast<Stem> (stem))).substring (0, 1).toUpperCase()
+                           + juce::String (toString (static_cast<Stem> (stem))).substring (1),
+                       juce::dontSendNotification);
+        label.setJustificationType (juce::Justification::centred);
+        label.setColour (juce::Label::textColourId, juce::Colours::grey);
+        label.setFont (juce::FontOptions (11.0f));
+        addAndMakeVisible (label);
+    }
+
     addAndMakeVisible (scrollingWave);
 
     overviewWave.onSeek = [this] (double seconds) { deck.seekToSeconds (seconds); refresh(); };
@@ -265,6 +316,39 @@ void DeckComponent::refresh()
     keyLockButton.setColour (juce::TextButton::buttonColourId,
                              deck.isKeyLockEnabled() ? accentColour.darker (0.4f) : juce::Colour (0xff2c2c34));
 
+    // The stem controls follow the engine: dead until a separation exists, and
+    // the button says what it is doing while one is running.
+    const auto separating = engine.isDeckSeparating (index);
+    const auto haveStems = deck.hasStems();
+
+    if (haveStems != stemsWereAvailable)
+    {
+        stemsWereAvailable = haveStems;
+
+        for (auto& knob : stemControls.knobs)
+        {
+            knob.setEnabled (haveStems);
+            knob.setValue (1.0, juce::dontSendNotification);
+        }
+    }
+
+    for (int stem = 0; stem < numStems; ++stem)
+    {
+        auto& knob = stemControls.knobs[(size_t) stem];
+        const auto gain = deck.getStemGain (static_cast<Stem> (stem));
+
+        if (! knob.isMouseButtonDown() && std::abs (knob.getValue() - gain) > 1.0e-4)
+            knob.setValue (gain, juce::dontSendNotification);
+    }
+
+    stemControls.separate.setEnabled (deck.isLoaded() && ! haveStems && ! separating
+                                      && engine.getStemSeparator().isAvailable());
+    stemControls.separate.setButtonText (separating
+        ? juce::String (juce::roundToInt (engine.getSeparationProgress (index) * 100.0f)) + "%"
+        : (haveStems ? juce::String ("Stems on") : juce::String ("Stems")));
+    stemControls.separate.setColour (juce::TextButton::buttonColourId,
+                                     haveStems ? accentColour.darker (0.4f) : juce::Colour (0xff2c2c34));
+
     updateTempoReadout();
 
     if (loading != wasLoading)
@@ -371,7 +455,24 @@ void DeckComponent::resized()
     for (auto& button : loopButtons)
         button.setBounds (loopRow.removeFromLeft (lengthWidth).reduced (1));
 
-    area.removeFromTop (10);
+    // Then the stems: the button that asks for a separation, and a knob per part.
+    area.removeFromTop (6);
+    {
+        auto stemRow = area.removeFromTop (46);
+        stemControls.separate.setBounds (stemRow.removeFromLeft (74).reduced (0, 12));
+        stemRow.removeFromLeft (6);
+
+        const auto knobWidth = juce::jmax (36, stemRow.getWidth() / numStems);
+
+        for (int stem = 0; stem < numStems; ++stem)
+        {
+            auto cell = stemRow.removeFromLeft (juce::jmin (knobWidth, stemRow.getWidth()));
+            stemControls.labels[(size_t) stem].setBounds (cell.removeFromBottom (13));
+            stemControls.knobs[(size_t) stem].setBounds (cell.reduced (2, 0));
+        }
+    }
+
+    area.removeFromTop (8);
 
     auto tempoColumn = area.removeFromRight (74);
     tempoRangeBox.setBounds (tempoColumn.removeFromTop (24));

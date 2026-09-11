@@ -34,6 +34,11 @@ target_compile_definitions(opendj-tests PRIVATE
     JUCE_USE_MP3AUDIOFORMAT=1
     JUCE_STANDALONE_APPLICATION=1)
 
+if(OpenVINO_FOUND)
+    target_compile_definitions(opendj-tests PRIVATE OPENDJ_HAVE_OPENVINO=1)
+    target_link_libraries(opendj-tests PRIVATE openvino::runtime)
+endif()
+
 target_link_libraries(opendj-tests PRIVATE
     Catch2::Catch2WithMain
     juce::juce_audio_devices

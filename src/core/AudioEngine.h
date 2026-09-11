@@ -9,6 +9,7 @@
 #include <juce_audio_formats/juce_audio_formats.h>
 
 #include "analysis/AnalysisCache.h"
+#include "analysis/StemSeparator.h"
 #include "core/Deck.h"
 #include "core/Mixer.h"
 
@@ -71,6 +72,27 @@ public:
         analysisCache.store (cache, std::memory_order_release);
     }
 
+    /** Separates the track on a deck into its four parts, in the background,
+        and hands them to the deck when they are ready. Does nothing if the
+        deck is empty or no separator is installed. */
+    void separateDeckAsync (int deckIndex, std::function<void (bool)> onComplete = {});
+
+    bool isDeckSeparating (int deckIndex) const noexcept
+    {
+        return juce::isPositiveAndBelow (deckIndex, numDecks)
+            && separating[(size_t) deckIndex].load (std::memory_order_relaxed);
+    }
+
+    /** How far along a separation is, from 0 to 1. */
+    float getSeparationProgress (int deckIndex) const noexcept
+    {
+        return juce::isPositiveAndBelow (deckIndex, numDecks)
+            ? separationProgress[(size_t) deckIndex].load (std::memory_order_relaxed)
+            : 0.0f;
+    }
+
+    StemSeparator& getStemSeparator() noexcept { return stemSeparator; }
+
     /** Matches one deck's tempo and beat phase to the other. Returns false when
         either deck has no usable beat grid, which is the honest answer for
         material the analyser could not read. */
@@ -112,6 +134,11 @@ private:
     juce::ThreadPool loaderPool { juce::ThreadPoolOptions{}.withNumberOfThreads (numDecks) };
     std::array<std::atomic<bool>, numDecks> loading {};
     std::atomic<AnalysisCache*> analysisCache { nullptr };
+
+    StemSeparator stemSeparator;
+    juce::ThreadPool separatorPool { juce::ThreadPoolOptions{}.withNumberOfThreads (1) };
+    std::array<std::atomic<bool>, numDecks> separating {};
+    std::array<std::atomic<float>, numDecks> separationProgress {};
 
     std::array<juce::AudioBuffer<float>, numDecks> deckBuffers;
     juce::AudioBuffer<float> masterBuffer;

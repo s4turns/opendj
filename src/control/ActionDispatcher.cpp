@@ -191,6 +191,19 @@ void ActionDispatcher::dispatch (const ActionMessage& message)
             mixer.setChannelCue (deckIndex, pressed);
             break;
 
+        case Action::deckStem:
+            deck.setStemGain (static_cast<Stem> (juce::jlimit (0, numStems - 1, message.slot)),
+                              message.value);
+            break;
+
+        case Action::deckStemToggle:
+            if (pressed)
+            {
+                const auto stem = static_cast<Stem> (juce::jlimit (0, numStems - 1, message.slot));
+                deck.setStemGain (stem, deck.getStemGain (stem) > 0.5f ? 0.0f : 1.0f);
+            }
+            break;
+
         case Action::channelFilter:
             mixer.setChannelFilter (deckIndex, message.value);
             break;

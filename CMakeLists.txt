@@ -79,6 +79,17 @@ else()
     endif()
 endif()
 
+# OpenVINO runs the stem separation model in this process. Optional on purpose:
+# it is a large dependency and a hundred megabytes of weights, and a build
+# without it is a complete DJ application that simply cannot separate stems.
+find_package(OpenVINO QUIET COMPONENTS Runtime)
+
+if(OpenVINO_FOUND)
+    message(STATUS "OpenVINO found: stem separation will be built in")
+else()
+    message(STATUS "OpenVINO not found: OpenDJ will build without stem separation")
+endif()
+
 # Sources shared by the application and the test binary, so the two cannot
 # drift apart. Nothing in here includes a UI header.
 set(OPENDJ_ENGINE_SOURCES
@@ -90,6 +101,8 @@ set(OPENDJ_ENGINE_SOURCES
     ${CMAKE_SOURCE_DIR}/src/analysis/TrackAnalyser.cpp
     ${CMAKE_SOURCE_DIR}/src/analysis/TrackDecoder.cpp
     ${CMAKE_SOURCE_DIR}/src/analysis/StemDsp.cpp
+    ${CMAKE_SOURCE_DIR}/src/analysis/StemSeparator.cpp
+    ${CMAKE_SOURCE_DIR}/src/analysis/StemModel.cpp
     ${CMAKE_SOURCE_DIR}/src/control/Action.cpp
     ${CMAKE_SOURCE_DIR}/src/control/ActionDispatcher.cpp
     ${CMAKE_SOURCE_DIR}/src/control/MidiMapping.cpp
@@ -149,6 +162,11 @@ if(OPENDJ_ENABLE_ASIO AND WIN32)
     endif()
     target_compile_definitions(OpenDJ PRIVATE JUCE_ASIO=1)
     target_include_directories(OpenDJ PRIVATE "${OPENDJ_ASIO_SDK_PATH}/common")
+endif()
+
+if(OpenVINO_FOUND)
+    target_compile_definitions(OpenDJ PRIVATE OPENDJ_HAVE_OPENVINO=1)
+    target_link_libraries(OpenDJ PRIVATE openvino::runtime)
 endif()
 
 target_link_libraries(OpenDJ PRIVATE

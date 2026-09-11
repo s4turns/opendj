@@ -40,6 +40,12 @@ enum class Action
     jogTouch,           ///< value above zero means a hand is on the platter
     jogTurn,            ///< value is signed ticks, not normalised
 
+    /** One part of a separated track. slot selects it: 0 drums, 1 bass,
+        2 other, 3 vocals. The value is the gain, so a knob sweeps it and a
+        button sends 1 or 0. */
+    deckStem,
+    deckStemToggle,     ///< press flips that stem between silent and full
+
     // Performance pads. slot selects the pad, 0 to 7.
     hotCue,             ///< press sets an empty slot, or jumps to a set one
     hotCueClear,
