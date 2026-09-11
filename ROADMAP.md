@@ -310,29 +310,42 @@ Eight tests cover it: both round trips, a missing file, a half damaged file fall
 field, values out of range being clamped, the state reaching a mixer and a sampler and being
 read back off them, and a save over an existing file leaving no temporary behind.
 
-## Known problem: the application crashes as it closes
+## The crash on exit, and what it was
 
-Closing the window ends the process with an access violation, exit code `0xC0000005`, on
-Windows. The window itself runs normally and the crash happens after the user has finished, so
-it is easy to miss, but it can cost the settings file: a run that crashes before the save
-completes leaves nothing written.
+Closing the window ended the process with an access violation, `0xC0000005`. Fixed. Worth
+writing down because the method got there faster than reading code would have.
 
-What is known so far:
+Windows records the faulting offset in the Application event log, and
+`llvm-symbolizer --obj=OpenDJ.exe` turns image base plus that offset into a file and a line.
+It named `Mixer::processBlock` every time, which said the fault was on the audio thread rather
+than anywhere near the close button.
 
-| Observed | Detail |
-| --- | --- |
-| Where | On exit only, after `CloseMainWindow`, which is the same path as clicking the close button |
-| Symptom | Exit code `-1073741819`, and `audio-device.xml` never written |
-| Not the cause | Reading the window's bounds during teardown. That was one fault, it is fixed, and the crash outlived it |
-| Untested | Whether it predates the settings work. Building the previous commit to compare is the obvious next step and has not been done |
+The fault itself: `processBlock` took its block length from the master buffer alone and trusted
+it for every other buffer in the function. A device handing over a block longer than `prepare`
+was told to expect wrote past the end of the strip buffers. It now takes the length every
+buffer involved can actually take, and a deck handing over a short buffer is dropped rather
+than read past the end of.
 
-Worth ruling out next, in order: the engine's timer still running while the decks are torn
-down, the sampler or the decks being destroyed while the device callback is live, and the
-stem separator's thread pool.
+Two other things were fixed on the way, both real and neither the cause:
 
-Also seen while testing: the window takes about eight seconds to appear, nearly all of it
-inside device setup, and the default device comes up as DirectSound at 2560 samples, which is
-87 ms out. Neither is a fault, but both are worth attention.
+- The window's bounds were read in the destructor, from a `DocumentWindow` already half torn
+  down. They are noted on the timer instead.
+- Shutdown is now explicit and ordered, in `AudioEngine::stop`: the callback and device go
+  first, then the loader and separator pools, then a recording still open is closed. The
+  destructor calls it, and so does the shell before anything else is freed.
+
+Verified by running the application and closing it: exit code 0, settings written, and the
+window reopening where it was left.
+
+Still open: the audio device is only remembered when one was chosen by hand. JUCE writes device
+state for a device asked for by name, and a session that took the default produces none.
+`AudioEngine::getDeviceState` tries to make the open device explicit first, and on Windows with
+the default DirectSound device that still yields nothing. Everything else in the settings file
+works.
+
+Also seen while testing: the window takes about eight seconds to appear, nearly all of it in
+device setup, and the default device comes up as DirectSound at 2560 samples, 87 ms out.
+Neither is a fault, but both are worth attention.
 
 ## Beyond milestone 1
 

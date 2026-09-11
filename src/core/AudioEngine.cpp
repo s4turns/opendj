@@ -31,13 +31,27 @@ AudioEngine::AudioEngine()
 
 AudioEngine::~AudioEngine()
 {
+    stop();
+}
+
+void AudioEngine::stop()
+{
     stopTimer();
 
-    // Let any decode in flight finish before the decks go away.
-    loaderPool.removeAllJobs (true, 5000);
-
+    // The callback goes first and the device with it, so nothing below can be
+    // reached from the device thread while it is being pulled apart.
     deviceManager.removeAudioCallback (this);
     deviceManager.closeAudioDevice();
+
+    // Then the background work, which reaches the decks and the sampler.
+    // Waiting here is the point: a decode still running when the decks are
+    // freed is the same crash by a different route.
+    loaderPool.removeAllJobs (true, 5000);
+    separatorPool.removeAllJobs (true, 5000);
+
+    // A recording still open would otherwise be left without its final flush.
+    if (recorder.isRecording())
+        recorder.stop();
 }
 
 juce::String AudioEngine::initialise (const juce::StringArray& preferredDeviceNames,
@@ -376,8 +390,19 @@ juce::File AudioEngine::startRecording (juce::String& error)
     return file;
 }
 
-std::unique_ptr<juce::XmlElement> AudioEngine::getDeviceState() const
+std::unique_ptr<juce::XmlElement> AudioEngine::getDeviceState()
 {
+    // JUCE only writes state for a device that was asked for by name, so a
+    // session that took the default has nothing to save and would open the
+    // default again next time even after the hardware changed underneath it.
+    // Saying what is open, explicitly, is what makes it worth remembering.
+    if (auto state = deviceManager.createStateXml(); state != nullptr)
+        return state;
+
+    if (deviceManager.getCurrentAudioDevice() == nullptr)
+        return nullptr;
+
+    deviceManager.setAudioDeviceSetup (deviceManager.getAudioDeviceSetup(), true);
     return deviceManager.createStateXml();
 }
 

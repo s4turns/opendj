@@ -53,7 +53,15 @@ public:
 
     /** The open device as XML, to be handed back to initialise next time.
         Returns null before a device is open. */
-    std::unique_ptr<juce::XmlElement> getDeviceState() const;
+    std::unique_ptr<juce::XmlElement> getDeviceState();
+
+    /** Takes the device away before anything else is torn down.
+
+        The destructor does this too, but by then the decks, the mixer and the
+        sampler are minutes from being freed and the device thread is still
+        calling into them. Shutting down explicitly, first, is the only ordering
+        that is actually guaranteed. Safe to call twice. */
+    void stop();
 
     /** The device that was opened, and why. For the status bar and the log. */
     juce::String getDeviceChoiceReason() const { return deviceChoiceReason; }

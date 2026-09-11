@@ -200,7 +200,13 @@ MainComponent::MainComponent()
 
 MainComponent::~MainComponent()
 {
+    // Settings first, while the device is still open: asking a closed device
+    // what it was gets an empty answer, and the whole point is to reopen it.
+    // Everything read here is an atomic or message thread state, so a running
+    // audio thread does not make it unsafe.
     saveSettings();
+
+    engine.stop();
 
     stopTimer();
     dispatcher.onStateChanged = nullptr;

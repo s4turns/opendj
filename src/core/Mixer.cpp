@@ -446,7 +446,18 @@ void Mixer::processBlock (const std::array<juce::AudioBuffer<float>*, numChannel
     master.clear();
     cue.clear();
 
-    const auto numSamples = master.getNumSamples();
+    // The block length is whatever every buffer involved can actually take.
+    // Trusting the master buffer alone means writing past the end of the strip
+    // buffers the moment a device hands over a block longer than prepare() was
+    // told to expect, which is a crash on the audio thread and nothing else.
+    auto numSamples = master.getNumSamples();
+
+    numSamples = juce::jmin (numSamples, cue.getNumSamples(),
+                             strips[0].shapedBuffer.getNumSamples(),
+                             strips[0].reverbBuffer.getNumSamples());
+
+    if (numSamples <= 0)
+        return;
 
     masterGain.setTargetValue (targetMasterGain.load (std::memory_order_relaxed));
     cueGain.setTargetValue (targetCueGain.load (std::memory_order_relaxed));
@@ -457,7 +468,10 @@ void Mixer::processBlock (const std::array<juce::AudioBuffer<float>*, numChannel
         auto& strip = strips[c];
         auto* deckBuffer = deckBuffers[c];
 
-        if (deckBuffer == nullptr)
+        // A deck handing over a short buffer is dropped rather than read past
+        // the end of, for the same reason.
+        if (deckBuffer == nullptr || deckBuffer->getNumSamples() < numSamples
+            || deckBuffer->getNumChannels() < 2)
             continue;
 
         for (size_t b = 0; b < 3; ++b)
