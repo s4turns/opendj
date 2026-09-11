@@ -51,13 +51,18 @@ public:
         one over: it decodes, and the message thread does nothing but install.
         Message thread. */
     bool installSlot (int slot, std::unique_ptr<DecodedAudio> decoded,
-                      const juce::String& name, juce::String* failureReason = nullptr);
+                      const juce::String& name, juce::String* failureReason = nullptr,
+                      const juce::File& sourceFile = {});
 
     /** Empties a slot. Message thread. */
     void clearSlot (int slot);
 
     bool isSlotLoaded (int slot) const noexcept;
     juce::String getSlotName (int slot) const;
+
+    /** The file a slot was loaded from, so a set of pads can be saved and put
+        back. An invalid file means the slot is empty. */
+    juce::File getSlotFile (int slot) const;
     double getSlotLengthSeconds (int slot) const noexcept;
 
     /** Starts a slot from its beginning, whether or not it was already
@@ -110,6 +115,7 @@ private:
         juce::AudioBuffer<float> audio;
         double sampleRate = 44100.0;
         juce::String name;
+        juce::File file;
     };
 
     struct Slot

@@ -91,6 +91,16 @@ the same eight pads.
 The knob beside them is the level of the whole sampler, and Cue sends it to the headphones as
 well as the room, so a sound can be found before anybody else hears it.
 
+## What it remembers
+
+The audio device you picked, the master and headphone levels, the crossfader curve and which
+channels answer to it, the tempo fader ranges, which decks are on screen, your sampler pads,
+and the window's size and position. They live in `settings.json` beside the library database,
+as plain JSON you can edit.
+
+The decks themselves are deliberately not restored, and neither are the channel faders. Starting
+quiet, with nothing playing, is the only safe way for a DJ application to open.
+
 ## The library
 
 Point OpenDJ at a folder with **Add folder** and it reads the tags of everything inside, which

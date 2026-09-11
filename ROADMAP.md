@@ -281,6 +281,35 @@ unreachable from hardware and nothing would say so.
 | `sampler.stop` | `slot` | |
 | `sampler.gain` | value | The level of the whole sampler |
 
+## What is remembered
+
+Until now nothing survived a restart except the library, so every launch meant picking the
+audio device again. `src/app/Settings.*` keeps a session in `settings.json` beside the library
+database, with the audio device in JUCE's own `audio-device.xml` next to it.
+
+| Kept | Not kept |
+| --- | --- |
+| The audio device chosen by hand | What was on the decks, and where in it |
+| Master, phones and cue mix levels | The channel faders |
+| Crossfader curve and the per-channel assignment | The crossfader position |
+| Tempo fader ranges | EQ, filter, echo and reverb settings |
+| Which decks are on screen | |
+| The sampler pads, their files, loops and gains | |
+| The window's size and position | |
+
+| Decision | Why |
+| --- | --- |
+| Decks and faders are deliberately not restored | An application that reopens playing where it crashed, or with a fader somewhere the user cannot see, is worse than one that starts quiet |
+| A device chosen by hand beats the device search | The search exists to make a good first guess, not to overrule somebody who already answered the question |
+| Every field falls back on its own | A file from an older build, or one edited by hand into nonsense, loses only the settings it got wrong. Values out of range are brought back into it rather than refused |
+| Pads are reloaded from their files, not stored as audio | A file that has moved leaves its pad empty, which is the truth, instead of a pad that looks loaded and plays nothing |
+| Written to a temporary file and moved into place | An interrupted write leaves the previous settings rather than half of the new ones |
+| Plain JSON | A setting can be corrected by hand when the interface for it does not exist yet |
+
+Eight tests cover it: both round trips, a missing file, a half damaged file falling back field by
+field, values out of range being clamped, the state reaching a mixer and a sampler and being
+read back off them, and a save over an existing file leaving no temporary behind.
+
 ## Beyond milestone 1
 
 | Item | Status | Notes |
@@ -293,6 +322,7 @@ unreachable from hardware and nothing would say so.
 | Sampler | ✅ | `src/core/Sampler.*`, eight slots on a row of pads under the browser. See above. Actions `sampler.trigger`, `sampler.stop` and `sampler.gain` are in the registry; the DJ-202 pads send sampler notes on 0x21 to 0x30 and need only a mapping entry |
 | Record the master output | ✅ | `src/core/SetRecorder.*`, with a tracklist written beside the audio. See above |
 | Stem separation | ✅ | `src/analysis/StemSeparator.*` and `StemDsp.*`, with a knob per stem on each deck |
+| Settings that survive a restart | ✅ | `src/app/Settings.*`, in `settings.json` beside the library. See above |
 | Video | ⬜ | Very large. Probably a separate project |
 
 ## Working on this

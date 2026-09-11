@@ -79,7 +79,12 @@ MainComponent::MainComponent()
     // as its MIDI port, so the list that finds the knobs also finds the outputs
     // they belong to. Playing into the machine's default output instead means
     // no headphone cue at all and a jog wheel felt through desktop latency.
-    startupError = engine.initialise (midi.getDeviceNameHints());
+    settings = SessionState::readFrom (SessionState::defaultFile());
+
+    const auto savedDevice = juce::XmlDocument::parse (
+        SessionState::defaultFile().getSiblingFile ("audio-device.xml"));
+
+    startupError = engine.initialise (midi.getDeviceNameHints(), savedDevice.get());
 
     if (juce::SystemStats::getEnvironmentVariable ("OPENDJ_MIDI_TRACE", {}).getIntValue() != 0)
         std::cerr << "[opendj audio] "
@@ -143,6 +148,8 @@ MainComponent::MainComponent()
     };
     addAndMakeVisible (*samplerView);
 
+    restoreSettings();
+
     browser = std::make_unique<BrowserComponent> (library, scanner);
     browser->onLoad = [this] (const juce::File& file, int deckIndex) { loadOntoDeck (file, deckIndex); };
     addAndMakeVisible (*browser);
@@ -193,6 +200,8 @@ MainComponent::MainComponent()
 
 MainComponent::~MainComponent()
 {
+    saveSettings();
+
     stopTimer();
     dispatcher.onStateChanged = nullptr;
     dispatcher.selectedFileProvider = nullptr;
@@ -421,6 +430,49 @@ void MainComponent::filesDropped (const juce::StringArray& files, int x, int y)
             return;
         }
     }
+}
+
+void MainComponent::restoreSettings()
+{
+    settings.applyTo (engine.getMixer(), engine.getSampler());
+
+    for (int deck = 0; deck < AudioEngine::numDecks; ++deck)
+        dispatcher.setTempoRange (deck, settings.tempoRanges[(size_t) deck]);
+
+    showDeck (settings.visibleDecks[0]);
+    showDeck (settings.visibleDecks[1]);
+
+    // Pads are reloaded rather than remembered, because the audio behind them
+    // lives in a file that may have moved. One that has is left empty, which is
+    // the truth, instead of a pad that looks loaded and plays nothing.
+    for (int slot = 0; slot < Sampler::numSlots; ++slot)
+    {
+        const juce::File file (settings.samplerFiles[(size_t) slot]);
+
+        if (file.existsAsFile())
+            engine.loadSampleAsync (slot, file);
+    }
+}
+
+void MainComponent::saveSettings()
+{
+    auto state = settings;
+    state.captureFrom (engine.getMixer(), engine.getSampler());
+
+    for (int deck = 0; deck < AudioEngine::numDecks; ++deck)
+        state.tempoRanges[(size_t) deck] = dispatcher.getTempoRange (deck);
+
+    state.visibleDecks = visibleDecks;
+
+    if (auto* window = getTopLevelComponent(); window != nullptr)
+        state.windowBounds = window->getBounds().toString();
+
+    state.writeTo (SessionState::defaultFile());
+
+    // The device is JUCE's own XML rather than anything of ours, so it is kept
+    // beside the settings instead of being folded into them.
+    if (const auto device = engine.getDeviceState(); device != nullptr)
+        device->writeTo (SessionState::defaultFile().getSiblingFile ("audio-device.xml"));
 }
 
 void MainComponent::showDeck (int deckIndex)

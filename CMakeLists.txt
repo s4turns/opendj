@@ -135,6 +135,7 @@ target_sources(OpenDJ PRIVATE
     ${OPENDJ_ENGINE_SOURCES}
     src/app/Main.cpp
     src/app/MainComponent.cpp
+    src/app/Settings.cpp
     src/ui/BrowserComponent.cpp
     src/ui/DeckComponent.cpp
     src/ui/MidiSetupComponent.cpp

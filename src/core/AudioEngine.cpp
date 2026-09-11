@@ -40,8 +40,26 @@ AudioEngine::~AudioEngine()
     deviceManager.closeAudioDevice();
 }
 
-juce::String AudioEngine::initialise (const juce::StringArray& preferredDeviceNames)
+juce::String AudioEngine::initialise (const juce::StringArray& preferredDeviceNames,
+                                      const juce::XmlElement* savedDeviceState)
 {
+    // A device chosen by hand last time wins over anything found by searching:
+    // the search exists to make a good first guess, not to overrule a person
+    // who has already answered the question.
+    if (savedDeviceState != nullptr)
+    {
+        const auto saved = deviceManager.initialise (0, preferredOutputChannels,
+                                                     savedDeviceState, true);
+
+        if (saved.isEmpty() && deviceManager.getCurrentAudioDevice() != nullptr)
+        {
+            deviceChoiceReason = "chosen last time";
+            deviceManager.addAudioCallback (this);
+            startTimer (retirementSweepMs);
+            return {};
+        }
+    }
+
     // The device manager has to be initialised before its device types can be
     // enumerated, so start with the default and then look for something better.
     auto error = deviceManager.initialiseWithDefaultDevices (0, preferredOutputChannels);
@@ -187,7 +205,7 @@ void AudioEngine::loadSampleAsync (int slot, const juce::File& file,
         // Decoding is the slow part and happens here; installing is one atomic
         // store and happens on the message thread, which owns the slot.
         juce::MessageManager::callAsync (
-            [this, slot, name = file.getFileNameWithoutExtension(),
+            [this, slot, file, name = file.getFileNameWithoutExtension(),
              decoded = std::shared_ptr<DecodedAudio> (std::move (decoded)),
              failureReason, onComplete]() mutable
             {
@@ -198,7 +216,7 @@ void AudioEngine::loadSampleAsync (int slot, const juce::File& file,
                     auto owned = std::make_unique<DecodedAudio> (std::move (*decoded));
                     error = {};
 
-                    if (! sampler.installSlot (slot, std::move (owned), name, &error)
+                    if (! sampler.installSlot (slot, std::move (owned), name, &error, file)
                         && error.isEmpty())
                         error = "That sound could not be loaded.";
                 }
@@ -356,6 +374,11 @@ juce::File AudioEngine::startRecording (juce::String& error)
                 recorder.noteTrack (deck->getTrackTitle());
 
     return file;
+}
+
+std::unique_ptr<juce::XmlElement> AudioEngine::getDeviceState() const
+{
+    return deviceManager.createStateXml();
 }
 
 juce::String AudioEngine::getDeviceDescription() const

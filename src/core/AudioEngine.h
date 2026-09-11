@@ -48,7 +48,12 @@ public:
         desktop's latency feels broken however good the MIDI is. Names to look
         for are passed in, and the default device is the fallback rather than
         the first choice. */
-    juce::String initialise (const juce::StringArray& preferredDeviceNames = {});
+    juce::String initialise (const juce::StringArray& preferredDeviceNames = {},
+                             const juce::XmlElement* savedDeviceState = nullptr);
+
+    /** The open device as XML, to be handed back to initialise next time.
+        Returns null before a device is open. */
+    std::unique_ptr<juce::XmlElement> getDeviceState() const;
 
     /** The device that was opened, and why. For the status bar and the log. */
     juce::String getDeviceChoiceReason() const { return deviceChoiceReason; }

@@ -21,6 +21,7 @@
 #include "ui/BrowserComponent.h"
 #include "ui/DeckComponent.h"
 #include "ui/MixerComponent.h"
+#include "app/Settings.h"
 #include "ui/SamplerComponent.h"
 
 #include <array>
@@ -73,6 +74,12 @@ private:
         DJ who says "the other pair". */
     void swapBothSides();
 
+    /** Puts last session's settings back, and files them away again on the way
+        out. Everything here is best effort: a settings file that cannot be
+        read or written costs the user their preferences, never their set. */
+    void restoreSettings();
+    void saveSettings();
+
     void showAudioSettings();
     void showMidiSettings();
     void toggleRecording();
@@ -116,6 +123,9 @@ private:
     juce::TextButton recordButton { "Record" };
     juce::Label statusLabel;
     juce::String startupError;
+
+    /** Read before the device is opened, written when the window closes. */
+    SessionState settings;
 
     // Cue keys are momentary, so their press and release have to be paired up.
     // The key code is kept rather than a flag, because a deck can be swapped

@@ -17,6 +17,8 @@ target_sources(opendj-tests PRIVATE
     Deck_test.cpp
     Loop_test.cpp
     Sampler_test.cpp
+    Settings_test.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/Settings.cpp
     SetRecorder_test.cpp
     TrackDecoder_test.cpp
     TrackAnalyser_test.cpp
