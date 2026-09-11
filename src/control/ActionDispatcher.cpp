@@ -213,6 +213,27 @@ void ActionDispatcher::dispatch (const ActionMessage& message)
             }
             break;
 
+        case Action::samplerTrigger:
+            // Shift turns a pad into its own stop button, which is the only way
+            // to end a looping slot on hardware with one row of pads.
+            if (pressed)
+            {
+                if (shiftHeld.load (std::memory_order_relaxed))
+                    engine.getSampler().stop (message.slot);
+                else
+                    engine.getSampler().trigger (message.slot);
+            }
+            break;
+
+        case Action::samplerStop:
+            if (pressed)
+                engine.getSampler().stop (message.slot);
+            break;
+
+        case Action::samplerGain:
+            engine.getSampler().setGain (message.value);
+            break;
+
         case Action::channelFilter:
             mixer.setChannelFilter (deckIndex, message.value);
             break;

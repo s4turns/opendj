@@ -73,6 +73,12 @@ enum class Action
     cueGain,
     cueMix,
 
+    // Sampler. slot selects the pad, 0 to 7; deck is unused, because the
+    // sampler sits over the whole mix rather than on one channel.
+    samplerTrigger,     ///< press starts that slot from the beginning
+    samplerStop,
+    samplerGain,        ///< the level of the whole sampler
+
     // Track browser. deck and slot are unused.
     browseScroll,       ///< value is signed rows to move the selection, not normalised
 

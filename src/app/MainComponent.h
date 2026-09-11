@@ -21,6 +21,7 @@
 #include "ui/BrowserComponent.h"
 #include "ui/DeckComponent.h"
 #include "ui/MixerComponent.h"
+#include "ui/SamplerComponent.h"
 
 #include <array>
 #include <memory>
@@ -89,6 +90,7 @@ private:
     std::array<std::unique_ptr<DeckComponent>, AudioEngine::numDecks> deckViews;
     std::unique_ptr<MixerComponent> mixerView;
     std::unique_ptr<BrowserComponent> browser;
+    std::unique_ptr<SamplerComponent> samplerView;
 
     juce::StretchableLayoutManager verticalLayout;
     std::unique_ptr<juce::StretchableLayoutResizerBar> resizerBar;

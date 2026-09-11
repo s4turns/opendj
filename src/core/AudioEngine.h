@@ -12,6 +12,7 @@
 #include "analysis/StemSeparator.h"
 #include "core/Deck.h"
 #include "core/Mixer.h"
+#include "core/Sampler.h"
 #include "core/SetRecorder.h"
 
 #include <array>
@@ -57,6 +58,17 @@ public:
 
     Deck& getDeck (int deckIndex) noexcept { return *decks[(size_t) deckIndex]; }
     Mixer& getMixer() noexcept { return mixer; }
+
+    /** Eight slots of short sounds, mixed in after the mixer. They join the
+        master rather than a channel because a sample is dropped on top of the
+        mix, not faded into it. */
+    Sampler& getSampler() noexcept { return sampler; }
+
+    /** Reads a file into a sampler slot on a background thread. The callback
+        runs on the message thread, with an empty string on success and the
+        reason on failure. */
+    void loadSampleAsync (int slot, const juce::File& file,
+                          std::function<void (juce::String)> onComplete = {});
 
     /** Decodes and analyses a file on a background thread, then swaps it onto
         the deck. Decoding a long track and finding its beat grid takes a second
@@ -169,6 +181,7 @@ private:
     std::atomic<bool> cueOutputAvailable { false };
     juce::String deviceChoiceReason;
 
+    Sampler sampler;
     SetRecorder recorder;
 
     std::array<std::atomic<double>, numDecks> echoBeats {};

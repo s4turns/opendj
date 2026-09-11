@@ -110,6 +110,13 @@ MainComponent::MainComponent()
         mixerView->setBounds (area);
     };
 
+    samplerView = std::make_unique<SamplerComponent> (engine);
+    samplerView->onMessage = [this] (const juce::String& message)
+    {
+        statusLabel.setText (message, juce::dontSendNotification);
+    };
+    addAndMakeVisible (*samplerView);
+
     browser = std::make_unique<BrowserComponent> (library, scanner);
     browser->onLoad = [this] (const juce::File& file, int deckIndex) { loadOntoDeck (file, deckIndex); };
     addAndMakeVisible (*browser);
@@ -318,6 +325,17 @@ bool MainComponent::keyPressed (const juce::KeyPress& key, juce::Component*)
         return true;
     }
 
+    // The number row fires the sampler pads, so a machine with no controller on
+    // it still has eight sounds under one hand.
+    for (int slot = 0; slot < Sampler::numSlots; ++slot)
+    {
+        if (key.isKeyCode ('1' + slot))
+        {
+            dispatcher.dispatch ({ Action::samplerTrigger, 0, slot, 1.0f });
+            return true;
+        }
+    }
+
     return false;
 }
 
@@ -453,6 +471,12 @@ void MainComponent::resized()
     footer.removeFromLeft (12);
     statusLabel.setBounds (footer);
 
+    area.removeFromBottom (8);
+
+    // A fixed row rather than a share of the window: eight pads need the same
+    // height whatever else is on screen, and taking it from the browser is
+    // cheaper than taking it from a waveform.
+    samplerView->setBounds (area.removeFromBottom (58));
     area.removeFromBottom (8);
 
     juce::Component* rows[] = { &deckRow, resizerBar.get(), browser.get() };

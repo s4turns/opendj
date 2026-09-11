@@ -16,6 +16,7 @@ target_sources(opendj-tests PRIVATE
     Mixer_test.cpp
     Deck_test.cpp
     Loop_test.cpp
+    Sampler_test.cpp
     SetRecorder_test.cpp
     TrackDecoder_test.cpp
     TrackAnalyser_test.cpp

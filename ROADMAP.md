@@ -231,6 +231,27 @@ The tests measure the output. A burst goes in and the level is read after it sto
 zero, ringing on afterwards, quieter later than earlier rather than sustaining, still ringing
 after the knob comes down, and nothing crossing from one channel into the other.
 
+## The sampler
+
+Eight slots holding short sounds, triggered over whatever the decks are doing. Load one by
+clicking an empty pad, dropping a file on it, or taking Load from its menu. The number row on
+the keyboard fires the eight pads.
+
+| Decision | Why |
+| --- | --- |
+| It joins the master after the mixer | A sample is laid over the mix, not mixed into it. Running it through a channel would put it behind the crossfader, where a stab is useless |
+| A slot is a decoded buffer, swapped in atomically | The same handover the decks use, so loading a pad mid-set cannot stall the audio thread. The displaced sound is freed a few blocks later |
+| Triggering restarts rather than queues | Retriggering is what a sampler is for. The envelope carries across a retrigger, so tapping a pad fast does not chop the tail of each tap |
+| Every start and stop is faded over four milliseconds | Long enough to swallow the step a sound cut mid waveform would make, short enough that a stab still sounds like a stab |
+| Slots are resampled with the same interpolator as the decks | A 44.1 kHz sample out of a 48 kHz device is being resampled whether anyone thinks of it that way. Aliasing that is inaudible on its own is audible over a mix |
+| Sixty seconds is the limit | A sampler holds stabs and loops. Anything longer is a track, and the answer is a deck |
+
+Sixteen tests cover it, measuring output rather than checking that code ran: silent until
+triggered, a one shot that ends itself, a loop that does not, a retrigger that goes back to the
+start, a stop that fades, both gains scaling, the headphone send, two slots at once, and a
+44.1 kHz sound playing for its own length out of a 48 kHz device rather than eight per cent
+fast.
+
 ## Beyond milestone 1
 
 | Item | Status | Notes |
@@ -240,7 +261,7 @@ after the knob comes down, and nothing crossing from one channel into the other.
 | Four decks | ⬜ | `AudioEngine::numDecks` is a constant the mixer sizes itself from, so the engine mostly follows. The interface and the DJ-202 deck-toggle button are the work |
 | Loops and loop rolls | ✅ | `Deck::setLoopBeats` and friends, with a loop row on each deck. See above |
 | Effects | ✅ | A filter, a beat-synced echo and a reverb on every channel strip. The DJ-202 effects section is on MIDI channels 9 and 10, still unmapped |
-| Sampler | ⬜ | The DJ-202 pads send sampler notes on 0x21 to 0x30, unmapped |
+| Sampler | ✅ | `src/core/Sampler.*`, eight slots on a row of pads under the browser. See above. The DJ-202 pads send sampler notes on 0x21 to 0x30, still unmapped |
 | Record the master output | ✅ | `src/core/SetRecorder.*`, with a tracklist written beside the audio. See above |
 | Stem separation | ✅ | `src/analysis/StemSeparator.*` and `StemDsp.*`, with a knob per stem on each deck |
 | Video | ⬜ | Very large. Probably a separate project |

@@ -96,6 +96,7 @@ set(OPENDJ_ENGINE_SOURCES
     ${CMAKE_SOURCE_DIR}/src/core/AudioEngine.cpp
     ${CMAKE_SOURCE_DIR}/src/core/Deck.cpp
     ${CMAKE_SOURCE_DIR}/src/core/Mixer.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/Sampler.cpp
     ${CMAKE_SOURCE_DIR}/src/core/SetRecorder.cpp
     ${CMAKE_SOURCE_DIR}/src/analysis/KeyDetector.cpp
     ${CMAKE_SOURCE_DIR}/src/analysis/TrackAnalysis.cpp
@@ -134,7 +135,8 @@ target_sources(OpenDJ PRIVATE
     src/ui/MidiSetupComponent.cpp
     src/ui/PlatterComponent.cpp
     src/ui/WaveformComponent.cpp
-    src/ui/MixerComponent.cpp)
+    src/ui/MixerComponent.cpp
+    src/ui/SamplerComponent.cpp)
 
 target_include_directories(OpenDJ PRIVATE src)
 

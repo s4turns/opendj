@@ -176,6 +176,43 @@ void AudioEngine::loadTrackAsync (int deckIndex, const juce::File& file,
     });
 }
 
+void AudioEngine::loadSampleAsync (int slot, const juce::File& file,
+                                   std::function<void (juce::String)> onComplete)
+{
+    loaderPool.addJob ([this, slot, file, onComplete = std::move (onComplete)]
+    {
+        juce::String failureReason;
+        auto decoded = TrackDecoder::decode (formatManager, file, &failureReason);
+
+        // Decoding is the slow part and happens here; installing is one atomic
+        // store and happens on the message thread, which owns the slot.
+        juce::MessageManager::callAsync (
+            [this, slot, name = file.getFileNameWithoutExtension(),
+             decoded = std::shared_ptr<DecodedAudio> (std::move (decoded)),
+             failureReason, onComplete]() mutable
+            {
+                auto error = failureReason;
+
+                if (decoded != nullptr)
+                {
+                    auto owned = std::make_unique<DecodedAudio> (std::move (*decoded));
+                    error = {};
+
+                    if (! sampler.installSlot (slot, std::move (owned), name, &error)
+                        && error.isEmpty())
+                        error = "That sound could not be loaded.";
+                }
+                else if (error.isEmpty())
+                {
+                    error = "That sound could not be loaded.";
+                }
+
+                if (onComplete != nullptr)
+                    onComplete (error);
+            });
+    });
+}
+
 double AudioEngine::getEffectiveBpm (int deckIndex) const
 {
     if (! juce::isPositiveAndBelow (deckIndex, numDecks))
@@ -332,6 +369,7 @@ void AudioEngine::audioDeviceAboutToStart (juce::AudioIODevice* device)
         deck->prepare (sampleRate, blockSize);
 
     mixer.prepare (sampleRate, blockSize);
+    sampler.prepare (sampleRate);
 
     cueOutputAvailable.store (device->getActiveOutputChannels().countNumberOfSetBits() >= 4,
                               std::memory_order_relaxed);
@@ -343,6 +381,7 @@ void AudioEngine::audioDeviceStopped()
         deck->releaseResources();
 
     mixer.reset();
+    sampler.stopAll();
 }
 
 void AudioEngine::audioDeviceIOCallbackWithContext (const float* const*,
@@ -381,6 +420,10 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const*,
     }
 
     mixer.processBlock (deckPointers, masterView, cueView);
+
+    // After the mixer and so after the crossfader, which is what a sampler is:
+    // a sound laid over the mix rather than one of the things being mixed.
+    sampler.processBlock (masterView, cueView, numSamples);
 
     const auto copyPair = [outputChannelData, numOutputChannels, numSamples]
                           (const juce::AudioBuffer<float>& source, int firstOutput)
@@ -435,6 +478,8 @@ void AudioEngine::timerCallback()
 {
     for (auto& deck : decks)
         deck->cleanUp();
+
+    sampler.cleanUp();
 
     // The tempo fader moves, tracks change, and the echo has to follow both.
     updateEchoTimes();

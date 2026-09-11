@@ -15,9 +15,9 @@ and the code are entirely original and entirely open.
 
 **Status: early development, but it mixes.** Two decks with turntable platters you can scratch,
 waveforms, beat grids, automatic BPM and key detection, sync, key lock, beat-locked loops and
-rolls, stem separation with a knob per stem, a mixer with a filter, a beat-synced echo and a reverb per channel, hot cues, a
+rolls, stem separation with a knob per stem, a mixer with a filter, a beat-synced echo and a reverb per channel, hot cues, an eight slot sampler, a
 searchable track library, set recording with a tracklist, and Roland DJ-202 support including its
-own audio interface and its platters. No sampler yet.
+own audio interface and its platters.
 
 ## Design goals
 
@@ -30,8 +30,8 @@ own audio interface and its platters. No sampler yet.
 ## Roadmap
 
 See [ROADMAP.md](ROADMAP.md) for what is done, what is left, and where to start. The short
-version: everything in the first milestone now works, along with effects and loops. A sampler
-and four decks are the next things worth having.
+version: everything in the first milestone now works, along with effects, loops and a sampler.
+Four decks are the next thing worth having.
 
 ## Using it
 
@@ -64,6 +64,16 @@ key.
 Cue follows the behaviour DJs expect. While the deck is stopped, pressing cue sets the cue
 point and previews from it, and releasing returns and stops. While it is playing, pressing
 cue drops straight back to the cue point and stops there.
+
+## The sampler
+
+A row of eight pads under the browser holds short sounds, played over whatever the decks are
+doing. Click an empty pad to load one, or drop a file onto it. Click a loaded pad to fire it,
+shift-click to stop it, and right-click for Loop, Stop and Clear. The number keys 1 to 8 fire
+the same eight pads.
+
+The knob beside them is the level of the whole sampler, and Cue sends it to the headphones as
+well as the room, so a sound can be found before anybody else hears it.
 
 ## The library
 
