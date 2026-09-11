@@ -188,6 +188,26 @@ public:
     bool isLoopRolling() const noexcept { return rollActive.load (std::memory_order_relaxed); }
 
     //==========================================================================
+    // Slip
+    //==========================================================================
+
+    /** Slip mode applies a roll's behaviour to everything else that takes the
+        deck off the timeline: a hand on the platter, or a loop left running.
+        The music carries on underneath, and letting go drops the playhead where
+        it would have been rather than where the hand left it.
+
+        That is what makes scratching over a running mix possible. Without it,
+        every scratch costs you the phrase. */
+    void setSlipEnabled (bool shouldSlip);
+    void toggleSlip();
+    bool isSlipEnabled() const noexcept { return slipEnabled.load (std::memory_order_relaxed); }
+
+    /** Where the track would be if nothing had taken it off the timeline, in
+        seconds, or a negative number when it is on the timeline. For drawing
+        the ghost playhead. */
+    double getSlipPositionSeconds() const noexcept { return slipPositionSeconds.load (std::memory_order_relaxed); }
+
+    //==========================================================================
     // Jog wheel
     //==========================================================================
 
@@ -294,10 +314,13 @@ private:
     std::atomic<double> loopBeats { 0.0 };                 // 0 when set by hand
     std::atomic<bool> loopEnabled { false };
     std::atomic<bool> rollActive { false };
+    std::atomic<bool> slipEnabled { false };
 
-    // Where the track would have been if the roll had never happened.
-    double rollReturnPosition = 0.0;                       // audio thread, file samples
-    bool rollReturnValid = false;                          // audio thread only
+    // Where the track would have been if nothing had taken it off the timeline.
+    // A roll always uses this; slip mode extends it to scratching and looping.
+    double slipPosition = 0.0;                             // audio thread, file samples
+    bool slipValid = false;                                // audio thread only
+    std::atomic<double> slipPositionSeconds { -1.0 };      // for the interface
 
     /** Wraps a read head back to the loop start when it runs past the end.
         Returns true when it moved. Audio thread only. */

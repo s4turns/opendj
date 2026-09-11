@@ -527,3 +527,187 @@ TEST_CASE ("another loop length changes the loop rather than stopping it", "[loo
     REQUIRE_FALSE (fixture.deck->toggleLoopBeats (2.0));
     REQUIRE_FALSE (fixture.deck->isLoopEnabled());
 }
+
+//==============================================================================
+// Slip
+//==============================================================================
+
+TEST_CASE ("slip is off until it is asked for", "[loop][slip]")
+{
+    Fixture fixture;
+
+    REQUIRE_FALSE (fixture.deck->isSlipEnabled());
+    fixture.deck->toggleSlip();
+    REQUIRE (fixture.deck->isSlipEnabled());
+    fixture.deck->toggleSlip();
+    REQUIRE_FALSE (fixture.deck->isSlipEnabled());
+}
+
+TEST_CASE ("with slip off, a scratch leaves the track where the hand left it", "[loop][slip]")
+{
+    Fixture fixture;
+
+    fixture.deck->seekToSeconds (10.0);
+    fixture.run (1);
+    fixture.deck->play();
+    fixture.run (2);
+
+    // Drag the platter backwards, then let go.
+    fixture.deck->setJogTouched (true);
+
+    for (int i = 0; i < 10; ++i)
+    {
+        fixture.deck->addJogTicks (-64.0);
+        fixture.run (1);
+    }
+
+    const auto whereTheHandLeftIt = fixture.deck->getPositionSeconds();
+    fixture.deck->setJogTouched (false);
+    fixture.run (2);
+
+    // It carries on from there, which is what vinyl does and what slip undoes.
+    REQUIRE (fixture.deck->getPositionSeconds() < 10.0);
+    REQUIRE_THAT (fixture.deck->getPositionSeconds(),
+                  WithinAbs (whereTheHandLeftIt + 2 * fixture.secondsPerBlock(), 0.05));
+}
+
+TEST_CASE ("with slip on, a scratch gives the track back", "[loop][slip]")
+{
+    Fixture fixture;
+
+    fixture.deck->setSlipEnabled (true);
+    fixture.deck->seekToSeconds (10.0);
+    fixture.run (1);
+    fixture.deck->play();
+    fixture.run (2);
+
+    const auto before = fixture.deck->getPositionSeconds();
+
+    fixture.deck->setJogTouched (true);
+    const auto scratchBlocks = 12;
+
+    for (int i = 0; i < scratchBlocks; ++i)
+    {
+        fixture.deck->addJogTicks (-64.0);
+        fixture.run (1);
+    }
+
+    // Mid-scratch it really is somewhere else, so this is not a no-op.
+    REQUIRE (fixture.deck->getPositionSeconds() < before);
+
+    fixture.deck->setJogTouched (false);
+    fixture.run (1);
+
+    // Let go and the music is where it would have been, not where the hand was.
+    const auto expected = before + (scratchBlocks + 1) * fixture.secondsPerBlock();
+
+    INFO ("landed at " << fixture.deck->getPositionSeconds() << ", expected near " << expected);
+    REQUIRE_THAT (fixture.deck->getPositionSeconds(), WithinAbs (expected, 0.05));
+}
+
+TEST_CASE ("with slip on, leaving a loop gives the track back", "[loop][slip]")
+{
+    Fixture fixture;
+
+    fixture.deck->setSlipEnabled (true);
+    fixture.deck->seekToSeconds (10.0);
+    fixture.run (1);
+    fixture.deck->play();
+    fixture.run (1);
+
+    const auto before = fixture.deck->getPositionSeconds();
+    REQUIRE (fixture.deck->setLoopBeats (1.0));
+
+    const auto loopBlocks = fixture.blocksFor (3.0);
+    fixture.run (loopBlocks);
+
+    fixture.deck->setLoopEnabled (false);
+    fixture.run (1);
+
+    const auto expected = before + (loopBlocks + 1) * fixture.secondsPerBlock();
+
+    INFO ("landed at " << fixture.deck->getPositionSeconds() << ", expected near " << expected);
+    REQUIRE_THAT (fixture.deck->getPositionSeconds(), WithinAbs (expected, 0.06));
+}
+
+TEST_CASE ("the shadow playhead runs at the fader's rate, not the hand's", "[loop][slip]")
+{
+    // A scratch moves the head fast and in both directions. What is underneath
+    // must ignore all of that and keep the tempo the fader asked for.
+    Fixture fixture;
+
+    fixture.deck->setSlipEnabled (true);
+    fixture.deck->setTempoRatio (1.08);
+    fixture.deck->seekToSeconds (10.0);
+    fixture.run (1);
+    fixture.deck->play();
+    fixture.run (1);
+
+    const auto before = fixture.deck->getPositionSeconds();
+
+    fixture.deck->setJogTouched (true);
+    const auto blocks = 20;
+
+    for (int i = 0; i < blocks; ++i)
+    {
+        fixture.deck->addJogTicks (i % 2 == 0 ? 300.0 : -280.0);
+        fixture.run (1);
+    }
+
+    fixture.deck->setJogTouched (false);
+    fixture.run (1);
+
+    const auto expected = before + (blocks + 1) * fixture.secondsPerBlock() * 1.08;
+
+    INFO ("landed at " << fixture.deck->getPositionSeconds() << ", expected near " << expected);
+    REQUIRE_THAT (fixture.deck->getPositionSeconds(), WithinAbs (expected, 0.05));
+}
+
+TEST_CASE ("a roll returns even with slip off", "[loop][slip][roll]")
+{
+    // A roll is a roll: carrying on underneath is the whole definition of it,
+    // not something slip mode switches on.
+    Fixture fixture;
+
+    REQUIRE_FALSE (fixture.deck->isSlipEnabled());
+
+    fixture.deck->seekToSeconds (10.0);
+    fixture.run (1);
+    fixture.deck->play();
+    fixture.run (2);
+
+    const auto before = fixture.deck->getPositionSeconds();
+    REQUIRE (fixture.deck->beginLoopRoll (1.0));
+
+    const auto rollBlocks = fixture.blocksFor (2.0);
+    fixture.run (rollBlocks);
+    fixture.deck->endLoopRoll();
+    fixture.run (1);
+
+    const auto expected = before + (rollBlocks + 1) * fixture.secondsPerBlock();
+    REQUIRE_THAT (fixture.deck->getPositionSeconds(), WithinAbs (expected, 0.1));
+}
+
+TEST_CASE ("a seek by hand cancels the shadow", "[loop][slip]")
+{
+    // Moving the playhead deliberately means the old shadow is meaningless;
+    // landing back on it afterwards would undo the move.
+    Fixture fixture;
+
+    fixture.deck->setSlipEnabled (true);
+    fixture.deck->seekToSeconds (10.0);
+    fixture.run (1);
+    fixture.deck->play();
+
+    fixture.deck->setJogTouched (true);
+    fixture.run (5);
+
+    fixture.deck->seekToSeconds (20.0);
+    fixture.run (2);
+
+    fixture.deck->setJogTouched (false);
+    fixture.run (2);
+
+    // Near where it was sent, not back at the shadow around 10 seconds.
+    REQUIRE (fixture.deck->getPositionSeconds() > 19.0);
+}

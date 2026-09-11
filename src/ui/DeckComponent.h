@@ -88,6 +88,7 @@ private:
     juce::TextButton playButton { "Play" };
     juce::TextButton syncButton { "Sync" };
     juce::TextButton keyLockButton { "Key" };
+    juce::TextButton slipButton { "Slip" };
 
     /** One knob per part of the track, and the button that asks for them. The
         knobs stay dead until a separation exists, since turning down a stem

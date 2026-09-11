@@ -130,6 +130,11 @@ void ActionDispatcher::dispatch (const ActionMessage& message)
             }
             break;
 
+        case Action::deckSlipToggle:
+            if (pressed)
+                deck.toggleSlip();
+            break;
+
         case Action::loopIn:
             if (pressed)
                 deck.setLoopIn();

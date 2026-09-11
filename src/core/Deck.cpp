@@ -246,6 +246,7 @@ void Deck::publish (std::unique_ptr<Track> newTrack)
     // A loop belongs to the track it was made in. Carrying one across would
     // trap the new track between two positions that mean nothing in it.
     rollActive.store (false, std::memory_order_relaxed);
+    slipPositionSeconds.store (-1.0, std::memory_order_relaxed);
     loopEnabled.store (false, std::memory_order_relaxed);
     loopStartSeconds.store (-1.0, std::memory_order_relaxed);
     loopEndSeconds.store (-1.0, std::memory_order_relaxed);
@@ -604,6 +605,16 @@ void Deck::endLoopRoll()
     clearLoop();
 }
 
+void Deck::setSlipEnabled (bool shouldSlip)
+{
+    slipEnabled.store (shouldSlip, std::memory_order_relaxed);
+}
+
+void Deck::toggleSlip()
+{
+    setSlipEnabled (! isSlipEnabled());
+}
+
 bool Deck::wrapIntoLoop (double& position, double rate, const Track& track) const
 {
     if (! loopEnabled.load (std::memory_order_relaxed))
@@ -742,7 +753,7 @@ void Deck::processBlock (juce::AudioBuffer<float>& destination)
             readPosition = seek * track->sampleRate;
             stretchPrimed = false;   // whatever the stretcher holds is from the old place
             scratchTargetValid = false;
-            rollReturnValid = false; // the head was moved by hand; the shadow is stale
+            slipValid = false;       // the head was moved by hand; the shadow is stale
         }
     }
 
@@ -870,25 +881,38 @@ void Deck::processBlock (juce::AudioBuffer<float>& destination)
     // While a roll is held, the track carries on underneath it. This is the
     // shadow head that says where it would have been, and it is what letting go
     // jumps to.
-    if (rollActive.load (std::memory_order_relaxed))
+    // Anything that takes the deck off the timeline runs a shadow playhead
+    // underneath at the tempo fader's rate, which is where the music would have
+    // been. A roll always does this, because that is what a roll is; with slip
+    // mode on, a hand on the platter and a running loop do it too.
+    const auto offTimeline = rollActive.load (std::memory_order_relaxed)
+                          || (slipEnabled.load (std::memory_order_relaxed)
+                              && (scratching || loopEnabled.load (std::memory_order_relaxed)));
+
+    if (offTimeline)
     {
-        if (! rollReturnValid)
+        if (! slipValid)
         {
-            rollReturnPosition = readPosition;
-            rollReturnValid = true;
+            slipPosition = readPosition;
+            slipValid = true;
         }
 
-        rollReturnPosition += rate * blockSize;
+        // The tempo rate, deliberately, not the rate actually used: during a
+        // scratch that is the hand's rate, and the whole point of the shadow is
+        // that the hand did not move it.
+        slipPosition += tempoRate * blockSize;
+        slipPositionSeconds.store (slipPosition / track->sampleRate, std::memory_order_relaxed);
     }
-    else if (rollReturnValid)
+    else if (slipValid)
     {
-        // The roll just ended. Land where the music got to, not where the loop
-        // left off, so a roll can be dropped in mid-phrase without losing the
-        // mix. Off the end of the track it simply stops, as playing off the end
-        // always does.
-        position = juce::jlimit (0.0, static_cast<double> (numSamples), rollReturnPosition);
-        rollReturnValid = false;
+        // Just came back onto the timeline. Land where the music got to, not
+        // where the hand or the loop left off, so a scratch or a roll can be
+        // dropped in mid-phrase without losing the mix. Off the end of the
+        // track it simply stops, as playing off the end always does.
+        position = juce::jlimit (0.0, static_cast<double> (numSamples), slipPosition);
+        slipValid = false;
         stretchPrimed = false;
+        slipPositionSeconds.store (-1.0, std::memory_order_relaxed);
     }
 
     // Running off either end stops playback rather than looping. Scratching

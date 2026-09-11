@@ -30,6 +30,7 @@ enum class Action
     deckLoadSelected,
 
     deckKeyLockToggle,  ///< tempo changes stop shifting the pitch
+    deckSlipToggle,     ///< the music keeps running under a scratch or a loop
 
     // Continuous deck controls, value normalised 0 to 1 unless noted.
     deckTempo,          ///< 0 is the slowest end of the fader, 1 the fastest

@@ -72,6 +72,11 @@ DeckComponent::DeckComponent (AudioEngine& engineToUse, int deckIndex, const juc
     };
     addAndMakeVisible (syncButton);
 
+    slipButton.setTooltip ("Slip: the music keeps running under a scratch or a loop, "
+                           "and letting go lands where it would have been");
+    slipButton.onClick = [this] { deck.toggleSlip(); refresh(); };
+    addAndMakeVisible (slipButton);
+
     keyLockButton.setTooltip ("Key lock: the tempo fader stops changing the pitch");
     keyLockButton.onClick = [this] { deck.toggleKeyLock(); refresh(); };
     addAndMakeVisible (keyLockButton);
@@ -334,6 +339,10 @@ void DeckComponent::refresh()
 
     refreshLoopControls();
 
+    slipButton.setColour (juce::TextButton::buttonColourId,
+                          deck.isSlipEnabled() ? loopColour.darker (0.2f)
+                                               : juce::Colour (0xff2c2c34));
+
     keyLockButton.setColour (juce::TextButton::buttonColourId,
                              deck.isKeyLockEnabled() ? accentColour.darker (0.4f) : juce::Colour (0xff2c2c34));
 
@@ -527,7 +536,7 @@ void DeckComponent::resized()
     // Spelled out, because the cue button is a different type to the others.
     const std::initializer_list<juce::Button*> transportButtons
     {
-        &loadButton, &cueButton, &playButton, &syncButton, &keyLockButton
+        &loadButton, &cueButton, &playButton, &syncButton, &keyLockButton, &slipButton
     };
 
     for (auto* button : transportButtons)
