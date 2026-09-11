@@ -30,6 +30,13 @@ enum class Action
     deckLoadSelected,
 
     deckKeyLockToggle,  ///< tempo changes stop shifting the pitch
+
+    /** Brings a deck on screen in place of the one it shares a side with.
+        `deck` names the deck to show; a press with no deck named swaps
+        whichever side that control belongs to, which is what a controller's
+        single deck-toggle button sends. */
+    deckSelect,
+    deckSwap,
     deckSlipToggle,     ///< the music keeps running under a scratch or a loop
 
     // Continuous deck controls, value normalised 0 to 1 unless noted.
@@ -67,6 +74,10 @@ enum class Action
     channelCueToggle,
     channelCue,
     channelFilter,      ///< 0.5 is out of the way, down is a low pass, up a high pass
+
+    /** Which side of the crossfader a channel answers to. slot picks it:
+        0 the A side, 1 neither, 2 the B side. */
+    channelCrossfaderAssign,
 
     crossfader,         ///< 0 is hard A, 1 is hard B
     masterGain,

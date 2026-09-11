@@ -99,10 +99,7 @@ MainComponent::MainComponent()
         // A deck can be swapped for the one behind it: A for C on the left, B
         // for D on the right. Four decks side by side would leave each of them
         // too narrow to read a waveform on, which is the thing a deck is for.
-        deckViews[(size_t) i]->onSwapRequested = [this, i]
-        {
-            showDeck (i < 2 ? i + 2 : i - 2);
-        };
+        deckViews[(size_t) i]->onSwapRequested = [this, i] { swapSide (i % 2); };
     }
 
     showDeck (0);
@@ -123,6 +120,20 @@ MainComponent::MainComponent()
         deckViews[(size_t) visibleDecks[1]]->setBounds (area.removeFromRight (deckWidth));
         area.removeFromRight (8);
         mixerView->setBounds (area);
+    };
+
+    // A controller either names the deck it wants or asks for the other pair,
+    // and either way the answer has to come back to the message thread before
+    // anything on screen moves.
+    dispatcher.deckSelectHandler = [this] (int deckIndex)
+    {
+        juce::MessageManager::callAsync ([this, deckIndex]
+        {
+            if (deckIndex < 0)
+                swapBothSides();
+            else
+                showDeck (deckIndex);
+        });
     };
 
     samplerView = std::make_unique<SamplerComponent> (engine);
@@ -431,6 +442,21 @@ void MainComponent::showDeck (int deckIndex)
         juce::String::charToString ('A' + (juce::juce_wchar) other));
 
     deckRow.resized();
+}
+
+void MainComponent::swapSide (int side)
+{
+    if (! juce::isPositiveAndBelow (side, 2))
+        return;
+
+    const auto showing = visibleDecks[(size_t) side];
+    showDeck (showing < 2 ? showing + 2 : showing - 2);
+}
+
+void MainComponent::swapBothSides()
+{
+    swapSide (0);
+    swapSide (1);
 }
 
 void MainComponent::showAudioSettings()

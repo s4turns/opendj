@@ -44,6 +44,13 @@ public:
         May be called from the MIDI thread, so implementations must marshal. */
     std::function<void (int rows)> browseScrollHandler;
 
+    /** Puts a deck on screen. Given -1 it swaps whichever pair the last deck
+        touched belongs to, which is what a single toggle button on a controller
+        means. Only the shell knows which decks are on screen, so it provides
+        this. May be called from the MIDI thread, so implementations must
+        marshal. */
+    std::function<void (int deckIndex)> deckSelectHandler;
+
     /** How far the tempo fader travels, as a percentage either side of zero. */
     void setTempoRange (int deckIndex, double percent);
     double getTempoRange (int deckIndex) const;

@@ -39,10 +39,6 @@ check behind it, not just code that compiles.
 | Arch | ⬜ | ⬜ | `scripts/build.sh` knows the packages, untested |
 | macOS | ⬜ | ⬜ | JUCE supports it; nothing has been tried |
 
-## FX
-
-Real-time stem separation using the same algorithm as Virtual DJ.
-
 ## Item 13: DJ-202, as measured on the hardware
 
 | Check | Status | What was found |
@@ -269,16 +265,32 @@ Five tests cover the mixer half: that there is a strip per deck, that C and D ig
 crossfader by default, that any channel can be put on either side of it, that the defaults read
 back, and that all four channels reach the master at once rather than two of them being dropped.
 
+## What a mapping can reach
+
+Everything a person can do is in the action registry, named once and reachable from a mapping
+file by that name. Two checks run over the registry itself: that every action has a name, and
+that every name finds its action again. An action added without its entry would otherwise be
+unreachable from hardware and nothing would say so.
+
+| Action | What it takes | Notes |
+| --- | --- | --- |
+| `deck.select` | `deck` | Puts that deck on screen in place of the one it shares a side with |
+| `deck.swap` | nothing | Swaps both sides at once: A and B out, C and D in, or back. What a single deck-toggle button on a controller means |
+| `mixer.crossfader_assign` | `deck`, `slot` | Which side of the crossfader a channel answers to: slot 0 the A side, 1 neither, 2 the B side |
+| `sampler.trigger` | `slot` | Starts that pad. With shift held it stops it instead |
+| `sampler.stop` | `slot` | |
+| `sampler.gain` | value | The level of the whole sampler |
+
 ## Beyond milestone 1
 
 | Item | Status | Notes |
 | --- | :---: | --- |
 | Slip mode | ✅ | `Deck::setSlipEnabled`, sharing the shadow playhead with loop rolls. Action `deck.slip_toggle` for the DJ-202's note 0x07 |
 | Key detection | ✅ | `src/analysis/KeyDetector.*`, shown in the browser's Key column. See above |
-| Four decks | ✅ | Four decks, four mixer strips, a crossfader assignment per channel and a swap button per side. See above. The DJ-202 deck-toggle button is still unmapped |
+| Four decks | ✅ | Four decks, four mixer strips, a crossfader assignment per channel and a swap button per side. See above. Actions `deck.select`, `deck.swap` and `mixer.crossfader_assign` are in the registry, so the DJ-202 deck-toggle button needs only a mapping entry |
 | Loops and loop rolls | ✅ | `Deck::setLoopBeats` and friends, with a loop row on each deck. See above |
 | Effects | ✅ | A filter, a beat-synced echo and a reverb on every channel strip. The DJ-202 effects section is on MIDI channels 9 and 10, still unmapped |
-| Sampler | ✅ | `src/core/Sampler.*`, eight slots on a row of pads under the browser. See above. The DJ-202 pads send sampler notes on 0x21 to 0x30, still unmapped |
+| Sampler | ✅ | `src/core/Sampler.*`, eight slots on a row of pads under the browser. See above. Actions `sampler.trigger`, `sampler.stop` and `sampler.gain` are in the registry; the DJ-202 pads send sampler notes on 0x21 to 0x30 and need only a mapping entry |
 | Record the master output | ✅ | `src/core/SetRecorder.*`, with a tracklist written beside the audio. See above |
 | Stem separation | ✅ | `src/analysis/StemSeparator.*` and `StemDsp.*`, with a knob per stem on each deck |
 | Video | ⬜ | Very large. Probably a separate project |

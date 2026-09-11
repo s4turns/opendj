@@ -88,6 +88,26 @@ void ActionDispatcher::dispatch (const ActionMessage& message)
                 deck.toggleKeyLock();
             break;
 
+        case Action::deckSelect:
+            if (pressed && deckSelectHandler != nullptr)
+                deckSelectHandler (deckIndex);
+            notify = false;   // the shell redraws itself
+            break;
+
+        case Action::deckSwap:
+            if (pressed && deckSelectHandler != nullptr)
+                deckSelectHandler (-1);
+            notify = false;
+            break;
+
+        case Action::channelCrossfaderAssign:
+            if (pressed)
+                mixer.setChannelCrossfaderAssign (deckIndex,
+                    message.slot == 0 ? Mixer::CrossfaderAssign::a
+                  : message.slot == 2 ? Mixer::CrossfaderAssign::b
+                                      : Mixer::CrossfaderAssign::thru);
+            break;
+
         case Action::browseScroll:
             if (browseScrollHandler != nullptr)
                 browseScrollHandler (juce::roundToInt (message.value));

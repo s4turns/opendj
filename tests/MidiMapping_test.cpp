@@ -418,3 +418,48 @@ TEST_CASE ("the shipped DJ-202 mapping reaches the loop section", "[midi][mappin
         REQUIRE (mapping.findControl (0x97, 0x16, false) != nullptr);
     }
 }
+
+//==============================================================================
+// The action registry itself. A mapping file names actions as strings, so a
+// name that does not round-trip is a control that silently stops working.
+
+TEST_CASE ("every action has a name and every name finds its action", "[mapping][actions]")
+{
+    using namespace opendj;
+
+    // Action::none is the answer for anything unrecognised, so it is deliberately
+    // not in the table and is checked separately below.
+    for (int i = 1; i <= (int) Action::shift; ++i)
+    {
+        const auto action = (Action) i;
+        const auto name = toString (action);
+
+        INFO ("action number " << i << " named " << name);
+
+        // A name of "none" here means the table is shorter than the enum, which
+        // is what happens when an action is added and its entry is not.
+        REQUIRE (name != "none");
+        REQUIRE (actionFromString (name) == action);
+    }
+
+    REQUIRE (toString (Action::none) == "none");
+    REQUIRE (actionFromString ("no such action") == Action::none);
+    REQUIRE (actionFromString ("") == Action::none);
+}
+
+TEST_CASE ("the four deck and sampler actions are reachable from a mapping", "[mapping][actions]")
+{
+    using namespace opendj;
+
+    REQUIRE (actionFromString ("deck.select") == Action::deckSelect);
+    REQUIRE (actionFromString ("deck.swap") == Action::deckSwap);
+    REQUIRE (actionFromString ("mixer.crossfader_assign") == Action::channelCrossfaderAssign);
+    REQUIRE (actionFromString ("sampler.trigger") == Action::samplerTrigger);
+    REQUIRE (actionFromString ("sampler.stop") == Action::samplerStop);
+    REQUIRE (actionFromString ("sampler.gain") == Action::samplerGain);
+
+    // The sampler level is a knob; the pads are buttons.
+    REQUIRE (isContinuous (Action::samplerGain));
+    REQUIRE (! isContinuous (Action::samplerTrigger));
+    REQUIRE (! isContinuous (Action::deckSwap));
+}

@@ -65,6 +65,14 @@ private:
         tells both of them which letter their swap button should carry. */
     void showDeck (int deckIndex);
 
+    /** Swaps one side for the deck behind it. */
+    void swapSide (int side);
+
+    /** Swaps both sides at once: A and B out, C and D in, or back again. A
+        controller with a single deck-toggle button means this, and so does a
+        DJ who says "the other pair". */
+    void swapBothSides();
+
     void showAudioSettings();
     void showMidiSettings();
     void toggleRecording();
