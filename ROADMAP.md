@@ -337,15 +337,33 @@ Two other things were fixed on the way, both real and neither the cause:
 Verified by running the application and closing it: exit code 0, settings written, and the
 window reopening where it was left.
 
-Still open: the audio device is only remembered when one was chosen by hand. JUCE writes device
-state for a device asked for by name, and a session that took the default produces none.
-`AudioEngine::getDeviceState` tries to make the open device explicit first, and on Windows with
-the default DirectSound device that still yields nothing. Everything else in the settings file
-works.
+## Picking a device worth playing on
 
-Also seen while testing: the window takes about eight seconds to appear, nearly all of it in
-device setup, and the default device comes up as DirectSound at 2560 samples, 87 ms out.
-Neither is a fault, but both are worth attention.
+Running it turned up something worse than the crash: the default device opened as DirectSound at
+2560 samples, 87 ms out. That is a beat and a half of slack between a hand and the sound, and no
+amount of care above it can make up for it. Startup also took eight to twelve seconds, nearly
+all of it scanning devices.
+
+The search took JUCE's own order of device types, which on Windows puts DirectSound first.
+DirectSound is the one backend on the machine that cannot do low latency. Types are now ranked
+and tried best first: ASIO, JACK and CoreAudio, then a low latency mode, then shared WASAPI or
+ALSA, with DirectSound last. The last resort asks the best type for its own default by name
+rather than taking whatever JUCE started on, and `tightenBufferSize` asks a device sitting on
+something enormous for about 256 samples instead.
+
+Measured on Windows, on the same machine, before and after:
+
+| | Before | After |
+| --- | --- | --- |
+| Device type | DirectSound | Windows Audio (Low Latency Mode) |
+| Buffer | 2560 samples | 336 samples |
+| Output latency | 87 ms | 7.0 ms |
+| First start | 8 to 12 s | 12 s |
+| Later starts | 8 to 12 s | 0.25 s |
+
+Asking by name also settled the one thing left open about the settings file: JUCE writes device
+state for a device that was asked for, so the device is now remembered, and a second launch
+reopens it and skips the scan entirely. That is where the quarter of a second comes from.
 
 ## Beyond milestone 1
 

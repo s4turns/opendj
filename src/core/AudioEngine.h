@@ -211,6 +211,11 @@ private:
         for a fiftieth of a second to matter. */
     void updateEchoTimes();
 
+    /** Asks the open device for a buffer size a DJ can play on, if it is
+        sitting on something far larger. Some backends open at a quarter of a
+        second, which is unusable however good everything above it is. */
+    void tightenBufferSize();
+
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AudioEngine)
 };
 

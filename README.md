@@ -91,6 +91,11 @@ the same eight pads.
 The knob beside them is the level of the whole sampler, and Cue sends it to the headphones as
 well as the room, so a sound can be found before anybody else hears it.
 
+OpenDJ picks the best audio backend it can find rather than the first one offered: ASIO or JACK
+ahead of a low latency mode, ahead of shared WASAPI or ALSA, with DirectSound last because it
+cannot do low latency. It also asks a device sitting on a huge buffer for a smaller one. On a
+plain Windows desktop that is the difference between 87 ms of output latency and 7 ms.
+
 ## What it remembers
 
 The audio device you picked, the master and headphone levels, the crossfader curve and which

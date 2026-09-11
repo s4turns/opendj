@@ -16,6 +16,55 @@ namespace
 {
     constexpr int retirementSweepMs = 500;
     constexpr int preferredOutputChannels = 4;   // master pair plus cue pair
+
+    // What a DJ set needs out of a buffer size: small enough that a scratch
+    // feels attached to the hand, large enough to survive a laptop deciding to
+    // do something else for a moment. About five milliseconds at 48 kHz.
+    constexpr int preferredBufferSize = 256;
+    constexpr int smallestSafeBufferSize = 128;
+
+    /** How much a device type is worth reaching for, lower being better.
+
+        JUCE hands its types back in its own order, which on Windows puts
+        DirectSound first. DirectSound is the one backend on the machine that
+        cannot do low latency: it opened at 2560 samples here, 87 ms out, which
+        is a beat and a half of slack between a hand and the sound. Anything
+        else on the system beats it, so the search is ordered rather than
+        taking whatever comes first. */
+    int rankOf (const juce::String& typeName)
+    {
+        if (typeName == "ASIO" || typeName == "JACK" || typeName == "CoreAudio")
+            return 0;
+
+        if (typeName.containsIgnoreCase ("Low Latency"))
+            return 1;
+
+        if (typeName.containsIgnoreCase ("Windows Audio"))
+            return typeName.containsIgnoreCase ("Exclusive") ? 3 : 2;
+
+        if (typeName == "ALSA")
+            return 2;
+
+        if (typeName.containsIgnoreCase ("DirectSound"))
+            return 9;
+
+        return 5;
+    }
+
+    /** The available types, best first. */
+    juce::Array<juce::AudioIODeviceType*> typesByPreference (juce::AudioDeviceManager& manager)
+    {
+        juce::Array<juce::AudioIODeviceType*> types;
+
+        for (auto* type : manager.getAvailableDeviceTypes())
+            if (type != nullptr)
+                types.add (type);
+
+        std::stable_sort (types.begin(), types.end(),
+                          [] (auto* a, auto* b) { return rankOf (a->getTypeName()) < rankOf (b->getTypeName()); });
+
+        return types;
+    }
 }
 
 AudioEngine::AudioEngine()
@@ -98,11 +147,8 @@ juce::String AudioEngine::initialise (const juce::StringArray& preferredDeviceNa
 
     // The controller's own interface first, wherever it turns up. Its four
     // outputs are exactly the master pair and the cue pair the mixer wants.
-    for (auto* type : deviceManager.getAvailableDeviceTypes())
+    for (auto* type : typesByPreference (deviceManager))
     {
-        if (type == nullptr)
-            continue;
-
         type->scanForDevices();
 
         for (const auto& name : type->getDeviceNames (false))
@@ -119,6 +165,7 @@ juce::String AudioEngine::initialise (const juce::StringArray& preferredDeviceNa
             if (openNamed (*type, name).isEmpty())
             {
                 deviceChoiceReason = "matched the controller";
+                tightenBufferSize();
                 deviceManager.addAudioCallback (this);
                 startTimer (retirementSweepMs);
                 return {};
@@ -131,11 +178,8 @@ juce::String AudioEngine::initialise (const juce::StringArray& preferredDeviceNa
     if (auto* device = deviceManager.getCurrentAudioDevice();
         device == nullptr || device->getOutputChannelNames().size() < preferredOutputChannels)
     {
-        for (auto* type : deviceManager.getAvailableDeviceTypes())
+        for (auto* type : typesByPreference (deviceManager))
         {
-            if (type == nullptr)
-                continue;
-
             for (const auto& name : type->getDeviceNames (false))
             {
                 if (openNamed (*type, name).isNotEmpty())
@@ -145,6 +189,7 @@ juce::String AudioEngine::initialise (const juce::StringArray& preferredDeviceNa
                     opened != nullptr && opened->getOutputChannelNames().size() >= preferredOutputChannels)
                 {
                     deviceChoiceReason = "has a cue bus";
+                    tightenBufferSize();
                     deviceManager.addAudioCallback (this);
                     startTimer (retirementSweepMs);
                     return {};
@@ -152,14 +197,40 @@ juce::String AudioEngine::initialise (const juce::StringArray& preferredDeviceNa
             }
         }
 
-        // Nothing better was found, so go back to the default rather than
-        // leaving whichever device the search happened to stop on.
-        error = deviceManager.initialiseWithDefaultDevices (0, preferredOutputChannels);
+        // Nothing with a cue bus was found, so take the default again rather
+        // than leaving whichever device the search happened to stop on. The
+        // best available type is asked first: its default output is a better
+        // answer than DirectSound's, and asking by name is also what gives the
+        // settings file something to remember.
+        auto opened = false;
 
-        if (error.isNotEmpty())
-            return error;
+        for (auto* type : typesByPreference (deviceManager))
+        {
+            if (const auto names = type->getDeviceNames (false); ! names.isEmpty())
+            {
+                const auto index = juce::jmax (0, type->getDefaultDeviceIndex (false));
+                const auto name = names[juce::jmin (index, names.size() - 1)];
+
+                if (openNamed (*type, name).isEmpty()
+                    && deviceManager.getCurrentAudioDevice() != nullptr)
+                {
+                    deviceChoiceReason = "best available default";
+                    opened = true;
+                    break;
+                }
+            }
+        }
+
+        if (! opened)
+        {
+            error = deviceManager.initialiseWithDefaultDevices (0, preferredOutputChannels);
+
+            if (error.isNotEmpty())
+                return error;
+        }
     }
 
+    tightenBufferSize();
     deviceManager.addAudioCallback (this);
     startTimer (retirementSweepMs);
     return {};
@@ -388,6 +459,37 @@ juce::File AudioEngine::startRecording (juce::String& error)
                 recorder.noteTrack (deck->getTrackTitle());
 
     return file;
+}
+
+void AudioEngine::tightenBufferSize()
+{
+    auto* device = deviceManager.getCurrentAudioDevice();
+
+    if (device == nullptr)
+        return;
+
+    const auto sizes = device->getAvailableBufferSizes();
+
+    if (sizes.isEmpty() || device->getCurrentBufferSizeSamples() <= preferredBufferSize)
+        return;
+
+    // The smallest size at or above the target, so a device offering 128, 256
+    // and 512 lands on 256 rather than on the smallest thing it will admit to.
+    auto chosen = 0;
+
+    for (const auto size : sizes)
+        if (size >= smallestSafeBufferSize && (chosen == 0 || std::abs (size - preferredBufferSize)
+                                                            < std::abs (chosen - preferredBufferSize)))
+            chosen = size;
+
+    if (chosen == 0 || chosen == device->getCurrentBufferSizeSamples())
+        return;
+
+    auto setup = deviceManager.getAudioDeviceSetup();
+    setup.bufferSize = chosen;
+
+    // A device that refuses keeps what it had, which is worse but still works.
+    deviceManager.setAudioDeviceSetup (setup, true);
 }
 
 std::unique_ptr<juce::XmlElement> AudioEngine::getDeviceState()
