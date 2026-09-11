@@ -218,11 +218,11 @@ for any of them, and installing a driver does not put it on your machine. Downlo
 steinberg.net, unpack it, and point the build at it once:
 
 ```
-pwsh scripts/build.ps1 -Asio -AsioSdkPath C:\path	osiosdk
+pwsh scripts/build.ps1 -Asio -AsioSdkPath C:/path/to/asiosdk
 ```
 
 The path can be left off if the SDK is unpacked as `external/asiosdk`, in your Downloads folder,
-or at `C:\SDKssiosdk`. By hand it is:
+or at `C:/SDKs/asiosdk`. By hand it is:
 
 ```
 cmake -S . -B build -DOPENDJ_ENABLE_ASIO=ON -DOPENDJ_ASIO_SDK_PATH=C:/path/to/asiosdk
