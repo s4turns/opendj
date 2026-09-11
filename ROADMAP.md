@@ -1,27 +1,30 @@
 # OpenDJ roadmap
 
 Where the project is and what to pick up next. Anything ticked has tests or a verified manual
-check behind it, not just code that compiles.
+check behind it, not just code that compiles. The suite is **216 tests**; anything touching
+audio is tested by measuring the output, not by checking that the code ran.
 
 | Symbol | Meaning |
 | :---: | --- |
 | ✅ | Done and verified |
-| 🚧 | Partly done, details in the table below it |
+| 🚧 | Partly done, details below |
 | ⬜ | Not started |
 
-## Milestone 1 — a deck you can actually mix on
+## Where it stands
+
+Milestone 1 was a two deck core you could genuinely mix on. It is done, and so is everything
+that was listed after it except video.
 
 | # | Item | Status | Where it lives |
 | :---: | --- | :---: | --- |
 | 1 | Build system, GPLv3, CI | ✅ | `CMakeLists.txt`, `scripts/`, `.gitea/workflows/` |
-| 2 | Audio device setup, master and cue routing | ✅ | `src/core/AudioEngine.*` |
-| 3 | Two decks: load, play, pause, cue | ✅ | `src/core/Deck.*` |
+| 2 | Audio device setup, master and cue routing | ✅ | `src/core/AudioEngine.*`, `src/core/OutputRouter.*` |
+| 3 | Decks: load, play, pause, cue | ✅ | `src/core/Deck.*` |
 | 4 | Tempo fader | ✅ | `src/core/Deck.*`, `src/ui/DeckComponent.*` |
 | 5 | Key lock, so tempo does not shift pitch | ✅ | `Deck::renderStretched`, via Rubber Band |
 | 6 | Mixer: fader, three-band EQ, crossfader, cue | ✅ | `src/core/Mixer.*` |
-| 6b | Per-channel filter, low pass down and high pass up | ✅ | `Mixer::setChannelFilter` |
 | 7 | Scrolling and overview waveforms | ✅ | `src/ui/WaveformComponent.*` |
-| 8 | BPM detection and beat grid | ✅ | `src/analysis/TrackAnalyser.*`, checked against a real collection below |
+| 8 | BPM detection and beat grid | ✅ | `src/analysis/TrackAnalyser.*` |
 | 9 | Sync: tempo and beat phase | ✅ | `AudioEngine::syncDeck` |
 | 10 | Turntable platters, mouse drivable | ✅ | `src/ui/PlatterComponent.*`, `src/ui/AngleMath.h` |
 | 11 | Hot cues | ✅ | `Deck::hotCuePressed` and friends |
@@ -29,288 +32,40 @@ check behind it, not just code that compiles.
 | 13 | Roland DJ-202 mapping | ✅ | `mappings/roland-dj-202.json`, verified on hardware |
 | 14 | Track browser and library database | ✅ | `src/library/`, `src/ui/BrowserComponent.*` |
 
+| Beyond milestone 1 | Status | Where it lives |
+| --- | :---: | --- |
+| Four decks, A to D | ✅ | Four mixer strips, a crossfader assignment per channel, a swap button per side |
+| Loops and loop rolls | ✅ | `Deck::setLoopBeats` and friends |
+| Slip mode | ✅ | `Deck::setSlipEnabled`, sharing the roll's shadow playhead |
+| Key detection | ✅ | `src/analysis/KeyDetector.*`, in the browser's Key column |
+| Effects: filter, echo, reverb | ✅ | `src/core/Mixer.*`, one knob each per channel |
+| Sampler | ✅ | `src/core/Sampler.*`, eight pads |
+| Stem separation | ✅ | `src/analysis/StemSeparator.*`, `StemDsp.*`, a knob per stem |
+| Record the master output | ✅ | `src/core/SetRecorder.*`, with a tracklist |
+| Split output cue | ✅ | `src/core/OutputRouter.*`, headphones on a stereo interface |
+| Settings that survive a restart | ✅ | `src/app/Settings.*` |
+| Broadcasting to Icecast | ✅ | `src/stream/`, verified against a real Icecast 2.4.4 |
+| Broadcasting to YouTube and Twitch | ⬜ | RTMP, so it needs ffmpeg as a separate program. Designed, not built |
+| Video | ⬜ | Very large. Probably a separate project |
+
+## What to pick up next
+
+| Item | Notes |
+| --- | --- |
+| DJ-202 tempo fader polarity | The one assumption never checked on hardware: mapped `"inverted": true`. If the fader reads backwards, set it to `false` in the mapping |
+| DJ-202 effects, sampler pads and deck toggle | Engine side is done and named in the action registry, so each needs a mapping entry and no C++ |
+| Arch and macOS | `scripts/build.sh` knows the Arch packages but has never been run there. macOS has never been tried |
+| Video | Unstarted, and probably its own project |
+
 ## Platforms
 
 | Platform | Builds | Runs | Notes |
 | --- | :---: | :---: | --- |
-| Windows | ✅ | ✅ | Built and run with MSVC 19.44. WASAPI by default, ASIO opt-in. No CI job: checked by building there directly, see below |
-| Fedora | ✅ | ✅ | Built and run on Fedora 44 with GCC 16, on a DJ-202's own four-channel interface through PipeWire's JACK. Decks, platters, browser, analysis and the library all exercised |
-| Debian and Ubuntu | ✅ | ⬜ | Same, via the Debian CI job |
-| Arch | ⬜ | ⬜ | `scripts/build.sh` knows the packages, untested |
+| Windows | ✅ | ✅ | MSVC 19.44. Windows Audio low latency mode by default, ASIO opt-in. No CI job, see below |
+| Fedora | ✅ | ✅ | Fedora 44, GCC 16, on a DJ-202's own four channel interface through PipeWire's JACK |
+| Debian and Ubuntu | ✅ | ⬜ | Builds and tests in CI; never run on a desktop |
+| Arch | ⬜ | ⬜ | Packages known, untested |
 | macOS | ⬜ | ⬜ | JUCE supports it; nothing has been tried |
-
-## Item 13: DJ-202, as measured on the hardware
-
-| Check | Status | What was found |
-| --- | :---: | --- |
-| Note off behaviour | ✅ | Both forms occur, and which one depends on the sequencer's MIDI version: as a UMP client the DJ-202's releases arrive as note off, as a legacy client as note on with velocity zero. A release is now taken from the message rather than the mapping, and a note off falls back to the note on control of the same number, so either form releases the button it belongs to |
-| Jog tick rate | ✅ | 800, not the 512 the Mixxx mapping states: two turns of the platter produced 1590 ticks on controller 6 |
-| Platter encoding | ✅ | Controller 6, relative, centred on 64. The wheel also streams 14-bit absolute position as pitch bend, but that flows whenever a hand merely rests on it and its net movement over two real turns was 0.04 of a revolution, so it is deliberately unmapped |
-| Tempo fader polarity | ⬜ | Still mapped `"inverted": true` on the assumption that the highest value is at the bottom of the throw. If the fader works backwards, set it to `false` |
-
-### The one that cost the most: controller 6 and MIDI 2.0
-
-JUCE registers its ALSA sequencer client as MIDI 2.0. On a kernel that knows about
-UMP, the sequencer then translates every legacy message before handing it over, and
-MIDI 2.0 reserves controller 6 as Data Entry, the middle of an RPN sequence, rather
-than a controller in its own right. A bare controller 6 is swallowed in translation.
-
-The DJ-202's platters report on controller 6. The touch was seen and the turning was
-not, so the deck stopped dead under the hand. It is reproducible with nothing but
-`aseqdump`:
-
-```
-aseqdump -u 0   ->  controller 6 arrives, controller 7 arrives
-aseqdump -u 2   ->  controller 6 is gone, controller 7 arrives
-```
-
-`src/control/AlsaMidiCompat.cpp` defines the weak symbol JUCE uses to ask for MIDI
-2.0, so the client stays at the legacy MIDI 1.0 a new one gets by default. Delete it
-once JUCE lets an application choose its own client MIDI version.
-
-## Item 5: key lock — done
-
-| Step | Status | Notes |
-| --- | :---: | --- |
-| Rubber Band | ✅ | Fetched by CMake and built from its single compilation unit, so its Meson build is never invoked. GPLv2 or later, so licence compatible |
-| Feed the stretcher from the deck | ✅ | `Deck::feedStretcher` reads the track at its recorded speed and the time ratio carries the tempo. The stretcher is built in `prepare`, so the audio thread never allocates one |
-| Bypass it while scratching | ✅ | And at exactly the recorded speed, where it would be a delay line that appears and disappears with the fader |
-| Key lock button and DJ-202 mapping | ✅ | `Key` on each deck, and notes 0x0D and 0x0E on the controller |
-
-Five tests in `tests/Deck_test.cpp` count zero crossings to measure the pitch that
-actually came out, so they check the tone held rather than that the code ran.
-
-## Item 14: track browser and library — done
-
-| Step | Status | Notes |
-| --- | :---: | --- |
-| SQLite schema | ✅ | `src/library/Library.cpp`: folders, tracks, tags, tempo, and an analysis version, so a better analyser quietly invalidates old results |
-| Analyse once, not on every load | ✅ | `AnalysisCache` in `src/analysis/`, which the engine asks before it decodes. `Deck::loadFile` takes a `KnownTrack` and skips the tempo pass |
-| Scanning | ✅ | `LibraryScanner`: a quick tag pass so the browser fills in seconds, then analysis at low priority, written as it goes so it can be stopped and picked up later |
-| Tag reading | ✅ | `src/library/TagReader.cpp`. ID3v2.2 to 2.4 and ID3v1 parsed directly, plus MP3 length from the Xing header, because opening a decoder for 13,000 files just to ask their length is far too slow |
-| Browser panel | ✅ | Search, sortable columns, folder filter, double-click or drag onto a deck |
-| Wire up the controller load buttons | ✅ | `selectedFileProvider`, plus a new `browse.scroll` action so the DJ-202 browse encoder moves the selection |
-
-## Item 8: how good is the tempo detection?
-
-Checked against 60 tracks taken at random from a 13,000 track techno collection,
-with the BPM Mixxx had already worked out for each as the comparison.
-
-| Estimator | Agreed with Mixxx |
-| --- | :---: |
-| Autocorrelation peak alone | 44 / 60 |
-| Pulse-train scoring and a tempo prior | **57 / 60** |
-
-Nearly every failure of the first version was a ratio of exactly 4/3 — 170.7 BPM
-reported for a 128 BPM track — and it reported them at full confidence.
-Autocorrelation cannot tell a tempo from three quarters of it, because the beat
-itself contaminates that lag. What the estimator does now:
-
-- **Judges a candidate by a pulse train rather than by correlation.** A train at
-  4/3 of the tempo lands on a beat once every four pulses. It is scored on the
-  level the weakest quarter of its pulses reach instead of their average, so
-  hitting hard three times in twelve does not rescue it.
-- **Aligns that train in windows of eight beats.** A rigid grid over five minutes
-  drifts off the beat from the fraction of a frame the period is out by, and a
-  drifting grid scores the correct tempo as a miss.
-- **Weights the bass band double.** The kick is the beat.
-- **Carries a tempo prior**, centred on 130 BPM. Nothing in the signal can
-  separate a tempo from half of it, so that assumption is written down in one
-  place instead of being spread through the search.
-- **Reports honest confidence**: how far the winner finished clear of the best
-  rival that is not simply a rounding of it. The median is 1.00 where it agrees
-  with Mixxx and 0.73 where it does not, so the number is worth reading.
-
-Of the three that still disagree, one is a 63 BPM reading from Mixxx for a track
-that is plainly 126, so the disagreement is not necessarily the wrong way round.
-
-To repeat the check, point the library at a folder, let the scan finish, and
-compare the `bpm` column with whatever you trust.
-
-## Key detection
-
-Twelve pitch classes folded out of the spectrum, then matched against the twenty-four
-Krumhansl-Kessler major and minor profiles. Reported in the spelling DJ software uses, sharps
-throughout, and convertible to Camelot notation, which is what harmonic mixing actually runs on.
-
-| Decision | Why |
-| --- | --- |
-| Only the middle two minutes are read | The intro and outro of a club record are usually just drums, which say nothing about key and pull the histogram towards noise. Reading a whole ten minute track costs five times as much and changes almost nothing |
-| Bins more than 35 cents off a semitone do not vote | A bin sitting between two semitones belongs to neither, and letting it vote is what turns a chromagram into a flat smear |
-| Nothing below about C3 counts | Below that, semitones are closer together than the transform can resolve, so they land in the wrong pitch class |
-| Each frame is normalised before it is added | So a loud drop does not outvote the four quiet minutes that share its key |
-| A key already in the tags wins | Detection fills the gap where there is nothing rather than overruling what a person put there |
-
-Confidence is the margin over the runner-up. It is worth reading: a track whose key is
-unambiguous finishes well clear, while a chromatic wash produces a near-tie between keys that
-share no notes.
-
-The honest limitation is the relative major. A minor key and its relative major contain the
-same seven notes, and a progression that touches neither leading tone is ambiguous to any
-method, including this one. Camelot notation is forgiving here, since a key and its relative
-share a number and mix anyway.
-
-## Loops and rolls
-
-Beat-locked loops on each deck: a row of lengths from half a beat to sixteen, halve and double,
-loop in and out by hand, and a loop toggle. Clicking a length sets a loop; holding the same
-button rolls instead.
-
-| Decision | Why |
-| --- | --- |
-| An automatic loop starts on the beat *behind* the playhead | Snapping to the nearest beat lets a loop start a fraction late, and a loop that starts late is late for every bar it plays. That is the mistake the button exists to prevent |
-| Loop bounds are computed on the message thread | Working them out needs the beat grid, and the grid lives behind a shared pointer. Taking a reference count is not a realtime operation, so the audio thread only ever sees two plain numbers |
-| The wrap uses a modulo, not a subtract-until-inside loop | A very short loop could otherwise want hundreds of iterations inside one block, and the audio thread should not do an unbounded amount of anything |
-| Loops are honoured on the stretcher's feed head too | With key lock on, that head chooses the audio. A loop that wrapped only the audible head would show the deck looping while it played straight through |
-| A hand on the platter suspends the loop | Direct manipulation should never be fenced in by something set earlier |
-| A roll clears its own loop when it ends | It was the roll's doing. Leaving it enabled would silently trap the deck |
-
-A roll differs from a loop in one way that matters: underneath it the track keeps running, so
-letting go drops you where the music got to rather than where the loop left off. That is what
-makes a roll usable mid-phrase without losing the mix, and it is what the shadow playhead in
-`Deck::processBlock` is for.
-
-The loop actions are in the registry as `loop.in`, `loop.out`, `loop.toggle`, `loop.beats`,
-`loop.roll`, `loop.halve`, `loop.double` and `loop.reloop`, so the DJ-202's second pad row can
-be mapped to them without touching any engine code. `loop.beats` and `loop.roll` take a slot,
-which `loopBeatsForSlot` turns into a length.
-
-## Recording a set
-
-The Record button in the bottom bar writes the master output to a 24-bit WAV in the user's
-music folder, named for the date and time, with a tracklist in a text file beside it.
-
-| Decision | Why |
-| --- | --- |
-| Tapped after the mixer, before the device | So the file holds exactly what the room heard: crossfader, master gain, soft clip and all |
-| Written through JUCE's `ThreadedWriter` | The audio thread copies a block into a FIFO and returns. Encoding and disk writes happen on a background thread, so a slow disk never stalls the callback |
-| A full FIFO drops samples rather than blocking | That is the right way round: the recording loses them, the room does not. But the count is kept and reported |
-| Dropouts are said out loud | In the status bar while it happens, in the dialog when it stops, and in the tracklist file, which is the only one still there tomorrow. A set with a hole in it must not look complete |
-| The tracklist is timed against the recording | Not the wall clock, so it stays right even if samples were dropped |
-| Whatever is already playing seeds the list | Recording usually starts a minute into the first track. A list beginning with the second record is missing the one people ask about |
-
-Verified end to end in the running application, not only in tests: eight seconds of playback
-recorded to a 48 kHz 24-bit stereo file that reads back at the right length with real audio in
-it, and a tracklist beside it.
-
-## The echo
-
-One knob per channel, with a length in beats beside it. At zero it is silent and out of the way;
-turning it up raises the wet level and the feedback together, which is how a DJ echo is used.
-
-| Decision | Why |
-| --- | --- |
-| The delay is fed even at zero wet | So turning the knob up brings in repeats of what just played, rather than silence followed by a burst once the line fills |
-| The length is smoothed, not stepped | Changing beat division sweeps the repeats the way a tape delay does. That is an effect in its own right and the one people reach for |
-| Feedback is capped below one | A mixer that can be left self-oscillating will be |
-| It sits after the EQ and filter | Which is where a send is on a DJ mixer: it repeats whatever you shaped, not the raw track |
-| The engine sets the time, not the mixer | Tempo lives on the deck, and the mixer has no idea decks exist. A deck with no beat grid falls back to half a second, which is a musical guess rather than a silent failure |
-
-The tests measure the output rather than checking the code ran: a click goes in, and the level
-is sampled where each repeat is due and halfway between. Loud on the beat and quiet between is
-what having the right delay length means, and neither half alone would show it, since a wash is
-loud everywhere and silence is quiet everywhere.
-
-## The reverb
-
-One knob per channel, under the echo. At zero it is silent, and turning it up moves the channel
-from dry into a room without changing its level.
-
-| Decision | Why |
-| --- | --- |
-| The reverb runs at full wet into its own buffer | The knob is then a gain on that buffer. It cannot click, and turning it down leaves a tail ringing out instead of cutting it off mid-decay |
-| It runs a block at a time, not a sample at a time | `juce::Reverb` is written that way, so the mixer does its EQ, filter and echo per sample into a shaped buffer, reverberates that buffer, and mixes the two in the final pass |
-| The room is fixed and fairly large | A DJ reverb is one gesture, not a plugin. One knob that always sounds like the same room is more useful behind a mix than five that need setting up |
-| It sits after the echo | So repeats fall into the room, which is the order a send chain has on hardware |
-
-The tests measure the output. A burst goes in and the level is read after it stops: silent at
-zero, ringing on afterwards, quieter later than earlier rather than sustaining, still ringing
-after the knob comes down, and nothing crossing from one channel into the other.
-
-## The sampler
-
-Eight slots holding short sounds, triggered over whatever the decks are doing. Load one by
-clicking an empty pad, dropping a file on it, or taking Load from its menu. The number row on
-the keyboard fires the eight pads.
-
-| Decision | Why |
-| --- | --- |
-| It joins the master after the mixer | A sample is laid over the mix, not mixed into it. Running it through a channel would put it behind the crossfader, where a stab is useless |
-| A slot is a decoded buffer, swapped in atomically | The same handover the decks use, so loading a pad mid-set cannot stall the audio thread. The displaced sound is freed a few blocks later |
-| Triggering restarts rather than queues | Retriggering is what a sampler is for. The envelope carries across a retrigger, so tapping a pad fast does not chop the tail of each tap |
-| Every start and stop is faded over four milliseconds | Long enough to swallow the step a sound cut mid waveform would make, short enough that a stab still sounds like a stab |
-| Slots are resampled with the same interpolator as the decks | A 44.1 kHz sample out of a 48 kHz device is being resampled whether anyone thinks of it that way. Aliasing that is inaudible on its own is audible over a mix |
-| Sixty seconds is the limit | A sampler holds stabs and loops. Anything longer is a track, and the answer is a deck |
-
-Sixteen tests cover it, measuring output rather than checking that code ran: silent until
-triggered, a one shot that ends itself, a loop that does not, a retrigger that goes back to the
-start, a stop that fades, both gains scaling, the headphone send, two slots at once, and a
-44.1 kHz sound playing for its own length out of a 48 kHz device rather than eight per cent
-fast.
-
-## Four decks
-
-Decks A to D, four strips on the mixer, and two decks on screen at a time. The button beside a
-deck's clock swaps it for the one behind it: A for C on the left, B for D on the right.
-
-| Decision | Why |
-| --- | --- |
-| Two decks on screen, not four | Four side by side leaves each one too narrow to read a waveform on, and reading the waveform is what a deck is for. The swap button costs one click and keeps both of them full size |
-| The crossfader is assignable per channel | With four channels, A and B are no longer the only answers. C and D default to running past the crossfader, which is how a third deck is nearly always used |
-| Sync follows the nearest playing deck with a grid | With two decks "the other one" needed no definition. With four it is the whole feature, and a deck that is stopped or ungridded is not what anybody means |
-| Q, W, O and P follow the side, not the deck | They mean the deck on the left and the deck on the right, so the keys keep working after a swap. A cue key held across a swap is released against the deck it was pressed on |
-| The engine needed almost nothing | `AudioEngine::numDecks` was already `Mixer::numChannels`, and both the mixer and the engine loop over their strips. Raising the constant did most of it, which is what that constant was for |
-
-Five tests cover the mixer half: that there is a strip per deck, that C and D ignore the
-crossfader by default, that any channel can be put on either side of it, that the defaults read
-back, and that all four channels reach the master at once rather than two of them being dropped.
-
-## What a mapping can reach
-
-Everything a person can do is in the action registry, named once and reachable from a mapping
-file by that name. Two checks run over the registry itself: that every action has a name, and
-that every name finds its action again. An action added without its entry would otherwise be
-unreachable from hardware and nothing would say so.
-
-| Action | What it takes | Notes |
-| --- | --- | --- |
-| `deck.select` | `deck` | Puts that deck on screen in place of the one it shares a side with |
-| `deck.swap` | nothing | Swaps both sides at once: A and B out, C and D in, or back. What a single deck-toggle button on a controller means |
-| `mixer.crossfader_assign` | `deck`, `slot` | Which side of the crossfader a channel answers to: slot 0 the A side, 1 neither, 2 the B side |
-| `sampler.trigger` | `slot` | Starts that pad. With shift held it stops it instead |
-| `sampler.stop` | `slot` | |
-| `sampler.gain` | value | The level of the whole sampler |
-
-## Beyond milestone 1
-
-| Item | Status | Notes |
-| --- | :---: | --- |
-| Slip mode | ✅ | `Deck::setSlipEnabled`, sharing the shadow playhead with loop rolls. Action `deck.slip_toggle` for the DJ-202's note 0x07 |
-| Key detection | ✅ | `src/analysis/KeyDetector.*`, shown in the browser's Key column. See above |
-| Four decks | ✅ | Four decks, four mixer strips, a crossfader assignment per channel and a swap button per side. See above. Actions `deck.select`, `deck.swap` and `mixer.crossfader_assign` are in the registry, so the DJ-202 deck-toggle button needs only a mapping entry |
-| Loops and loop rolls | ✅ | `Deck::setLoopBeats` and friends, with a loop row on each deck. See above |
-| Effects | ✅ | A filter, a beat-synced echo and a reverb on every channel strip. The DJ-202 effects section is on MIDI channels 9 and 10, still unmapped |
-| Sampler | ✅ | `src/core/Sampler.*`, eight slots on a row of pads under the browser. See above. Actions `sampler.trigger`, `sampler.stop` and `sampler.gain` are in the registry; the DJ-202 pads send sampler notes on 0x21 to 0x30 and need only a mapping entry |
-| Record the master output | ✅ | `src/core/SetRecorder.*`, with a tracklist written beside the audio. See above |
-| Stem separation | ✅ | `src/analysis/StemSeparator.*` and `StemDsp.*`, with a knob per stem on each deck |
-| Video | ⬜ | Very large. Probably a separate project |
-
-## Working on this
-
-| Task | Windows | Linux |
-| --- | --- | --- |
-| Install dependencies | comes with VS 2022 Build Tools | `scripts/build.sh --deps` |
-| Build | `pwsh scripts/build.ps1` | `scripts/build.sh` |
-| Build and run | `pwsh scripts/build.ps1 -Run` | `scripts/build.sh --run` |
-| Run the tests | `ctest --test-dir build -C RelWithDebInfo` | `ctest --test-dir build` |
-| Start from scratch | `pwsh scripts/build.ps1 -Clean` | `scripts/build.sh --clean` |
-
-Pass audio files on the command line to start with tracks already on the decks, which is far
-faster than clicking through a file dialog while testing:
-
-```
-scripts/build.sh --run track-a.wav track-b.wav
-```
 
 ## Rules worth knowing before changing the engine
 
@@ -321,104 +76,460 @@ scripts/build.sh --run track-a.wav track-b.wav
 | Handing new data to the audio thread uses an atomic pointer swap | See `Deck::publish` and `Deck::cleanUp`. Copy that pattern rather than adding a mutex |
 | Every input goes through `ActionDispatcher` | Mouse, keyboard and MIDI produce the same actions, so the interface and the controller cannot drift apart |
 | Analysis results are immutable and shared by pointer | The interface can hold one as long as it likes without affecting the audio thread's lifetime rules |
-| Anything touching audio gets a test that measures the output | The suite has already caught three real bugs this way, not by checking that code runs |
+| Anything touching audio gets a test that measures the output | That is what has caught the real bugs, including every one below |
+
+---
+
+# Design notes
+
+Why things are the way they are, for whoever changes them next.
+
+## Tempo detection
+
+Checked against 60 tracks taken at random from a 13,000 track techno collection, with the BPM
+Mixxx had already worked out as the comparison.
+
+| Estimator | Agreed with Mixxx |
+| --- | :---: |
+| Autocorrelation peak alone | 44 / 60 |
+| Pulse-train scoring and a tempo prior | **57 / 60** |
+
+Nearly every failure of the first version was a ratio of exactly 4/3, such as 170.7 BPM reported
+for a 128 BPM track, and it reported them at full confidence. Autocorrelation cannot tell a tempo
+from three quarters of it, because the beat itself contaminates that lag. What fixed it:
+
+- **A pulse train, not a correlation peak**, scored on its weakest quarter of pulses rather than
+  the average. A train at 4/3 of the tempo hits a beat once every four pulses, and scoring the
+  average lets hitting hard three times in twelve rescue it.
+- **Aligned in windows of eight beats.** A rigid grid drifts off the beat over five minutes from
+  the fraction of a frame the period is out by, and then scores the right tempo as a miss.
+- **The bass band counts double**, because the kick is the beat, and **a tempo prior centred on
+  130 BPM**, since nothing in the signal separates a tempo from half of it. Better one written
+  assumption than the same guess spread through the search.
+- **Confidence is the margin over the best rival that is not a rounding of the winner.** Median
+  1.00 where it agrees with Mixxx, 0.73 where it does not, so the number is worth reading.
+
+One of the three remaining disagreements is Mixxx reading 63 BPM for a track that is plainly 126.
+To repeat the check, point the library at a folder, let it scan, and compare the `bpm` column.
+
+## Key detection
+
+Twelve pitch classes folded out of the spectrum, matched against the twenty-four
+Krumhansl-Kessler profiles, and reported in the sharps-throughout spelling DJ software uses,
+convertible to Camelot.
+
+| Decision | Why |
+| --- | --- |
+| Only the middle two minutes are read | Intros and outros are usually just drums, which say nothing about key and pull the histogram towards noise. Reading a whole track costs five times as much and changes almost nothing |
+| Bins more than 35 cents off a semitone do not vote | A bin between two semitones belongs to neither, and letting it vote smears the chromagram |
+| Nothing below about C3 counts | Below that, semitones are closer together than the transform can resolve |
+| Each frame is normalised before it is added | So a loud drop does not outvote the four quiet minutes that share its key |
+| A key already in the tags wins | Detection fills a gap rather than overruling a person |
+
+The honest limitation is the relative major: it shares all seven notes with its minor, and a
+progression touching neither leading tone is ambiguous to any method. Camelot notation is
+forgiving here, since a key and its relative share a number and mix anyway.
+
+## Key lock
+
+Rubber Band, fetched by CMake and built from its single compilation unit so its Meson build is
+never invoked. GPLv2 or later, so licence compatible.
+
+`Deck::feedStretcher` reads the track at its recorded speed and lets the time ratio carry the
+tempo. The stretcher is built in `prepare`, so the audio thread never allocates one. It is
+bypassed while scratching, and at exactly the recorded speed, where it would be a delay line
+that appears and disappears with the fader.
+
+Five tests in `tests/Deck_test.cpp` count zero crossings to measure the pitch that actually came
+out, rather than checking that the code ran.
+
+## Loops and rolls
+
+Beat-locked loops per deck: lengths from half a beat to sixteen, halve and double, loop in and
+out by hand, and a toggle. Clicking a length sets a loop; holding the same button rolls instead.
+
+| Decision | Why |
+| --- | --- |
+| An automatic loop starts on the beat *behind* the playhead | Snapping to the nearest beat lets a loop start a fraction late, and then it is late for every bar it plays. That is the mistake the button exists to prevent |
+| Loop bounds are computed on the message thread | They need the beat grid, which lives behind a shared pointer, and taking a reference count is not a realtime operation. The audio thread sees two plain numbers |
+| The wrap uses a modulo, not subtract-until-inside | A very short loop could otherwise want hundreds of iterations in one block |
+| Loops are honoured on the stretcher's feed head too | With key lock on, that head chooses the audio. Wrapping only the audible head would show a loop while playing straight through |
+| A hand on the platter suspends the loop | Direct manipulation should never be fenced in by something set earlier |
+| A roll clears its own loop when it ends | It was the roll's doing; leaving it on would silently trap the deck |
+
+A roll differs from a loop in the one way that matters: underneath it the track keeps running, so
+letting go drops you where the music got to. That is the shadow playhead in `Deck::processBlock`,
+and slip mode shares it.
+
+## Four decks
+
+Decks A to D with a strip each, two on screen at a time. The button beside a deck's clock swaps
+it for the one behind it: A for C on the left, B for D on the right.
+
+| Decision | Why |
+| --- | --- |
+| Two decks on screen, not four | Four side by side leaves each too narrow to read a waveform on, and reading the waveform is what a deck is for |
+| The crossfader is assignable per channel | With four channels, A and B are no longer the only answers. C and D default to running past it, which is how a third deck is nearly always used |
+| Sync follows the nearest playing deck with a grid | With two decks "the other one" needed no definition. With four it is the whole feature |
+| Q, W, O and P follow the side, not the deck | So the keys keep meaning left and right after a swap. A cue key held across a swap is released against the deck it was pressed on |
+
+It shipped with decks C and D silent. See **What running it turned up**.
+
+## Mixer and effects
+
+The three band EQ is a Linkwitz-Riley crossover rather than stacked shelves, so a band at zero
+is a true kill and the bands sum back flat at unity. Every gain is smoothed, so nothing clicks
+even when a controller sends coarse steps. The master soft clips above 0.7 rather than applying
+`tanh` everywhere, which used to cost about 8% of unity gain.
+
+**Filter**: one knob per channel, centred and doing nothing there, a low pass sweeping down and
+a high pass sweeping up. Both filters run at all times, transparent at their ends, so the knob
+never switches type mid-signal and clicks.
+
+**Echo**: one knob plus a length in beats. Turning it up raises wet level and feedback together,
+which is how a DJ echo is used.
+
+| Decision | Why |
+| --- | --- |
+| The delay is fed even at zero wet | So turning the knob up brings in repeats of what just played, not silence then a burst once the line fills |
+| The length is smoothed, not stepped | Changing beat division sweeps the repeats the way a tape delay does, which is the effect people reach for |
+| Feedback is capped below one | A mixer that can be left self-oscillating will be |
+| The engine sets the time, not the mixer | Tempo lives on the deck, and the mixer has no idea decks exist. No beat grid falls back to half a second, a musical guess rather than a silent failure |
+
+**Reverb**: one knob, under the echo.
+
+| Decision | Why |
+| --- | --- |
+| It runs at full wet into its own buffer | The knob is then a gain on that buffer: it cannot click, and turning it down leaves a tail ringing instead of cutting it mid-decay |
+| A block at a time, not a sample | `juce::Reverb` is written that way, so the strip is built per sample into a shaped buffer, reverberated, then mixed in the final pass |
+| The room is fixed and fairly large | A DJ reverb is one gesture, not a plugin |
+
+The chain is EQ, then filter, then echo, then reverb, which is the order a send chain has on
+hardware: repeats fall into the room.
+
+The tests measure output. For the echo, a click goes in and the level is sampled where each
+repeat is due and halfway between: loud on the beat and quiet between is what the right delay
+length means, and neither half alone would show it.
+
+## Sampler
+
+Eight slots of short sounds triggered over whatever the decks are doing. Load by clicking an
+empty pad, dropping a file on it, or the pad menu. The number row fires the eight pads.
+
+| Decision | Why |
+| --- | --- |
+| It joins the master after the mixer | A sample is laid over the mix, not mixed into it. Through a channel it would sit behind the crossfader, where a stab is useless |
+| A slot is a decoded buffer, swapped in atomically | The decks' handover, so loading a pad mid-set cannot stall the audio thread |
+| Triggering restarts rather than queues, and the envelope carries across | Retriggering is the point. Tapping fast must not chop the tail of each tap |
+| Four millisecond fades on every start and stop | Long enough to swallow the step of a sound cut mid waveform, short enough that a stab still sounds like one |
+| The decks' interpolator, not a cheaper one | A 44.1 kHz sample out of a 48 kHz device is being resampled whether anyone thinks of it that way, and aliasing inaudible on its own is audible over a mix |
+| Sixty seconds is the limit | Anything longer is a track, and the answer is a deck |
+
+Sixteen tests, including a 44.1 kHz sound playing for its own length out of a 48 kHz device
+rather than eight per cent fast.
+
+## Output routing and the cue bus
+
+`src/core/OutputRouter.*` holds the rules, out of the device callback and testable on its own.
+
+| Mode | Master | Cue |
+| --- | --- | --- |
+| Separate outputs | 1 and 2, stereo | 3 and 4, stereo, when the device has them |
+| Split output | 1, mono | 2, mono |
+
+A split is the trick that predates DJ interfaces: one stereo output, a splitter cable, one half
+to the speakers and the other to the headphones. It costs stereo in both, and it is the only way
+to pre-listen on a plain sound card, where the cue bus previously had nowhere to go at all.
+
+| Decision | Why |
+| --- | --- |
+| Split is never the default | It puts a mono master into one speaker. It is a choice in Audio setup, and it is remembered |
+| A split uses only outputs 1 and 2, whatever else the device has | A split is a statement about a cable, not about the hardware |
+| Mono is the average of both sides, not their sum | A loud stereo mix would clip on the way down otherwise |
+| Fewer than four outputs on separate pairs drops the cue | Putting it anywhere else would send the headphone feed to the room |
+| The mode is applied before the device opens | So the first block is routed correctly and the startup line tells the truth |
+
+Eleven tests: both modes against one, two and four outputs, inactive channels skipped, an
+oversized block trimmed, and canaries proving nothing is written past the block.
+
+## Broadcasting
+
+The master output to an Icecast server, encoded as Ogg Vorbis, while you play. The same tap the
+recorder uses, so listeners hear exactly what the room hears.
+
+It needed **no new dependencies**. JUCE already bundles a Vorbis encoder in
+`juce_audio_formats/codecs/oggvorbis` and a socket in `juce_core/network`, which between them
+are the whole job.
+
+| Decision | Why |
+| --- | --- |
+| The encoder writes to a socket through an `OutputStream` | That is the seam JUCE's Ogg writer already has. Encoding, buffering and the background thread come from `ThreadedWriter` unchanged, exactly as the recorder gets them |
+| A full FIFO drops samples rather than blocking | The same bargain the recorder makes, and the reason it is the right one: the people in the room paid to be there, and the stream is what gives way |
+| A reconnect rebuilds the stream rather than resuming it | Ogg carries its headers at the front, so a server joining halfway through one has nothing to decode. The backoff runs 1, 2, 4 seconds up to 30 while the audio carries on untouched |
+| `PUT` first, then `SOURCE` | Icecast 2.4 and later want the HTTP verb; older servers and most Icecast-alikes only know the original one. Trying both costs a round trip on an old server and nothing on a new one |
+| The request is built by a function that touches no socket | The handshake is the part most likely to be subtly wrong and the easiest to test if it is kept away from the network |
+| Settings that cannot work are refused before a socket opens | A typo becomes a sentence rather than a timeout |
+
+**Track titles do not appear on an Ogg mount.** Measured against Icecast 2.4.4, which answers
+"Mountpoint will not accept URL updates". That is correct behaviour, not a fault: Ogg carries
+metadata in band in its Vorbis comment header, and the admin URL exists for MP3 and Shoutcast
+sources that have nowhere else to put it. The code is kept, and works the day an MP3 mount does.
+
+**A broadcast lags the room**, by the encoder and the network. Vorbis fills an Ogg page before it
+emits one, and a quiet passage fills it slowly: a pure tone at quality 5 took five seconds to
+produce a couple of pages. That is normal for every internet radio stream.
+
+Ten tests cover it, including one that stands a fake server on a loopback socket, broadcasts at
+it, and checks the request arrived and Ogg pages followed. There is also a hidden `[.live]` test
+for a real server; `tests/Broadcast_test.cpp` says how to run it.
+
+Verified end to end against Icecast 2.4.4 in Docker: the source registered at 160 kbps, 48 kHz,
+stereo, with its genre intact, and a listener pulled 40 KB of `audio/ogg` beginning with the
+`OggS` marker while it was live.
+
+## Picking a device worth playing on
+
+The default device used to open as DirectSound at 2560 samples, 87 ms out. That is a beat and a
+half between a hand and the sound, and no amount of care above it makes up for that.
+
+Device types are now ranked and tried best first: ASIO, JACK and CoreAudio, then a low latency
+mode, then shared WASAPI or ALSA, with DirectSound last, since it is the one backend on a
+Windows machine that cannot do low latency. JUCE's first open happens before the types can be
+listed at all, so the manager is moved onto the best type immediately afterwards. The last resort
+asks the best type for its default *by name* rather than taking whatever JUCE started on, and
+`tightenBufferSize` asks a device sitting on something enormous for about 256 samples.
+
+| | Before | After |
+| --- | --- | --- |
+| Device type | DirectSound | Windows Audio (Low Latency Mode) |
+| Buffer | 2560 samples | 336 samples |
+| Output latency | 87 ms | 7.0 ms |
+| Second start | 8 to 12 s | 0.25 s |
+
+Asking by name also settled the device being remembered: JUCE writes state for a device that was
+asked for, so a second launch reopens it and skips the scan, which is where the quarter of a
+second comes from. `AudioEngine::preferenceForDeviceType` is public and has three tests on it,
+because a build that quietly went back to DirectSound would sound broken everywhere and nothing
+would fail.
+
+## Library and browser
+
+| Piece | Notes |
+| --- | --- |
+| SQLite schema | `src/library/Library.cpp`: folders, tracks, tags, tempo, and an analysis version, so a better analyser quietly invalidates old results |
+| Analyse once | `AnalysisCache`, asked before anything is decoded. `Deck::loadFile` takes a `KnownTrack` and skips the tempo pass |
+| Scanning | A quick tag pass so the browser fills in seconds, then analysis at low priority, written as it goes so it can be stopped and resumed |
+| Tag reading | `TagReader.cpp` parses ID3v2.2 to 2.4 and ID3v1 directly, plus MP3 length from the Xing header. Opening a decoder for 13,000 files just to ask their length is far too slow |
+| Browser | Search, sortable columns, folder filter, double-click or drag onto a deck, and `browse.scroll` so the controller's encoder moves the selection |
+
+## Recording a set
+
+The master output to a 24-bit WAV in the user's music folder, with a tracklist beside it.
+
+| Decision | Why |
+| --- | --- |
+| Tapped after the mixer, before the device | So the file holds exactly what the room heard: crossfader, master gain, soft clip and all |
+| Written through JUCE's `ThreadedWriter` | The audio thread copies into a FIFO and returns; encoding and disk writes happen elsewhere |
+| A full FIFO drops samples rather than blocking | The recording loses them, the room does not. The count is kept and reported: status bar, closing dialog, and the tracklist file, which is the one still there tomorrow. A set with a hole must not look complete |
+| The tracklist is timed against the recording, and seeded with whatever is already playing | The wall clock would drift if samples were dropped, and recording usually starts a minute into the first track, so the list would otherwise begin with the second record |
+
+## What is remembered
+
+`src/app/Settings.*` keeps a session in `settings.json` beside the library database, with the
+audio device in JUCE's own `audio-device.xml` next to it.
+
+| Kept | Not kept |
+| --- | --- |
+| The audio device, and the cue routing mode | What was on the decks, and where in it |
+| Master, phones and cue mix levels | The channel faders and the crossfader |
+| Crossfader curve and per-channel assignment | EQ, filter, echo and reverb settings |
+| Tempo fader ranges, which decks are on screen | |
+| The sampler pads, their files, loops and gains | |
+| The window's size and position | |
+
+| Decision | Why |
+| --- | --- |
+| Decks and faders are deliberately not restored | An application that reopens playing where it crashed, or with a fader somewhere the user cannot see, is worse than one that starts quiet |
+| A device chosen by hand beats the device search | The search makes a good first guess; it does not overrule somebody who already answered |
+| Every field falls back on its own | An older or hand-edited file loses only the settings it got wrong. Out of range values are clamped rather than refused |
+| Pads reload from their files | A file that moved leaves its pad empty, which is the truth, rather than a pad that looks loaded and plays nothing |
+| Written to a temporary file and moved into place | An interrupted write leaves the previous settings, not half of the new ones |
+| Plain JSON | A setting can be corrected by hand before an interface for it exists |
+
+## What a mapping can reach
+
+Everything a person can do is in the action registry, named once and reachable from a mapping
+file by that name. Two tests walk the registry: every action has a name, and every name finds its
+action. An action added without its entry would be unreachable from hardware and nothing else
+would say so.
+
+| Action | Takes | Notes |
+| --- | --- | --- |
+| `deck.select` | `deck` | Puts that deck on screen in place of the one it shares a side with |
+| `deck.swap` | nothing | Swaps both sides at once. What a single deck-toggle button means |
+| `mixer.crossfader_assign` | `deck`, `slot` | 0 the A side, 1 neither, 2 the B side |
+| `sampler.trigger` | `slot` | Starts that pad; with shift, stops it |
+| `sampler.stop` | `slot` | |
+| `sampler.gain` | value | The level of the whole sampler |
+
+Plus the loop family: `loop.in`, `loop.out`, `loop.toggle`, `loop.beats`, `loop.roll`,
+`loop.halve`, `loop.double`, `loop.reloop`. `loop.beats` and `loop.roll` take a slot, which
+`loopBeatsForSlot` turns into a length.
+
+---
+
+# What running it turned up
+
+Three real faults that no test caught, all found by building the thing and using it. They are
+kept together because they share a lesson: the audio path had no seam a test could reach without
+a sound card.
+
+## Decks C and D were silent
+
+From the day four decks landed. The device callback built its deck views from a two element list
+written when there were two decks, so views 2 and 3 were default constructed with no channels and
+no samples. Both extra decks rendered into nothing, and the mixer was handed pointers to empty
+buffers.
+
+| Change | Why |
+| --- | --- |
+| `AudioEngine::prepareToPlay` and `renderNextBlock` are public | The device callback is one caller, not a privileged one. An offline render or a plugin wrapper wants the same seam, and a test needs it |
+| Views are built in a loop over `numDecks` | A list written by hand goes stale when a constant changes |
+| Pointed at storage with `setDataToReferTo` | Assigning an `AudioBuffer` copies, and copying allocates. On the audio thread that is its own bug |
+| Six tests in `tests/AudioEngine_test.cpp` | Every deck is loaded with a tone and required to reach the master. The old two element list was put back to confirm they fail, so they are known to catch this rather than merely to pass |
+
+## The crash on exit
+
+Closing the window ended the process with an access violation, `0xC0000005`, and it was the same
+bug wearing a different hat: `Mixer::processBlock` took its block length from the master buffer
+and trusted it for every other buffer, including the empty ones above. It now takes the length
+every buffer involved can actually take, and a deck handing over a short buffer is dropped.
+
+The method is worth keeping. Windows records the faulting offset in the Application event log,
+and `llvm-symbolizer --obj=OpenDJ.exe` turns image base plus that offset into a file and a line.
+It named `Mixer::processBlock` every time, which said the fault was on the audio thread rather
+than anywhere near the close button.
+
+Two other real faults were fixed on the way, neither the cause:
+
+- The window's bounds were read in the destructor, from a `DocumentWindow` already half torn
+  down. They are noted on the timer instead.
+- Shutdown is now explicit and ordered in `AudioEngine::stop`: callback and device first, then
+  the loader and separator pools, then any open recording.
+
+## MP3 tracks were refused
+
+JUCE over-reports the length of an MP3, so the last 93 to 189 ms failed to read and the whole
+track was discarded as undecodable. `TrackDecoder` now reads in chunks and halves the chunk on
+failure, keeping everything that does decode. A track whose reported length overruns what exists
+plays, which is the honest answer.
+
+---
+
+# The Roland DJ-202
+
+Measured on the hardware rather than taken from the documentation.
+
+| Check | Status | What was found |
+| --- | :---: | --- |
+| Note off behaviour | ✅ | Both forms occur, depending on the sequencer's MIDI version: as a UMP client releases arrive as note off, as a legacy client as note on with velocity zero. A release is taken from the message rather than the mapping, and a note off falls back to the note on control of the same number |
+| Jog tick rate | ✅ | 800, not the 512 the Mixxx mapping states: two turns produced 1590 ticks |
+| Platter encoding | ✅ | Controller 6, relative, centred on 64. The wheel also streams 14-bit absolute position as pitch bend, but that flows whenever a hand merely rests on it, so it is deliberately unmapped |
+| Tempo fader polarity | ⬜ | Still `"inverted": true` on an assumption. If the fader reads backwards, set it to `false` |
+
+## The one that cost the most: controller 6 and MIDI 2.0
+
+JUCE registers its ALSA sequencer client as MIDI 2.0. On a kernel that knows about UMP, the
+sequencer translates every legacy message before handing it over, and MIDI 2.0 reserves
+controller 6 as Data Entry, the middle of an RPN sequence, rather than a controller in its own
+right. A bare controller 6 is swallowed in translation.
+
+The DJ-202's platters report on controller 6. The touch was seen and the turning was not, so the
+deck stopped dead under the hand. Reproducible with nothing but `aseqdump`:
+
+```
+aseqdump -u 0   ->  controller 6 arrives, controller 7 arrives
+aseqdump -u 2   ->  controller 6 is gone, controller 7 arrives
+```
+
+`src/control/AlsaMidiCompat.cpp` defines the weak symbol JUCE uses to ask for MIDI 2.0, so the
+client stays at legacy MIDI 1.0. Delete it once JUCE lets an application choose its own client
+MIDI version.
+
+---
+
+# Working on this
+
+| Task | Windows | Linux |
+| --- | --- | --- |
+| Install dependencies | comes with VS 2022 Build Tools | `scripts/build.sh --deps` |
+| Build | `pwsh scripts/build.ps1` | `scripts/build.sh` |
+| Build and run | `pwsh scripts/build.ps1 -Run` | `scripts/build.sh --run` |
+| Run the tests | `pwsh scripts/build.ps1 -Test` | `ctest --test-dir build` |
+| Start from scratch | `pwsh scripts/build.ps1 -Clean` | `scripts/build.sh --clean` |
+| Build with ASIO | `pwsh scripts/build.ps1 -Asio` | not applicable |
+
+Pass audio files on the command line to start with tracks already on the decks, which is far
+faster than clicking through a file dialog while testing:
+
+```
+scripts/build.sh --run track-a.wav track-b.wav
+```
+
+ASIO needs Steinberg's SDK, which is headers and cannot be shipped with anything. An ASIO
+*driver* such as ASIO4ALL is not the SDK. See the README.
 
 ## Continuous integration
 
-The workflow is `.gitea/workflows/build.yml`. It runs on pushes to `main` and `testing`, on pull
-requests, and on demand from the Actions tab.
-
-### Re-running a workflow
-
-Open the Actions tab, pick the workflow, and use **Run workflow** for a fresh run, or open a
-finished run and use its re-run button. Neither needs a commit.
+`.gitea/workflows/build.yml` runs on pushes to `main` and `testing`, on pull requests, and on
+demand from the Actions tab. The README carries a status badge per branch; Gitea's badges are per
+workflow rather than per job, so one badge covers both platforms.
 
 | Job | Runs on | Status |
 | --- | --- | :---: |
 | fedora | `fedora:latest` container on the Linux runner | ✅ |
 | debian | the Linux runner's own image | ✅ |
-| windows | removed | ⬜ |
-
-### Why there is no Windows job
-
-There was one, it worked, and it was removed anyway. The only Windows runner available was a
-desktop someone works on, and a five minute MSVC build landing on it for every push made that
-machine unusable to type on. CI that costs more than it catches is not worth running.
-
-Windows is still checked, by building and running the tests there directly, which is what has
-actually been catching things: the `NOMINMAX` failure, the MP3 decode bug and the loop work were
-all found that way rather than by a CI tick.
-
-To bring it back, on a machine nobody is working on, see below. The job itself is kept as a
-comment at the foot of `.gitea/workflows/build.yml` so it can be pasted back in one piece.
-
-Two things about the remaining jobs are worth knowing before changing them.
+| windows | removed, see below | ⬜ |
 
 | Detail | Why |
 | --- | --- |
-| The Fedora job installs `nodejs` and `git` before anything else | `actions/checkout` is a JavaScript action, and the stock Fedora image has neither. Without that step the job fails in two seconds, long before a compiler is involved |
-| A Windows job, if restored, should call `scripts/build.ps1` rather than CMake directly | The script finds the CMake, Ninja and MSVC environment inside Visual Studio Build Tools, so a self-hosted machine needs nothing on PATH but git and node |
+| The Fedora job installs `nodejs` and `git` first | `actions/checkout` is a JavaScript action and the stock image has neither. Without it the job fails in two seconds, long before a compiler is involved |
+| There is no Windows job | There was one, it worked, and it was removed: the only Windows runner was a desktop someone works on, and a five minute MSVC build per push made it unusable to type on. Windows is checked by building and testing there directly, which is what has actually caught things, including `NOMINMAX`, the MP3 bug and all three faults above |
+| A restored Windows job should call `scripts/build.ps1` | The script finds CMake, Ninja and the MSVC environment inside Build Tools, so the machine needs nothing on PATH but git and node |
 
-The README carries a status badge per branch. Gitea's badges are per workflow rather than per
-job, so one badge covers both platforms and goes red if either fails.
+The job is kept verbatim as a comment at the foot of the workflow file so it can be pasted back
+in one piece.
 
-### If a restored Windows job misbehaves
+### Restoring the Windows runner
 
-The runner is a console program on a desktop machine, so it goes down when the session that
-started it does, and a job already in flight is then left with no runner and fails for reasons
-that have nothing to do with the build. Check the machine before reading the log:
-
-| Check | Command |
-| --- | --- |
-| Is the service running? | `Get-Service GiteaRunner` |
-| Start or restart it | `Restart-Service GiteaRunner` |
-| Stop it eating the machine | `Stop-Service GiteaRunner; Set-Service GiteaRunner -StartupType Manual` |
-| What did it say? | `Get-Content C:\gitea-runner\logs\runner.err.log -Tail 40` |
-
-The runner writes its ordinary progress to stderr, so `runner.err.log` is the interesting file
-and `runner.log` stays empty. An empty `runner.log` is not a sign that anything is wrong.
-
-A last result of `0xC000013A` means it was killed by the session ending rather than crashing.
-
-### Registering a Windows runner
-
-There is no Windows job to run at the moment, so this is only needed if one is restored. The
-Linux runner advertises `ubuntu-latest` and has no MSVC, so it will never take a Windows job.
-On a machine nobody is working on, with Visual Studio Build Tools, git and Node installed:
+On a machine nobody is working on, with Build Tools, git and Node installed:
 
 ```
 pwsh scripts/setup-windows-runner.ps1 -Token <registration token>
-```
-
-Get the token from Gitea under repository Settings, then Actions, then Runners, then "Create new
-runner". The script downloads the runner, registers it with the label `windows-latest:host`, and
-starts it from a task at logon. The `:host` suffix is what makes jobs run directly on the machine
-rather than in a container.
-
-Then make it unattended:
-
-```
 pwsh scripts/install-runner-service.ps1
 ```
 
-That asks for Administrator, installs NSSM, and runs the runner as the `GiteaRunner` service on
-automatic startup, disabling the logon task so only one runner is ever live. `-Uninstall` undoes
-it and puts the task back.
+The token comes from repository Settings, then Actions, then Runners. The label is
+`windows-latest:host`, where `:host` is what makes jobs run on the machine rather than in a
+container. The second script installs it as the `GiteaRunner` service via NSSM, which is needed
+because the runner is a console program that does not speak to the service control manager;
+`-Uninstall` undoes it. Manage it with `Get-Service`, `Restart-Service`, or
+`Stop-Service GiteaRunner; Set-Service GiteaRunner -StartupType Manual` to stop it eating the
+machine. Logs are in `C:\gitea-runner\logs`, where `runner.err.log` is the interesting file
+because progress goes to stderr; a last result of `0xC000013A` means the session ended rather
+than a crash.
 
-| Detail | Why |
-| --- | --- |
-| NSSM rather than `sc.exe` | The runner is a console program and does not speak to the service control manager. Installed directly, Windows would keep reporting it as failing to start while it worked perfectly. NSSM runs it as a child and does the service protocol for it |
-| It runs as `LocalSystem` | So it needs no stored password. That is a privileged account, and jobs it runs are equally privileged, which is worth knowing before pointing this repository's CI at code you have not read |
-| Logs in `C:\gitea-runner\logs` | Rotated at 10 MB. The service restarts itself five seconds after any exit |
-| Job workspaces in `C:\gitea-runner\work`, set in `config.yaml` | Not a tidiness preference. See below |
+Two things about it are worth knowing in advance.
 
-The workspace location is the one setting here that must not be reverted to its default. A
-service running as `LocalSystem` has its home under `C:\Windows\System32`, which is where the
-runner would otherwise put each job. Visual Studio ships a **32-bit** CMake, and a 32-bit process
-reading a path under `System32` is silently redirected by WOW64 to `SysWOW64`, where the checkout
-is not. What you see is CMake reporting that the source directory does not exist, eleven seconds
-into a job whose checkout plainly succeeded into that exact directory. Nothing in the message
-hints at the cause.
+**Workspaces must stay in `C:\gitea-runner\work`, as set in `config.yaml`.** This is not a
+tidiness preference. The service runs as `LocalSystem`, whose home is under
+`C:\Windows\System32`. Visual Studio ships a 32-bit CMake, and a 32-bit process reading a path
+under `System32` is silently redirected by WOW64 to `SysWOW64`, where the checkout is not. It
+presents as CMake claiming the source directory does not exist, eleven seconds into a job whose
+checkout plainly succeeded.
+
+**`LocalSystem` is privileged, and so is every job it runs.** No stored password, but worth
+knowing before pointing this repository's CI at code you have not read.
 
 ### Reading a failed job's log
 
@@ -428,5 +539,5 @@ The web endpoint serves it without a token, which is quicker than clicking throu
 curl https://git.interdo.me/interdome/opendj/actions/runs/<run>/jobs/<job>/logs
 ```
 
-Get both ids from `/api/v1/repos/interdome/opendj/actions/runs/<run>/jobs`. The API's own
-`/logs` route needs a token; the web one does not.
+Get both ids from `/api/v1/repos/interdome/opendj/actions/runs/<run>/jobs`. The API's own `/logs`
+route needs a token; the web one does not.

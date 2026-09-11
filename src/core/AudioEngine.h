@@ -12,8 +12,10 @@
 #include "analysis/StemSeparator.h"
 #include "core/Deck.h"
 #include "core/Mixer.h"
+#include "core/OutputRouter.h"
 #include "core/Sampler.h"
 #include "core/SetRecorder.h"
+#include "stream/Broadcaster.h"
 
 #include <array>
 #include <atomic>
@@ -48,7 +50,27 @@ public:
         desktop's latency feels broken however good the MIDI is. Names to look
         for are passed in, and the default device is the fallback rather than
         the first choice. */
-    juce::String initialise (const juce::StringArray& preferredDeviceNames = {});
+    juce::String initialise (const juce::StringArray& preferredDeviceNames = {},
+                             const juce::XmlElement* savedDeviceState = nullptr);
+
+    /** The open device as XML, to be handed back to initialise next time.
+        Returns null before a device is open. */
+    std::unique_ptr<juce::XmlElement> getDeviceState();
+
+    /** How much a device type is worth reaching for, lower being better.
+
+        Public because it is the one rule in the device search worth pinning
+        down in a test: a build that quietly started preferring DirectSound
+        again would sound broken and nothing would fail. */
+    static int preferenceForDeviceType (const juce::String& typeName);
+
+    /** Takes the device away before anything else is torn down.
+
+        The destructor does this too, but by then the decks, the mixer and the
+        sampler are minutes from being freed and the device thread is still
+        calling into them. Shutting down explicitly, first, is the only ordering
+        that is actually guaranteed. Safe to call twice. */
+    void stop();
 
     /** The device that was opened, and why. For the status bar and the log. */
     juce::String getDeviceChoiceReason() const { return deviceChoiceReason; }
@@ -127,8 +149,46 @@ public:
             && loading[(size_t) deckIndex].load (std::memory_order_relaxed);
     }
 
-    /** True when the open device has a second output pair for the cue bus. */
-    bool hasCueOutput() const noexcept { return cueOutputAvailable.load (std::memory_order_relaxed); }
+    /** Where the master and cue busses go. Changing it takes effect on the
+        next block; the audio thread reads it once per block and nothing is
+        reopened, so this is safe to call while playing. */
+    void setOutputMode (OutputMode mode) noexcept
+    {
+        outputMode.store (mode, std::memory_order_relaxed);
+    }
+
+    OutputMode getOutputMode() const noexcept
+    {
+        return outputMode.load (std::memory_order_relaxed);
+    }
+
+    /** How many outputs the open device is actually using, or 0 with none. */
+    int getNumOutputChannels() const noexcept
+    {
+        return deviceOutputChannels.load (std::memory_order_relaxed);
+    }
+
+    /** True when the cue bus can be heard: four outputs on separate pairs, or
+        two on a split. */
+    bool hasCueOutput() const noexcept
+    {
+        return cueIsAudible (getOutputMode(), getNumOutputChannels());
+    }
+
+    //==========================================================================
+    // Driving the engine directly. The device callback is one caller of these
+    // and not a privileged one: an offline render, a test, or some future
+    // plugin wrapper is another. Keeping the per block work behind a private
+    // callback is what let four decks ship with two of them silent, because
+    // nothing outside a running sound card could reach it.
+    //==========================================================================
+
+    /** Sizes every buffer and prepares the decks, the mixer and the sampler. */
+    void prepareToPlay (double sampleRate, int blockSize);
+
+    /** Renders one block of the whole engine into the given device outputs.
+        Realtime safe: allocates nothing, locks nothing, opens nothing. */
+    void renderNextBlock (float* const* outputs, int numOutputChannels, int numSamples);
 
     /** A one line summary of the open device, for the status bar. */
     juce::String getDeviceDescription() const;
@@ -149,6 +209,9 @@ public:
     /** Records the master output, exactly what the room hears, including the
         crossfader and the master gain. */
     SetRecorder& getRecorder() noexcept { return recorder; }
+
+    /** Sends that same master output to a broadcast server. */
+    Broadcaster& getBroadcaster() noexcept { return broadcaster; }
 
     /** Starts recording at the open device's sample rate. Returns the file, or
         an invalid file with `error` filled in. */
@@ -185,11 +248,13 @@ private:
     juce::AudioBuffer<float> masterBuffer;
     juce::AudioBuffer<float> cueBuffer;
 
-    std::atomic<bool> cueOutputAvailable { false };
+    std::atomic<int> deviceOutputChannels { 0 };
+    std::atomic<OutputMode> outputMode { OutputMode::separatePairs };
     juce::String deviceChoiceReason;
 
     Sampler sampler;
     SetRecorder recorder;
+    Broadcaster broadcaster;
 
     std::array<std::atomic<double>, numDecks> echoBeats {};
 
@@ -197,6 +262,11 @@ private:
         the timer rather than per block: a tempo fader does not move fast enough
         for a fiftieth of a second to matter. */
     void updateEchoTimes();
+
+    /** Asks the open device for a buffer size a DJ can play on, if it is
+        sitting on something far larger. Some backends open at a quarter of a
+        second, which is unusable however good everything above it is. */
+    void tightenBufferSize();
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AudioEngine)
 };

@@ -16,6 +16,30 @@ namespace
 {
     constexpr int retirementSweepMs = 500;
     constexpr int preferredOutputChannels = 4;   // master pair plus cue pair
+
+    // What a DJ set needs out of a buffer size: small enough that a scratch
+    // feels attached to the hand, large enough to survive a laptop deciding to
+    // do something else for a moment. About five milliseconds at 48 kHz.
+    constexpr int preferredBufferSize = 256;
+    constexpr int smallestSafeBufferSize = 128;
+
+    /** The available types, best first. */
+    juce::Array<juce::AudioIODeviceType*> typesByPreference (juce::AudioDeviceManager& manager)
+    {
+        juce::Array<juce::AudioIODeviceType*> types;
+
+        for (auto* type : manager.getAvailableDeviceTypes())
+            if (type != nullptr)
+                types.add (type);
+
+        std::stable_sort (types.begin(), types.end(), [] (auto* a, auto* b)
+        {
+            return AudioEngine::preferenceForDeviceType (a->getTypeName())
+                 < AudioEngine::preferenceForDeviceType (b->getTypeName());
+        });
+
+        return types;
+    }
 }
 
 AudioEngine::AudioEngine()
@@ -29,19 +53,79 @@ AudioEngine::AudioEngine()
     }
 }
 
+int AudioEngine::preferenceForDeviceType (const juce::String& typeName)
+{
+    // A driver written for the job, where one is installed at all.
+    if (typeName == "ASIO" || typeName == "JACK" || typeName == "CoreAudio")
+        return 0;
+
+    // On Windows this is the default, and deliberately: the low latency mode
+    // is what makes a stock machine with no extra drivers playable. It opened
+    // at 7 ms here against DirectSound's 87.
+    if (typeName.containsIgnoreCase ("Low Latency"))
+        return 1;
+
+    if (typeName.containsIgnoreCase ("Windows Audio"))
+        return typeName.containsIgnoreCase ("Exclusive") ? 3 : 2;
+
+    if (typeName == "ALSA")
+        return 2;
+
+    // Last, always. DirectSound is the one backend on a Windows machine that
+    // cannot do low latency, whatever it is asked for.
+    if (typeName.containsIgnoreCase ("DirectSound"))
+        return 9;
+
+    return 5;
+}
+
 AudioEngine::~AudioEngine()
+{
+    stop();
+}
+
+void AudioEngine::stop()
 {
     stopTimer();
 
-    // Let any decode in flight finish before the decks go away.
-    loaderPool.removeAllJobs (true, 5000);
-
+    // The callback goes first and the device with it, so nothing below can be
+    // reached from the device thread while it is being pulled apart.
     deviceManager.removeAudioCallback (this);
     deviceManager.closeAudioDevice();
+
+    // Then the background work, which reaches the decks and the sampler.
+    // Waiting here is the point: a decode still running when the decks are
+    // freed is the same crash by a different route.
+    loaderPool.removeAllJobs (true, 5000);
+    separatorPool.removeAllJobs (true, 5000);
+
+    // A recording still open would otherwise be left without its final flush.
+    if (recorder.isRecording())
+        recorder.stop();
+
+    broadcaster.stop();
 }
 
-juce::String AudioEngine::initialise (const juce::StringArray& preferredDeviceNames)
+juce::String AudioEngine::initialise (const juce::StringArray& preferredDeviceNames,
+                                      const juce::XmlElement* savedDeviceState)
 {
+    // A device chosen by hand last time wins over anything found by searching:
+    // the search exists to make a good first guess, not to overrule a person
+    // who has already answered the question.
+    if (savedDeviceState != nullptr)
+    {
+        const auto saved = deviceManager.initialise (0, preferredOutputChannels,
+                                                     savedDeviceState, true);
+
+        if (saved.isEmpty() && deviceManager.getCurrentAudioDevice() != nullptr)
+        {
+            deviceChoiceReason = "chosen last time";
+            deviceManager.addAudioCallback (this);
+            startTimer (retirementSweepMs);
+            return {};
+        }
+    }
+
     // The device manager has to be initialised before its device types can be
     // enumerated, so start with the default and then look for something better.
     auto error = deviceManager.initialiseWithDefaultDevices (0, preferredOutputChannels);
@@ -50,6 +134,21 @@ juce::String AudioEngine::initialise (const juce::StringArray& preferredDeviceNa
         return error;
 
     deviceChoiceReason = "default device";
+
+    // The first initialise above opens whatever type JUCE starts on, which is
+    // DirectSound on Windows. Move to the best available type straight away, so
+    // a run that never gets past this point is still on a playable backend
+    // rather than one that cannot do low latency.
+    if (const auto types = typesByPreference (deviceManager); ! types.isEmpty())
+    {
+        const auto& best = types.getFirst()->getTypeName();
+
+        if (deviceManager.getCurrentAudioDeviceType() != best)
+        {
+            deviceManager.setCurrentAudioDeviceType (best, true);
+            deviceChoiceReason = "default device on " + best;
+        }
+    }
 
     const auto openNamed = [this] (juce::AudioIODeviceType& type, const juce::String& name)
     {
@@ -66,11 +165,8 @@ juce::String AudioEngine::initialise (const juce::StringArray& preferredDeviceNa
 
     // The controller's own interface first, wherever it turns up. Its four
     // outputs are exactly the master pair and the cue pair the mixer wants.
-    for (auto* type : deviceManager.getAvailableDeviceTypes())
+    for (auto* type : typesByPreference (deviceManager))
     {
-        if (type == nullptr)
-            continue;
-
         type->scanForDevices();
 
         for (const auto& name : type->getDeviceNames (false))
@@ -87,6 +183,7 @@ juce::String AudioEngine::initialise (const juce::StringArray& preferredDeviceNa
             if (openNamed (*type, name).isEmpty())
             {
                 deviceChoiceReason = "matched the controller";
+                tightenBufferSize();
                 deviceManager.addAudioCallback (this);
                 startTimer (retirementSweepMs);
                 return {};
@@ -99,11 +196,8 @@ juce::String AudioEngine::initialise (const juce::StringArray& preferredDeviceNa
     if (auto* device = deviceManager.getCurrentAudioDevice();
         device == nullptr || device->getOutputChannelNames().size() < preferredOutputChannels)
     {
-        for (auto* type : deviceManager.getAvailableDeviceTypes())
+        for (auto* type : typesByPreference (deviceManager))
         {
-            if (type == nullptr)
-                continue;
-
             for (const auto& name : type->getDeviceNames (false))
             {
                 if (openNamed (*type, name).isNotEmpty())
@@ -113,6 +207,7 @@ juce::String AudioEngine::initialise (const juce::StringArray& preferredDeviceNa
                     opened != nullptr && opened->getOutputChannelNames().size() >= preferredOutputChannels)
                 {
                     deviceChoiceReason = "has a cue bus";
+                    tightenBufferSize();
                     deviceManager.addAudioCallback (this);
                     startTimer (retirementSweepMs);
                     return {};
@@ -120,14 +215,40 @@ juce::String AudioEngine::initialise (const juce::StringArray& preferredDeviceNa
             }
         }
 
-        // Nothing better was found, so go back to the default rather than
-        // leaving whichever device the search happened to stop on.
-        error = deviceManager.initialiseWithDefaultDevices (0, preferredOutputChannels);
+        // Nothing with a cue bus was found, so take the default again rather
+        // than leaving whichever device the search happened to stop on. The
+        // best available type is asked first: its default output is a better
+        // answer than DirectSound's, and asking by name is also what gives the
+        // settings file something to remember.
+        auto opened = false;
 
-        if (error.isNotEmpty())
-            return error;
+        for (auto* type : typesByPreference (deviceManager))
+        {
+            if (const auto names = type->getDeviceNames (false); ! names.isEmpty())
+            {
+                const auto index = juce::jmax (0, type->getDefaultDeviceIndex (false));
+                const auto name = names[juce::jmin (index, names.size() - 1)];
+
+                if (openNamed (*type, name).isEmpty()
+                    && deviceManager.getCurrentAudioDevice() != nullptr)
+                {
+                    deviceChoiceReason = "best available default";
+                    opened = true;
+                    break;
+                }
+            }
+        }
+
+        if (! opened)
+        {
+            error = deviceManager.initialiseWithDefaultDevices (0, preferredOutputChannels);
+
+            if (error.isNotEmpty())
+                return error;
+        }
     }
 
+    tightenBufferSize();
     deviceManager.addAudioCallback (this);
     startTimer (retirementSweepMs);
     return {};
@@ -169,7 +290,13 @@ void AudioEngine::loadTrackAsync (int deckIndex, const juce::File& file,
         // A loaded track goes into the tracklist, so a recorded set comes with
         // one rather than two unbroken hours nobody can navigate.
         if (succeeded)
-            recorder.noteTrack (decks[(size_t) deckIndex]->getTrackTitle());
+        {
+            const auto title = decks[(size_t) deckIndex]->getTrackTitle();
+            recorder.noteTrack (title);
+
+            // Listeners see the same thing the tracklist records.
+            broadcaster.noteTrack (title);
+        }
 
         if (onComplete != nullptr)
             juce::MessageManager::callAsync ([onComplete, succeeded] { onComplete (succeeded); });
@@ -187,7 +314,7 @@ void AudioEngine::loadSampleAsync (int slot, const juce::File& file,
         // Decoding is the slow part and happens here; installing is one atomic
         // store and happens on the message thread, which owns the slot.
         juce::MessageManager::callAsync (
-            [this, slot, name = file.getFileNameWithoutExtension(),
+            [this, slot, file, name = file.getFileNameWithoutExtension(),
              decoded = std::shared_ptr<DecodedAudio> (std::move (decoded)),
              failureReason, onComplete]() mutable
             {
@@ -198,7 +325,7 @@ void AudioEngine::loadSampleAsync (int slot, const juce::File& file,
                     auto owned = std::make_unique<DecodedAudio> (std::move (*decoded));
                     error = {};
 
-                    if (! sampler.installSlot (slot, std::move (owned), name, &error)
+                    if (! sampler.installSlot (slot, std::move (owned), name, &error, file)
                         && error.isEmpty())
                         error = "That sound could not be loaded.";
                 }
@@ -358,6 +485,53 @@ juce::File AudioEngine::startRecording (juce::String& error)
     return file;
 }
 
+void AudioEngine::tightenBufferSize()
+{
+    auto* device = deviceManager.getCurrentAudioDevice();
+
+    if (device == nullptr)
+        return;
+
+    const auto sizes = device->getAvailableBufferSizes();
+
+    if (sizes.isEmpty() || device->getCurrentBufferSizeSamples() <= preferredBufferSize)
+        return;
+
+    // The smallest size at or above the target, so a device offering 128, 256
+    // and 512 lands on 256 rather than on the smallest thing it will admit to.
+    auto chosen = 0;
+
+    for (const auto size : sizes)
+        if (size >= smallestSafeBufferSize && (chosen == 0 || std::abs (size - preferredBufferSize)
+                                                            < std::abs (chosen - preferredBufferSize)))
+            chosen = size;
+
+    if (chosen == 0 || chosen == device->getCurrentBufferSizeSamples())
+        return;
+
+    auto setup = deviceManager.getAudioDeviceSetup();
+    setup.bufferSize = chosen;
+
+    // A device that refuses keeps what it had, which is worse but still works.
+    deviceManager.setAudioDeviceSetup (setup, true);
+}
+
+std::unique_ptr<juce::XmlElement> AudioEngine::getDeviceState()
+{
+    // JUCE only writes state for a device that was asked for by name, so a
+    // session that took the default has nothing to save and would open the
+    // default again next time even after the hardware changed underneath it.
+    // Saying what is open, explicitly, is what makes it worth remembering.
+    if (auto state = deviceManager.createStateXml(); state != nullptr)
+        return state;
+
+    if (deviceManager.getCurrentAudioDevice() == nullptr)
+        return nullptr;
+
+    deviceManager.setAudioDeviceSetup (deviceManager.getAudioDeviceSetup(), true);
+    return deviceManager.createStateXml();
+}
+
 juce::String AudioEngine::getDeviceDescription() const
 {
     auto* device = deviceManager.getCurrentAudioDevice();
@@ -376,18 +550,18 @@ juce::String AudioEngine::getDeviceDescription() const
                 << "  |  " << juce::String (sampleRate, 0) << " Hz"
                 << "  |  " << bufferSize << " samples"
                 << "  |  " << juce::String (latencyMs, 1) << " ms out"
-                << "  |  cue bus: " << (hasCueOutput() ? "outputs 3-4" : "unavailable");
+                << "  |  cue bus: "
+                << (! hasCueOutput()                             ? "unavailable"
+                  : getOutputMode() == OutputMode::splitStereo   ? "split across outputs 1-2"
+                                                                 : "outputs 3-4");
 
     return description;
 }
 
 //==============================================================================
 
-void AudioEngine::audioDeviceAboutToStart (juce::AudioIODevice* device)
+void AudioEngine::prepareToPlay (double sampleRate, int blockSize)
 {
-    const auto sampleRate = device->getCurrentSampleRate();
-    const auto blockSize = device->getCurrentBufferSizeSamples();
-
     for (auto& buffer : deckBuffers)
         buffer.setSize (2, blockSize, false, true, true);
 
@@ -399,9 +573,14 @@ void AudioEngine::audioDeviceAboutToStart (juce::AudioIODevice* device)
 
     mixer.prepare (sampleRate, blockSize);
     sampler.prepare (sampleRate);
+}
 
-    cueOutputAvailable.store (device->getActiveOutputChannels().countNumberOfSetBits() >= 4,
-                              std::memory_order_relaxed);
+void AudioEngine::audioDeviceAboutToStart (juce::AudioIODevice* device)
+{
+    prepareToPlay (device->getCurrentSampleRate(), device->getCurrentBufferSizeSamples());
+
+    deviceOutputChannels.store (device->getActiveOutputChannels().countNumberOfSetBits(),
+                                std::memory_order_relaxed);
 }
 
 void AudioEngine::audioDeviceStopped()
@@ -420,33 +599,37 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const*,
                                                     int numSamples,
                                                     const juce::AudioIODeviceCallbackContext&)
 {
+    renderNextBlock (outputChannelData, numOutputChannels, numSamples);
+}
+
+void AudioEngine::renderNextBlock (float* const* outputs, int numOutputChannels, int numSamples)
+{
     for (int ch = 0; ch < numOutputChannels; ++ch)
-        if (outputChannelData[ch] != nullptr)
-            juce::FloatVectorOperations::clear (outputChannelData[ch], numSamples);
+        if (outputs[ch] != nullptr)
+            juce::FloatVectorOperations::clear (outputs[ch], numSamples);
 
     // The device can hand us a shorter block than it advertised, so never grow
     // a buffer here; that would allocate on the audio thread.
-    if (numSamples > masterBuffer.getNumSamples())
+    if (numSamples <= 0 || numSamples > masterBuffer.getNumSamples())
         return;
 
-    // Wrap the preallocated storage in views of exactly this block's length.
-    // AudioBuffer's pointer constructor does not allocate.
-    std::array<juce::AudioBuffer<float>, numDecks> deckViews
-    {
-        juce::AudioBuffer<float> (deckBuffers[0].getArrayOfWritePointers(), 2, numSamples),
-        juce::AudioBuffer<float> (deckBuffers[1].getArrayOfWritePointers(), 2, numSamples)
-    };
-
-    juce::AudioBuffer<float> masterView (masterBuffer.getArrayOfWritePointers(), 2, numSamples);
-    juce::AudioBuffer<float> cueView (cueBuffer.getArrayOfWritePointers(), 2, numSamples);
-
+    // Views of exactly this block's length over storage that already exists.
+    // Default construction allocates nothing and neither does setDataToReferTo,
+    // where assigning a buffer would copy and therefore allocate. Every deck
+    // gets one: building this list by hand is how decks C and D came to render
+    // into nothing at all.
+    std::array<juce::AudioBuffer<float>, numDecks> deckViews;
     std::array<juce::AudioBuffer<float>*, numDecks> deckPointers {};
 
     for (size_t i = 0; i < (size_t) numDecks; ++i)
     {
+        deckViews[i].setDataToReferTo (deckBuffers[i].getArrayOfWritePointers(), 2, numSamples);
         decks[i]->processBlock (deckViews[i]);
         deckPointers[i] = &deckViews[i];
     }
+
+    juce::AudioBuffer<float> masterView (masterBuffer.getArrayOfWritePointers(), 2, numSamples);
+    juce::AudioBuffer<float> cueView (cueBuffer.getArrayOfWritePointers(), 2, numSamples);
 
     mixer.processBlock (deckPointers, masterView, cueView);
 
@@ -454,28 +637,16 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const*,
     // a sound laid over the mix rather than one of the things being mixed.
     sampler.processBlock (masterView, cueView, numSamples);
 
-    const auto copyPair = [outputChannelData, numOutputChannels, numSamples]
-                          (const juce::AudioBuffer<float>& source, int firstOutput)
-    {
-        for (int ch = 0; ch < 2; ++ch)
-        {
-            const auto destination = firstOutput + ch;
-
-            if (destination < numOutputChannels && outputChannelData[destination] != nullptr)
-                juce::FloatVectorOperations::copy (outputChannelData[destination],
-                                                   source.getReadPointer (ch),
-                                                   numSamples);
-        }
-    };
-
     // Recorded after the mixer and before the device, so the file holds exactly
     // what the room heard: crossfader, master gain, soft clip and all.
     recorder.write (masterView, numSamples);
 
-    copyPair (masterView, 0);
+    // The same tap feeds the broadcast, so a listener hears what the room
+    // hears. Both drop samples rather than stall, and neither can block here.
+    broadcaster.write (masterView, numSamples);
 
-    if (numOutputChannels >= 4)
-        copyPair (cueView, 2);
+    routeOutputs (masterView, cueView, outputs, numOutputChannels, numSamples,
+                  outputMode.load (std::memory_order_relaxed));
 }
 
 //==============================================================================

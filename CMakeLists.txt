@@ -96,6 +96,9 @@ set(OPENDJ_ENGINE_SOURCES
     ${CMAKE_SOURCE_DIR}/src/core/AudioEngine.cpp
     ${CMAKE_SOURCE_DIR}/src/core/Deck.cpp
     ${CMAKE_SOURCE_DIR}/src/core/Mixer.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/OutputRouter.cpp
+    ${CMAKE_SOURCE_DIR}/src/stream/Broadcaster.cpp
+    ${CMAKE_SOURCE_DIR}/src/stream/IcecastConnection.cpp
     ${CMAKE_SOURCE_DIR}/src/core/Sampler.cpp
     ${CMAKE_SOURCE_DIR}/src/core/SetRecorder.cpp
     ${CMAKE_SOURCE_DIR}/src/analysis/KeyDetector.cpp
@@ -122,6 +125,11 @@ juce_add_gui_app(OpenDJ
     COMPANY_NAME  "OpenDJ"
     BUNDLE_ID     "me.interdo.opendj"
     VERSION       ${PROJECT_VERSION}
+    # The same mark the repository carries, so the taskbar, the title bar and
+    # the readme are recognisably one product. JUCE builds the platform icon
+    # from these: an .ico on Windows, an .icns in a macOS bundle.
+    ICON_BIG      ${CMAKE_SOURCE_DIR}/images/icon.png
+    ICON_SMALL    ${CMAKE_SOURCE_DIR}/images/icon-256.png
     NEEDS_CURL    FALSE)
 
 juce_generate_juce_header(OpenDJ)
@@ -130,6 +138,7 @@ target_sources(OpenDJ PRIVATE
     ${OPENDJ_ENGINE_SOURCES}
     src/app/Main.cpp
     src/app/MainComponent.cpp
+    src/app/Settings.cpp
     src/ui/BrowserComponent.cpp
     src/ui/DeckComponent.cpp
     src/ui/MidiSetupComponent.cpp

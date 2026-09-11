@@ -1,4 +1,6 @@
-# OpenDJ
+<p align="center">
+  <img src="images/banner.png" alt="OpenDJ, free and open source DJ software" width="900">
+</p>
 
 | Branch | Build and tests |
 | --- | --- |
@@ -7,7 +9,7 @@
 
 Free and open source DJ software, built in C++ with [JUCE](https://juce.com).
 
-![Two decks with waveforms and beat grids, loop lengths and stem knobs on each, the mixer between them, the track library underneath showing tempo and key, and a Record button in the bottom bar](images/screen2.jpg)
+![Decks A and B with waveforms, beat grids, loop lengths, stem knobs and turntable platters, a four channel mixer between them with EQ, filter, echo, reverb and a crossfader assignment per channel, the track library underneath showing tempo and key, and a row of eight sampler pads along the bottom](images/screen3.jpg)
 
 The goal is an application a VirtualDJ user can sit down at and already know how to use:
 the same deck layout, the same workflow, the same muscle memory. The artwork, the naming
@@ -16,8 +18,8 @@ and the code are entirely original and entirely open.
 **Status: early development, but it mixes.** Four decks with turntable platters you can scratch,
 waveforms, beat grids, automatic BPM and key detection, sync, key lock, beat-locked loops and
 rolls, stem separation with a knob per stem, a mixer with a filter, a beat-synced echo and a reverb per channel, hot cues, an eight slot sampler, a
-searchable track library, set recording with a tracklist, and Roland DJ-202 support including its
-own audio interface and its platters.
+searchable track library, set recording with a tracklist, broadcasting to Icecast, and Roland
+DJ-202 support including its own audio interface and its platters.
 
 ## Design goals
 
@@ -79,6 +81,28 @@ Q, W, O and P follow the side rather than the deck, so they keep meaning the dec
 and the deck on the right after a swap. Sync matches the nearest deck that is playing and has a
 beat grid.
 
+## Broadcasting
+
+Press Stream in the bottom bar, fill in your server, and press Go live. OpenDJ encodes the master
+output as Ogg Vorbis and sends it to any Icecast server, which covers Icecast itself, most
+internet radio hosts, and the Icecast-compatible half of Shoutcast. The button counts up while
+you are on air and the status bar says where to.
+
+A dropped connection comes back on its own, waiting a little longer after each failure, and the
+music in the room never stops while it does. If the network cannot keep up, the stream loses
+those samples rather than the room losing audio, and the status bar says so.
+
+Two honest limitations. Track titles do not show on an Ogg mount, because Icecast carries Ogg
+metadata inside the stream and its title mechanism is for MP3 sources. And your listeners hear
+you a few seconds late, which is true of every internet radio stream.
+
+Your server password is stored in the settings file in clear text, as it is in every DJ
+application. The dialog says so too.
+
+YouTube, Twitch and Mixcloud are not supported yet. All three need an H.264 video track and will
+not accept audio alone, so they need a different machine underneath: see
+[ROADMAP.md](ROADMAP.md).
+
 ## The sampler
 
 A row of eight pads under the browser holds short sounds, played over whatever the decks are
@@ -88,6 +112,32 @@ the same eight pads.
 
 The knob beside them is the level of the whole sampler, and Cue sends it to the headphones as
 well as the room, so a sound can be found before anybody else hears it.
+
+OpenDJ picks the best audio backend it can find rather than the first one offered. On Windows
+that means **Windows Audio (Low Latency Mode)** by default, with ASIO ahead of it when you have
+built with the SDK, then shared or exclusive Windows Audio, and DirectSound last because it
+cannot do low latency. On Linux it means JACK or PipeWire ahead of ALSA. It also asks a device sitting on a huge buffer for a smaller one. On a
+plain Windows desktop that is the difference between 87 ms of output latency and 7 ms.
+
+## Headphones on a stereo interface
+
+Headphone cue normally lives on outputs 3 and 4, which a four channel interface such as the
+DJ-202's has and a plain sound card does not. Audio setup offers a split instead: the master on
+output 1 and the cue on output 2, both in mono, for use with a splitter cable. One half goes to
+the speakers and the other to the headphones.
+
+It is off unless you choose it, because a split puts a mono master into one speaker, and the
+choice is remembered.
+
+## What it remembers
+
+The audio device you picked, the master and headphone levels, the crossfader curve and which
+channels answer to it, the tempo fader ranges, which decks are on screen, your sampler pads,
+and the window's size and position. They live in `settings.json` beside the library database,
+as plain JSON you can edit.
+
+The decks themselves are deliberately not restored, and neither are the channel faders. Starting
+quiet, with nothing playing, is the only safe way for a DJ application to open.
 
 ## The library
 
@@ -192,14 +242,27 @@ cmake --build build --parallel
 
 ### ASIO on Windows
 
-ASIO is off by default because Steinberg's SDK cannot be redistributed. Download it
-yourself, then configure with:
+ASIO is off by default because Steinberg's SDK cannot be redistributed.
+
+**The SDK is not a driver.** ASIO4ALL, FL Studio ASIO and whatever came with an audio interface
+are drivers: they are what you play through. The SDK is a set of headers needed to build support
+for any of them, and installing a driver does not put it on your machine. Download it from
+steinberg.net, unpack it, and point the build at it once:
+
+```
+pwsh scripts/build.ps1 -Asio -AsioSdkPath C:/path/to/asiosdk
+```
+
+The path can be left off if the SDK is unpacked as `external/asiosdk`, in your Downloads folder,
+or at `C:/SDKs/asiosdk`. By hand it is:
 
 ```
 cmake -S . -B build -DOPENDJ_ENABLE_ASIO=ON -DOPENDJ_ASIO_SDK_PATH=C:/path/to/asiosdk
 ```
 
-Without it the app uses WASAPI, which is fine for development but not for a live set.
+Without it the app uses Windows Audio in its low latency mode, which measured 7 ms of output
+latency on a plain desktop and is genuinely usable. ASIO is still worth having for an interface
+with a driver written for it.
 
 ## Running the tests
 

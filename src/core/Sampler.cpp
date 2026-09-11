@@ -73,11 +73,13 @@ bool Sampler::loadSlot (int slot, juce::AudioFormatManager& formatManager,
     if (decoded == nullptr)
         return false;
 
-    return installSlot (slot, std::move (decoded), file.getFileNameWithoutExtension(), failureReason);
+    return installSlot (slot, std::move (decoded), file.getFileNameWithoutExtension(),
+                        failureReason, file);
 }
 
 bool Sampler::installSlot (int slot, std::unique_ptr<DecodedAudio> decoded,
-                           const juce::String& name, juce::String* failureReason)
+                           const juce::String& name, juce::String* failureReason,
+                           const juce::File& sourceFile)
 {
     if (! juce::isPositiveAndBelow (slot, numSlots))
     {
@@ -103,6 +105,7 @@ bool Sampler::installSlot (int slot, std::unique_ptr<DecodedAudio> decoded,
     sound->audio = std::move (decoded->audio);
     sound->sampleRate = decoded->sampleRate;
     sound->name = name;
+    sound->file = sourceFile;
 
     auto& s = slots[(size_t) slot];
 
@@ -166,6 +169,15 @@ juce::String Sampler::getSlotName (int slot) const
     // in a way that following the atomic would not be.
     const auto& owned = slots[(size_t) slot].owned;
     return owned != nullptr ? owned->name : juce::String();
+}
+
+juce::File Sampler::getSlotFile (int slot) const
+{
+    if (! juce::isPositiveAndBelow (slot, numSlots))
+        return {};
+
+    const auto& owned = slots[(size_t) slot].owned;
+    return owned != nullptr ? owned->file : juce::File();
 }
 
 double Sampler::getSlotLengthSeconds (int slot) const noexcept

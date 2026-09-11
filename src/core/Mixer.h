@@ -112,6 +112,8 @@ public:
     float getCueGain() const noexcept    { return cuePosition.load (std::memory_order_relaxed); }
     float getCueMix() const noexcept     { return targetCueMix.load (std::memory_order_relaxed); }
 
+    CrossfaderCurve getCrossfaderCurve() const noexcept { return curve.load (std::memory_order_relaxed); }
+
     //==========================================================================
     // Audio thread
     //==========================================================================

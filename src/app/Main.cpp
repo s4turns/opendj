@@ -11,6 +11,7 @@
 #include <JuceHeader.h>
 
 #include "app/MainComponent.h"
+#include "app/Settings.h"
 
 namespace opendj
 {
@@ -59,7 +60,21 @@ private:
             setContentOwned (new MainComponent(), true);
             setResizable (true, false);
             setResizeLimits (900, 600, 10000, 10000);
-            centreWithSize (getWidth(), getHeight());
+
+            // Back where it was left, if that is still somewhere a window can
+            // be. A monitor that has since been unplugged would otherwise put
+            // the window off the edge of everything, so the saved bounds are
+            // only honoured when they land on a screen that exists.
+            const auto saved = SessionState::readFrom (SessionState::defaultFile()).windowBounds;
+            const auto bounds = juce::Rectangle<int>::fromString (saved);
+
+            if (! bounds.isEmpty()
+                && juce::Desktop::getInstance().getDisplays()
+                       .getTotalBounds (true).intersects (bounds.reduced (40)))
+                setBounds (bounds);
+            else
+                centreWithSize (getWidth(), getHeight());
+
             setVisible (true);
         }
 
