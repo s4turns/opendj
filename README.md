@@ -5,20 +5,23 @@
 | [`main`](https://git.interdo.me/interdome/opendj/actions?workflow=build.yml&branch=main) | [![main](https://git.interdo.me/interdome/opendj/actions/workflows/build.yml/badge.svg?branch=main)](https://git.interdo.me/interdome/opendj/actions?workflow=build.yml&branch=main) |
 | [`testing`](https://git.interdo.me/interdome/opendj/actions?workflow=build.yml&branch=testing) | [![testing](https://git.interdo.me/interdome/opendj/actions/workflows/build.yml/badge.svg?branch=testing)](https://git.interdo.me/interdome/opendj/actions?workflow=build.yml&branch=testing) |
 
-Free and open source DJ software, built in C++ with [JUCE](https://juce.com).
-
 Each badge is a build and the full test suite on Fedora, Debian and Windows, and goes red if
 any one of the three fails. The badge itself only ever says "build", because Gitea labels it
 with the workflow name and offers no way to change that, so the branch is named beside it.
+
+Free and open source DJ software, built in C++ with [JUCE](https://juce.com).
+
+![Two decks with waveforms and beat grids, loop and stem controls, the mixer between them, and the track library underneath](images/screen1.jpg)
 
 The goal is an application a VirtualDJ user can sit down at and already know how to use:
 the same deck layout, the same workflow, the same muscle memory. The artwork, the naming
 and the code are entirely original and entirely open.
 
 **Status: early development, but it mixes.** Two decks with turntable platters you can scratch,
-waveforms, beat grids, automatic BPM detection and sync, key lock, a mixer with a filter per
-channel, hot cues, a searchable track library, and Roland DJ-202 support including its own audio
-interface and its platters. No effects, loops or sampler yet.
+waveforms, beat grids, automatic BPM and key detection, sync, key lock, beat-locked loops and
+rolls, stem separation with a knob per stem, a mixer with a filter per channel, hot cues, a
+searchable track library, and Roland DJ-202 support including its own audio interface and its
+platters. No effects or sampler yet.
 
 ## Design goals
 
