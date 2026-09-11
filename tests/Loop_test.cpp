@@ -46,8 +46,10 @@ namespace
             juce::AudioBuffer<float> content (2, numSamples);
             content.clear();
 
-            const auto addHit = [&content, numSamples] (double at, double frequency,
-                                                        double decay, float amplitude)
+            // fileSampleRate is used inside, so it has to be captured: MSVC lets
+            // a const local through without one, GCC does not.
+            const auto addHit = [&content, numSamples, fileSampleRate] (double at, double frequency,
+                                                                        double decay, float amplitude)
             {
                 const auto start = static_cast<int> (at);
 
