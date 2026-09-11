@@ -197,15 +197,33 @@ Verified end to end in the running application, not only in tests: eight seconds
 recorded to a 48 kHz 24-bit stereo file that reads back at the right length with real audio in
 it, and a tracklist beside it.
 
+## The echo
+
+One knob per channel, with a length in beats beside it. At zero it is silent and out of the way;
+turning it up raises the wet level and the feedback together, which is how a DJ echo is used.
+
+| Decision | Why |
+| --- | --- |
+| The delay is fed even at zero wet | So turning the knob up brings in repeats of what just played, rather than silence followed by a burst once the line fills |
+| The length is smoothed, not stepped | Changing beat division sweeps the repeats the way a tape delay does. That is an effect in its own right and the one people reach for |
+| Feedback is capped below one | A mixer that can be left self-oscillating will be |
+| It sits after the EQ and filter | Which is where a send is on a DJ mixer: it repeats whatever you shaped, not the raw track |
+| The engine sets the time, not the mixer | Tempo lives on the deck, and the mixer has no idea decks exist. A deck with no beat grid falls back to half a second, which is a musical guess rather than a silent failure |
+
+The tests measure the output rather than checking the code ran: a click goes in, and the level
+is sampled where each repeat is due and halfway between. Loud on the beat and quiet between is
+what having the right delay length means, and neither half alone would show it, since a wash is
+loud everywhere and silence is quiet everywhere.
+
 ## Beyond milestone 1
 
 | Item | Status | Notes |
 | --- | :---: | --- |
-| Slip mode | ⬜ | After a scratch the track carries on from where the hand left it, rather than catching up to where it would have been. The DJ-202 has a button for it on note 0x07 |
+| Slip mode | ✅ | `Deck::setSlipEnabled`, sharing the shadow playhead with loop rolls. Action `deck.slip_toggle` for the DJ-202's note 0x07 |
 | Key detection | ✅ | `src/analysis/KeyDetector.*`, shown in the browser's Key column. See above |
 | Four decks | ⬜ | `AudioEngine::numDecks` is a constant the mixer sizes itself from, so the engine mostly follows. The interface and the DJ-202 deck-toggle button are the work |
 | Loops and loop rolls | ✅ | `Deck::setLoopBeats` and friends, with a loop row on each deck. See above |
-| Effects | ⬜ | Filter, echo, reverb. The DJ-202 effects section is on MIDI channels 9 and 10, unmapped |
+| Effects | 🚧 | Filter and a beat-synced echo are done, one knob and a length each on the channel strip. Reverb is not. The DJ-202 effects section is on MIDI channels 9 and 10, unmapped |
 | Sampler | ⬜ | The DJ-202 pads send sampler notes on 0x21 to 0x30, unmapped |
 | Record the master output | ✅ | `src/core/SetRecorder.*`, with a tracklist written beside the audio. See above |
 | Stem separation | ✅ | `src/analysis/StemSeparator.*` and `StemDsp.*`, with a knob per stem on each deck |

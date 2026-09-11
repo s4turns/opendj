@@ -7,7 +7,7 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
-#include "core/Mixer.h"
+#include "core/AudioEngine.h"
 
 #include <array>
 #include <memory>
@@ -20,7 +20,7 @@ namespace opendj
 class MixerComponent final : public juce::Component
 {
 public:
-    explicit MixerComponent (Mixer& mixerToControl);
+    MixerComponent (AudioEngine& engineToUse, Mixer& mixerToControl);
 
     /** Redraws the level meters from the mixer's peak holds. */
     void refresh();
@@ -34,6 +34,8 @@ private:
         juce::Label heading;
         std::array<juce::Slider, 3> eq;      // high, mid, low, top to bottom
         juce::Slider filter;                 // centred: low pass down, high pass up
+        juce::Slider echo;                   // off at the bottom
+        juce::ComboBox echoBeats;            // how long one repeat lasts
         juce::Slider fader;
         juce::TextButton cue { "Cue" };
     };
@@ -41,6 +43,7 @@ private:
     void configureKnob (juce::Slider& knob);
     void layOutStrip (Strip& strip, juce::Rectangle<int> area);
 
+    AudioEngine& engine;
     Mixer& mixer;
 
     std::array<Strip, Mixer::numChannels> strips;

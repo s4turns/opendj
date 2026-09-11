@@ -47,6 +47,20 @@ public:
         sweeping out of the bottom. Both filters run at all times, transparent
         at their ends, so the knob never switches type mid-signal and clicks. */
     void setChannelFilter (int channel, float normalised);
+
+    /** A beat-synced echo per channel.
+
+        One knob: at zero it is silent and out of the way, and turning it up
+        raises both how much comes back and how long it takes to die away, which
+        is how a DJ echo is actually used. The repeats are always audible, never
+        a wash, because an echo you cannot hear the taps of is just reverb. */
+    void setChannelEcho (int channel, float amount);
+    float getChannelEcho (int channel) const noexcept;
+
+    /** How long one repeat lasts, in seconds. Set from the deck's beat length
+        by the engine, since the mixer has no idea what tempo anything is. */
+    void setChannelEchoTime (int channel, double seconds);
+    double getChannelEchoTime (int channel) const noexcept;
     void toggleChannelCue (int channel);
     bool isChannelCued (int channel) const;
 
@@ -101,6 +115,16 @@ private:
         juce::dsp::StateVariableTPTFilter<float> filterLow;    // the knob turned down
         juce::dsp::StateVariableTPTFilter<float> filterHigh;   // the knob turned up
         juce::SmoothedValue<float> filterLowCutoff, filterHighCutoff;
+
+        // The echo. Its length is smoothed rather than stepped, so changing the
+        // beat division sweeps the repeats the way a tape delay does instead of
+        // clicking, which is an effect in its own right and the one DJs expect.
+        juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Linear> echo { 1 };
+        juce::SmoothedValue<float> echoDelaySamples;
+        juce::SmoothedValue<float> echoWet, echoFeedback;
+
+        std::atomic<float> echoAmount { 0.0f };
+        std::atomic<double> echoSeconds { 0.5 };
 
         std::array<juce::SmoothedValue<float>, 3> bandGain;
         juce::SmoothedValue<float> faderGain;

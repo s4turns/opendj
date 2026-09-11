@@ -313,3 +313,190 @@ TEST_CASE ("the filter position is reported back for the interface", "[mixer][fi
     // An unknown channel answers with the neutral position rather than crashing.
     REQUIRE_THAT (mixer.getChannelFilter (99), WithinAbs (0.5f, 0.001f));
 }
+
+//==============================================================================
+// Echo
+//==============================================================================
+
+namespace
+{
+    /** Sends a single click through one channel and returns the master output,
+        so the repeats can be found by looking for them rather than inferred. */
+    std::vector<float> echoImpulseResponse (float amount, double echoSeconds, int blocks)
+    {
+        opendj::Mixer mixer;
+        juce::AudioBuffer<float> deckA (2, blockSize), deckB (2, blockSize);
+        juce::AudioBuffer<float> master (2, blockSize), cue (2, blockSize);
+
+        mixer.prepare (sampleRate, blockSize);
+        mixer.setMasterGain (1.0f);
+        mixer.setChannelFader (0, 1.0f);
+        mixer.setCrossfaderCurve (opendj::Mixer::CrossfaderCurve::linear);
+        mixer.setCrossfaderPosition (-1.0f);
+        mixer.setChannelEchoTime (0, echoSeconds);
+        mixer.setChannelEcho (0, amount);
+
+        // Every gain in the mixer ramps from zero, so a click sent in the first
+        // block is multiplied away before it reaches the master. Let the ramps
+        // finish on silence first, which is also what happens in practice.
+        for (int b = 0; b <= blocksToSettle; ++b)
+        {
+            deckA.clear();
+            deckB.clear();
+            std::array<juce::AudioBuffer<float>*, 2> decks { &deckA, &deckB };
+            mixer.processBlock (decks, master, cue);
+        }
+
+        std::vector<float> out;
+        out.reserve ((size_t) blocks * blockSize);
+
+        for (int b = 0; b < blocks; ++b)
+        {
+            deckA.clear();
+            deckB.clear();
+
+            // One click, in the first block after settling.
+            if (b == 0)
+                for (int ch = 0; ch < 2; ++ch)
+                    deckA.setSample (ch, 0, 0.5f);
+
+            std::array<juce::AudioBuffer<float>*, 2> decks { &deckA, &deckB };
+            mixer.processBlock (decks, master, cue);
+
+            for (int i = 0; i < blockSize; ++i)
+                out.push_back (master.getSample (0, i));
+        }
+
+        return out;
+    }
+
+    /** The loudest sample within a window. A click through the crossover rings
+        for a few dozen samples rather than arriving as a single spike, so a
+        repeat is a burst to be measured, not an index to be found. */
+    float peakNear (const std::vector<float>& signal, int centre, int radius)
+    {
+        const auto from = juce::jmax (0, centre - radius);
+        const auto to = juce::jmin ((int) signal.size(), centre + radius);
+
+        auto peak = 0.0f;
+
+        for (int i = from; i < to; ++i)
+            peak = juce::jmax (peak, std::abs (signal[(size_t) i]));
+
+        return peak;
+    }
+}
+
+TEST_CASE ("the echo is silent until it is turned up", "[mixer][echo]")
+{
+    const auto echoSeconds = 0.25;
+    const auto dry = echoImpulseResponse (0.0f, echoSeconds, 40);
+    const auto spacing = (int) (echoSeconds * sampleRate);
+
+    // The click arrives, and nothing comes back after it.
+    REQUIRE (peakNear (dry, 0, 300) > 0.01f);
+    REQUIRE (peakNear (dry, spacing, 300) < 0.0005f);
+    REQUIRE (peakNear (dry, spacing * 2, 300) < 0.0005f);
+}
+
+TEST_CASE ("the echo repeats at the time it was given", "[mixer][echo]")
+{
+    const auto echoSeconds = 0.25;
+    const auto response = echoImpulseResponse (0.7f, echoSeconds, 80);
+    const auto spacing = (int) (echoSeconds * sampleRate);
+
+    // Loud where a repeat is due and quiet halfway between. Neither half alone
+    // would show the delay length is right: a wash is loud everywhere, and
+    // silence is quiet everywhere.
+    for (int repeat = 0; repeat < 4; ++repeat)
+    {
+        const auto onBeat = peakNear (response, repeat * spacing, 300);
+        const auto between = peakNear (response, (int) ((repeat + 0.5) * spacing), 300);
+
+        INFO ("repeat " << repeat << ": on " << onBeat << ", between " << between);
+        REQUIRE (onBeat > 0.01f);
+        REQUIRE (between < onBeat * 0.2f);
+    }
+}
+
+TEST_CASE ("each repeat is quieter than the one before", "[mixer][echo]")
+{
+    // An echo that does not decay is a mixer that will be left howling.
+    const auto echoSeconds = 0.1;
+    const auto response = echoImpulseResponse (0.8f, echoSeconds, 80);
+    const auto spacing = (int) (echoSeconds * sampleRate);
+
+    auto previous = peakNear (response, 0, 300);
+
+    for (int repeat = 1; repeat < 5; ++repeat)
+    {
+        const auto level = peakNear (response, repeat * spacing, 300);
+
+        INFO ("repeat " << repeat << " level " << level << " against " << previous);
+        REQUIRE (level > 0.0f);
+        REQUIRE (level < previous);
+        previous = level;
+    }
+}
+
+TEST_CASE ("the echo dies away rather than running for ever", "[mixer][echo]")
+{
+    // Ten seconds after one click at full amount, there must be nothing left.
+    const auto blocks = (int) (sampleRate * 10.0 / blockSize);
+    const auto response = echoImpulseResponse (1.0f, 0.1, blocks);
+
+    auto tail = 0.0f;
+
+    for (size_t i = response.size() * 9 / 10; i < response.size(); ++i)
+        tail = juce::jmax (tail, std::abs (response[i]));
+
+    INFO ("tail level " << tail);
+    REQUIRE (tail < 0.001f);
+}
+
+TEST_CASE ("the echo time is clamped to something playable", "[mixer][echo]")
+{
+    opendj::Mixer mixer;
+    mixer.prepare (sampleRate, blockSize);
+
+    mixer.setChannelEchoTime (0, 1000.0);
+    REQUIRE (mixer.getChannelEchoTime (0) <= 4.0);
+
+    mixer.setChannelEchoTime (0, 0.0);
+    REQUIRE (mixer.getChannelEchoTime (0) >= 0.02);
+
+    // An out of range channel answers rather than writing past the end.
+    mixer.setChannelEchoTime (7, 1.0);
+    REQUIRE (mixer.getChannelEcho (7) == 0.0f);
+}
+
+TEST_CASE ("the echo on one channel leaves the other alone", "[mixer][echo]")
+{
+    opendj::Mixer mixer;
+    juce::AudioBuffer<float> deckA (2, blockSize), deckB (2, blockSize);
+    juce::AudioBuffer<float> master (2, blockSize), cue (2, blockSize);
+
+    mixer.prepare (sampleRate, blockSize);
+    mixer.setMasterGain (1.0f);
+    mixer.setChannelFader (0, 1.0f);
+    mixer.setChannelFader (1, 1.0f);
+    mixer.setCrossfaderCurve (opendj::Mixer::CrossfaderCurve::linear);
+    mixer.setCrossfaderPosition (1.0f);          // hard over on B
+    mixer.setChannelEcho (0, 1.0f);              // and the echo is on A
+    mixer.setChannelEchoTime (0, 0.1);
+
+    for (int b = 0; b < 40 + blocksToSettle; ++b)
+    {
+        deckA.clear();
+        deckB.clear();
+
+        if (b == blocksToSettle)
+            for (int ch = 0; ch < 2; ++ch)
+                deckA.setSample (ch, 0, 0.5f);
+
+        std::array<juce::AudioBuffer<float>*, 2> decks { &deckA, &deckB };
+        mixer.processBlock (decks, master, cue);
+
+        REQUIRE (master.getMagnitude (0, 0, blockSize) < 0.001f);
+    }
+}

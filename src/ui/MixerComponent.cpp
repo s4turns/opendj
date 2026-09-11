@@ -20,8 +20,8 @@ namespace
     constexpr int bandForRow (int row) noexcept { return 2 - row; }
 }
 
-MixerComponent::MixerComponent (Mixer& mixerToControl)
-    : mixer (mixerToControl)
+MixerComponent::MixerComponent (AudioEngine& engineToUse, Mixer& mixerToControl)
+    : engine (engineToUse), mixer (mixerToControl)
 {
     const char* headings[] = { "A", "B" };
 
@@ -56,6 +56,29 @@ MixerComponent::MixerComponent (Mixer& mixerToControl)
             mixer.setChannelFilter (channel, static_cast<float> (strip.filter.getValue()));
         };
         addAndMakeVisible (strip.filter);
+
+        configureKnob (strip.echo);
+        strip.echo.setValue (0.0, juce::dontSendNotification);
+        strip.echo.setDoubleClickReturnValue (true, 0.0);
+        strip.echo.setTooltip ("Echo: beat-synced repeats, off at the bottom");
+        strip.echo.onValueChange = [this, channel, &strip]
+        {
+            mixer.setChannelEcho (channel, static_cast<float> (strip.echo.getValue()));
+        };
+        addAndMakeVisible (strip.echo);
+
+        // The lengths a DJ echo is actually set to. A bar at the top, an
+        // eighth at the bottom, and the whole thing sweeps when it changes.
+        strip.echoBeats.addItemList ({ "1/8", "1/4", "1/2", "1", "2", "4" }, 1);
+        strip.echoBeats.setSelectedId (4, juce::dontSendNotification);   // one beat
+        strip.echoBeats.setTooltip ("How long one echo repeat lasts, in beats");
+        strip.echoBeats.onChange = [this, channel, &strip]
+        {
+            static constexpr double lengths[] = { 0.125, 0.25, 0.5, 1.0, 2.0, 4.0 };
+            const auto index = juce::jlimit (0, 5, strip.echoBeats.getSelectedId() - 1);
+            engine.setEchoBeats (channel, lengths[index]);
+        };
+        addAndMakeVisible (strip.echoBeats);
 
         strip.fader.setSliderStyle (juce::Slider::LinearVertical);
         strip.fader.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
@@ -173,6 +196,7 @@ void MixerComponent::refresh()
             follow (strip.eq[(size_t) row], mixer.getChannelEq (channel, 2 - row));
 
         follow (strip.filter, mixer.getChannelFilter (channel));
+        follow (strip.echo, mixer.getChannelEcho (channel));
 
         strip.cue.setToggleState (mixer.isChannelCued (channel), juce::dontSendNotification);
     }
@@ -221,6 +245,8 @@ void MixerComponent::layOutStrip (Strip& strip, juce::Rectangle<int> area)
     }
 
     strip.filter.setBounds (area.removeFromTop (44).reduced (4, 2));
+    strip.echo.setBounds (area.removeFromTop (44).reduced (4, 2));
+    strip.echoBeats.setBounds (area.removeFromTop (20).reduced (4, 1));
 
     strip.cue.setBounds (area.removeFromBottom (24).reduced (4, 2));
     strip.fader.setBounds (area.reduced (10, 6));

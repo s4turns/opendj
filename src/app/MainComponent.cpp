@@ -95,7 +95,7 @@ MainComponent::MainComponent()
         deckRow.addAndMakeVisible (*deckViews[(size_t) i]);
     }
 
-    mixerView = std::make_unique<MixerComponent> (engine.getMixer());
+    mixerView = std::make_unique<MixerComponent> (engine, engine.getMixer());
     deckRow.addAndMakeVisible (*mixerView);
 
     deckRow.onResized = [this] (juce::Rectangle<int> area)

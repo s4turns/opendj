@@ -114,6 +114,19 @@ public:
     /** A one line summary of the open device, for the status bar. */
     juce::String getDeviceDescription() const;
 
+    /** How many beats one echo repeat lasts on a deck. The mixer is told the
+        length in seconds; this is where that is worked out, because the tempo
+        lives on the deck and the mixer has no idea decks exist. A deck with no
+        beat grid falls back to half a second, which is a musical guess rather
+        than a silent failure. */
+    void setEchoBeats (int deckIndex, double beats);
+    double getEchoBeats (int deckIndex) const noexcept
+    {
+        return juce::isPositiveAndBelow (deckIndex, numDecks)
+            ? echoBeats[(size_t) deckIndex].load (std::memory_order_relaxed)
+            : 1.0;
+    }
+
     /** Records the master output, exactly what the room hears, including the
         crossfader and the master gain. */
     SetRecorder& getRecorder() noexcept { return recorder; }
@@ -157,6 +170,13 @@ private:
     juce::String deviceChoiceReason;
 
     SetRecorder recorder;
+
+    std::array<std::atomic<double>, numDecks> echoBeats {};
+
+    /** Pushes each deck's beat length into the mixer's echo. Cheap, and done on
+        the timer rather than per block: a tempo fader does not move fast enough
+        for a fiftieth of a second to matter. */
+    void updateEchoTimes();
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AudioEngine)
 };

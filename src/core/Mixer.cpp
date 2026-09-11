@@ -67,6 +67,20 @@ namespace
     constexpr float filterOpenLow = 22000.0f;   // a low pass this high is transparent
     constexpr float filterOpenHigh = 15.0f;     // and a high pass this low likewise
 
+    // Long enough for two beats at 60 BPM, which is slower than anything anyone
+    // will echo. The line is sized once in prepare and never again.
+    constexpr double maxEchoSeconds = 4.0;
+
+    constexpr double shortestEchoSeconds = 0.02;
+
+    /** The knob turned up raises the wet level and the feedback together. Kept
+        under one so the echo always dies away: a DJ mixer that could be left
+        self-oscillating is a mixer that will be. */
+    float echoFeedbackFor (float amount) noexcept
+    {
+        return juce::jlimit (0.0f, 0.85f, amount * 0.85f);
+    }
+
     /** Cutoff for the low pass half of the knob: transparent from the centre up. */
     float lowPassCutoffFor (float position)
     {
@@ -110,6 +124,16 @@ void Mixer::ChannelStrip::prepare (const juce::dsp::ProcessSpec& spec)
     filterLow.setResonance (0.8f);
     filterHigh.setResonance (0.8f);
 
+    echo.setMaximumDelayInSamples (juce::jmax (2, (int) (maxEchoSeconds * spec.sampleRate)));
+    echo.prepare (spec);
+
+    // The delay length glides over a quarter of a second: long enough to hear
+    // as a sweep, short enough that changing division still feels immediate.
+    echoDelaySamples.reset (spec.sampleRate, 0.25);
+    echoDelaySamples.setCurrentAndTargetValue ((float) (0.5 * spec.sampleRate));
+    echoWet.reset (spec.sampleRate, smoothingSeconds);
+    echoFeedback.reset (spec.sampleRate, smoothingSeconds);
+
     filterLowCutoff.reset (spec.sampleRate, smoothingSeconds);
     filterHighCutoff.reset (spec.sampleRate, smoothingSeconds);
     filterLowCutoff.setCurrentAndTargetValue (filterOpenLow);
@@ -131,6 +155,7 @@ void Mixer::ChannelStrip::reset()
     lowAllpass.reset();
     filterLow.reset();
     filterHigh.reset();
+    echo.reset();
 }
 
 //==============================================================================
@@ -184,6 +209,34 @@ void Mixer::setChannelFilter (int channel, float normalised)
     if (juce::isPositiveAndBelow (channel, numChannels))
         strips[(size_t) channel].filterPosition.store (juce::jlimit (0.0f, 1.0f, normalised),
                                                        std::memory_order_relaxed);
+}
+
+void Mixer::setChannelEcho (int channel, float amount)
+{
+    if (juce::isPositiveAndBelow (channel, numChannels))
+        strips[(size_t) channel].echoAmount.store (juce::jlimit (0.0f, 1.0f, amount),
+                                                   std::memory_order_relaxed);
+}
+
+float Mixer::getChannelEcho (int channel) const noexcept
+{
+    return juce::isPositiveAndBelow (channel, numChannels)
+        ? strips[(size_t) channel].echoAmount.load (std::memory_order_relaxed)
+        : 0.0f;
+}
+
+void Mixer::setChannelEchoTime (int channel, double seconds)
+{
+    if (juce::isPositiveAndBelow (channel, numChannels))
+        strips[(size_t) channel].echoSeconds.store (
+            juce::jlimit (shortestEchoSeconds, maxEchoSeconds, seconds), std::memory_order_relaxed);
+}
+
+double Mixer::getChannelEchoTime (int channel) const noexcept
+{
+    return juce::isPositiveAndBelow (channel, numChannels)
+        ? strips[(size_t) channel].echoSeconds.load (std::memory_order_relaxed)
+        : 0.0;
 }
 
 float Mixer::getChannelFilter (int channel) const noexcept
@@ -353,6 +406,12 @@ void Mixer::processBlock (const std::array<juce::AudioBuffer<float>*, numChannel
         strip.filterLowCutoff.setTargetValue (lowPassCutoffFor (filterPosition));
         strip.filterHighCutoff.setTargetValue (highPassCutoffFor (filterPosition));
 
+        const auto echoAmount = strip.echoAmount.load (std::memory_order_relaxed);
+        strip.echoDelaySamples.setTargetValue (
+            (float) (strip.echoSeconds.load (std::memory_order_relaxed) * currentSampleRate));
+        strip.echoWet.setTargetValue (echoAmount);
+        strip.echoFeedback.setTargetValue (echoFeedbackFor (echoAmount));
+
         strip.faderGain.setTargetValue (strip.targetFaderGain.load (std::memory_order_relaxed));
         strip.crossfaderGain.setTargetValue (strip.targetCrossfaderGain.load (std::memory_order_relaxed));
 
@@ -369,6 +428,11 @@ void Mixer::processBlock (const std::array<juce::AudioBuffer<float>*, numChannel
             strip.filterLow.setCutoffFrequency (strip.filterLowCutoff.getNextValue());
             strip.filterHigh.setCutoffFrequency (strip.filterHighCutoff.getNextValue());
 
+            const auto delaySamples = strip.echoDelaySamples.getNextValue();
+            const auto wet = strip.echoWet.getNextValue();
+            const auto feedback = strip.echoFeedback.getNextValue();
+            strip.echo.setDelay (delaySamples);
+
             for (int ch = 0; ch < 2; ++ch)
             {
                 const auto input = deckBuffer->getSample (ch, i);
@@ -384,6 +448,15 @@ void Mixer::processBlock (const std::array<juce::AudioBuffer<float>*, numChannel
 
                 // Filter after the EQ, which is where a DJ mixer puts it.
                 shaped = strip.filterHigh.processSample ((int) ch, strip.filterLow.processSample ((int) ch, shaped));
+
+                // Echo last, so it repeats whatever the EQ and filter made,
+                // which is what a send on a DJ mixer does. Feeding the delay
+                // even at zero wet keeps the line warm, so turning the knob up
+                // brings in repeats of what just played rather than silence
+                // followed by a sudden burst.
+                const auto delayed = strip.echo.popSample ((int) ch);
+                strip.echo.pushSample ((int) ch, shaped + delayed * feedback);
+                shaped += delayed * wet;
 
                 // The cue bus is pre-fader and pre-crossfader, so a track can be
                 // lined up in headphones before it is brought into the mix.

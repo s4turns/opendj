@@ -23,7 +23,10 @@ AudioEngine::AudioEngine()
     formatManager.registerBasicFormats();
 
     for (int i = 0; i < numDecks; ++i)
+    {
         decks[(size_t) i] = std::make_unique<Deck> (i, formatManager);
+        echoBeats[(size_t) i].store (1.0, std::memory_order_relaxed);
+    }
 }
 
 AudioEngine::~AudioEngine()
@@ -405,10 +408,36 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const*,
 
 //==============================================================================
 
+void AudioEngine::setEchoBeats (int deckIndex, double beats)
+{
+    if (! juce::isPositiveAndBelow (deckIndex, numDecks))
+        return;
+
+    echoBeats[(size_t) deckIndex].store (juce::jlimit (0.0625, 8.0, beats), std::memory_order_relaxed);
+    updateEchoTimes();
+}
+
+void AudioEngine::updateEchoTimes()
+{
+    for (int i = 0; i < numDecks; ++i)
+    {
+        const auto bpm = getEffectiveBpm (i);
+
+        // No grid, no tempo to sync to. Half a second is a musical length and a
+        // better answer than switching the effect off.
+        const auto beatSeconds = bpm > 0.0 ? 60.0 / bpm : 0.5;
+
+        mixer.setChannelEchoTime (i, beatSeconds * echoBeats[(size_t) i].load (std::memory_order_relaxed));
+    }
+}
+
 void AudioEngine::timerCallback()
 {
     for (auto& deck : decks)
         deck->cleanUp();
+
+    // The tempo fader moves, tracks change, and the echo has to follow both.
+    updateEchoTimes();
 }
 
 } // namespace opendj
