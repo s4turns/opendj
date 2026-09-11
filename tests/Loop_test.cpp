@@ -486,3 +486,44 @@ TEST_CASE ("loading a track leaves no loop behind", "[loop]")
     REQUIRE_FALSE (fixture.deck->isLoopEnabled());
     REQUIRE_FALSE (fixture.deck->isLoopRolling());
 }
+
+TEST_CASE ("a loop length is sticky", "[loop][sticky]")
+{
+    // Pressing a length starts that loop and leaves it running; pressing the
+    // same length again stops it. Every loop section on every piece of DJ gear
+    // behaves this way, and a controller has no click-and-hold to tell apart.
+    Fixture fixture;
+
+    REQUIRE (fixture.deck->getAnalysis() != nullptr);
+    REQUIRE (fixture.deck->getAnalysis()->hasTempo());
+
+    REQUIRE (fixture.deck->toggleLoopBeats (4.0));
+    REQUIRE (fixture.deck->isLoopEnabled());
+    REQUIRE_THAT (fixture.deck->getLoopBeats(), WithinAbs (4.0, 0.001));
+
+    // It survives being played through, rather than ending on its own.
+    fixture.deck->play();
+    fixture.run (50);
+    REQUIRE (fixture.deck->isLoopEnabled());
+
+    // The same length again turns it off.
+    REQUIRE_FALSE (fixture.deck->toggleLoopBeats (4.0));
+    REQUIRE_FALSE (fixture.deck->isLoopEnabled());
+}
+
+TEST_CASE ("another loop length changes the loop rather than stopping it", "[loop][sticky]")
+{
+    Fixture fixture;
+
+    REQUIRE (fixture.deck->toggleLoopBeats (8.0));
+    REQUIRE (fixture.deck->isLoopEnabled());
+
+    // Reaching for another length mid-loop means change to it, not stop.
+    REQUIRE (fixture.deck->toggleLoopBeats (2.0));
+    REQUIRE (fixture.deck->isLoopEnabled());
+    REQUIRE_THAT (fixture.deck->getLoopBeats(), WithinAbs (2.0, 0.001));
+
+    // And that new length is now the one that stops it.
+    REQUIRE_FALSE (fixture.deck->toggleLoopBeats (2.0));
+    REQUIRE_FALSE (fixture.deck->isLoopEnabled());
+}

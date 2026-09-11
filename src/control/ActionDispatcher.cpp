@@ -146,8 +146,12 @@ void ActionDispatcher::dispatch (const ActionMessage& message)
             break;
 
         case Action::loopBeats:
+            // Sticky: the button that turned a loop on is the button that turns
+            // it off again. Pressing a different length while one is running
+            // changes to that length rather than stopping, which is what a
+            // hand reaching for 4 in the middle of an 8 means.
             if (pressed)
-                deck.setLoopBeats (loopBeatsForSlot (message.slot));
+                deck.toggleLoopBeats (loopBeatsForSlot (message.slot));
             break;
 
         case Action::loopRoll:

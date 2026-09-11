@@ -114,6 +114,11 @@ private:
     juce::TextButton loopToggleButton { "Loop" };
     juce::TextButton loopHalveButton { "/2" };
     juce::TextButton loopDoubleButton { "x2" };
+    /** How long a loop button has to be held before it counts as a roll
+        rather than a click. Below this it leaves a loop running. */
+    static constexpr juce::uint32 holdIsARollMs = 350;
+
+    std::array<juce::uint32, numLoopButtons> loopButtonPressedAt {};
     std::array<bool, numLoopButtons> loopButtonRolling { };
 
     WaveformComponent scrollingWave { WaveformComponent::Mode::scrolling };

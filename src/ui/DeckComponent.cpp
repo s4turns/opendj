@@ -89,10 +89,21 @@ DeckComponent::DeckComponent (AudioEngine& engineToUse, int deckIndex, const juc
         button.setButtonText (beats < 1.0 ? "1/" + juce::String (juce::roundToInt (1.0 / beats))
                                           : juce::String (beats, 0));
         button.setTooltip ("Click for a " + button.getButtonText()
-                           + " beat loop, hold for a roll");
+                           + " beat loop that stays on, hold for a roll");
 
         button.onPress = [this, i, beats]
         {
+            loopButtonPressedAt[(size_t) i] = juce::Time::getMillisecondCounter();
+
+            // Pressing the length that is already looping turns it off.
+            if (deck.isLoopEnabled() && std::abs (deck.getLoopBeats() - beats) < 0.001)
+            {
+                deck.toggleLoopBeats (beats);
+                loopButtonPressedAt[(size_t) i] = 0;
+                refresh();
+                return;
+            }
+
             // A roll only makes sense over a running deck; on a stopped one the
             // button behaves as a plain loop.
             if (deck.isPlaying() && deck.beginLoopRoll (beats))
@@ -103,10 +114,20 @@ DeckComponent::DeckComponent (AudioEngine& engineToUse, int deckIndex, const juc
             refresh();
         };
 
-        button.onRelease = [this, i]
+        button.onRelease = [this, i, beats]
         {
+            const auto pressedAt = std::exchange (loopButtonPressedAt[(size_t) i], 0u);
+            const auto held = pressedAt != 0 ? juce::Time::getMillisecondCounter() - pressedAt : 0;
+
             if (std::exchange (loopButtonRolling[(size_t) i], false))
+            {
                 deck.endLoopRoll();
+
+                // Let go quickly and it was a click, not a hold: leave a loop
+                // running rather than the moment of roll the press began.
+                if (pressedAt != 0 && held < holdIsARollMs)
+                    deck.setLoopBeats (beats);
+            }
 
             refresh();
         };

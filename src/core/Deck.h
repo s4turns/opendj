@@ -156,6 +156,13 @@ public:
     void halveLoop();
     void doubleLoop();
 
+    /** Sticky: a length that is already looping is turned off, and any other
+        length replaces the loop rather than stopping it. The button that
+        started a loop is the one that stops it, which is how every loop
+        section on every piece of DJ gear behaves. Returns true if a loop is
+        running afterwards. */
+    bool toggleLoopBeats (double beats);
+
     void setLoopEnabled (bool shouldLoop);
     void toggleLoop();
     void clearLoop();

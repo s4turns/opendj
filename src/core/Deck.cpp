@@ -547,6 +547,17 @@ void Deck::doubleLoop()
         loopBeats.store (beats * 2.0, std::memory_order_relaxed);
 }
 
+bool Deck::toggleLoopBeats (double beats)
+{
+    if (isLoopEnabled() && std::abs (getLoopBeats() - beats) < 0.001)
+    {
+        setLoopEnabled (false);
+        return false;
+    }
+
+    return setLoopBeats (beats);
+}
+
 void Deck::setLoopEnabled (bool shouldLoop)
 {
     loopEnabled.store (shouldLoop && hasLoop(), std::memory_order_relaxed);
