@@ -91,9 +91,10 @@ the same eight pads.
 The knob beside them is the level of the whole sampler, and Cue sends it to the headphones as
 well as the room, so a sound can be found before anybody else hears it.
 
-OpenDJ picks the best audio backend it can find rather than the first one offered: ASIO or JACK
-ahead of a low latency mode, ahead of shared WASAPI or ALSA, with DirectSound last because it
-cannot do low latency. It also asks a device sitting on a huge buffer for a smaller one. On a
+OpenDJ picks the best audio backend it can find rather than the first one offered. On Windows
+that means **Windows Audio (Low Latency Mode)** by default, with ASIO ahead of it when you have
+built with the SDK, then shared or exclusive Windows Audio, and DirectSound last because it
+cannot do low latency. On Linux it means JACK or PipeWire ahead of ALSA. It also asks a device sitting on a huge buffer for a smaller one. On a
 plain Windows desktop that is the difference between 87 ms of output latency and 7 ms.
 
 ## What it remembers

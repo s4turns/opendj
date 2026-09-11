@@ -23,34 +23,6 @@ namespace
     constexpr int preferredBufferSize = 256;
     constexpr int smallestSafeBufferSize = 128;
 
-    /** How much a device type is worth reaching for, lower being better.
-
-        JUCE hands its types back in its own order, which on Windows puts
-        DirectSound first. DirectSound is the one backend on the machine that
-        cannot do low latency: it opened at 2560 samples here, 87 ms out, which
-        is a beat and a half of slack between a hand and the sound. Anything
-        else on the system beats it, so the search is ordered rather than
-        taking whatever comes first. */
-    int rankOf (const juce::String& typeName)
-    {
-        if (typeName == "ASIO" || typeName == "JACK" || typeName == "CoreAudio")
-            return 0;
-
-        if (typeName.containsIgnoreCase ("Low Latency"))
-            return 1;
-
-        if (typeName.containsIgnoreCase ("Windows Audio"))
-            return typeName.containsIgnoreCase ("Exclusive") ? 3 : 2;
-
-        if (typeName == "ALSA")
-            return 2;
-
-        if (typeName.containsIgnoreCase ("DirectSound"))
-            return 9;
-
-        return 5;
-    }
-
     /** The available types, best first. */
     juce::Array<juce::AudioIODeviceType*> typesByPreference (juce::AudioDeviceManager& manager)
     {
@@ -60,8 +32,11 @@ namespace
             if (type != nullptr)
                 types.add (type);
 
-        std::stable_sort (types.begin(), types.end(),
-                          [] (auto* a, auto* b) { return rankOf (a->getTypeName()) < rankOf (b->getTypeName()); });
+        std::stable_sort (types.begin(), types.end(), [] (auto* a, auto* b)
+        {
+            return AudioEngine::preferenceForDeviceType (a->getTypeName())
+                 < AudioEngine::preferenceForDeviceType (b->getTypeName());
+        });
 
         return types;
     }
@@ -76,6 +51,32 @@ AudioEngine::AudioEngine()
         decks[(size_t) i] = std::make_unique<Deck> (i, formatManager);
         echoBeats[(size_t) i].store (1.0, std::memory_order_relaxed);
     }
+}
+
+int AudioEngine::preferenceForDeviceType (const juce::String& typeName)
+{
+    // A driver written for the job, where one is installed at all.
+    if (typeName == "ASIO" || typeName == "JACK" || typeName == "CoreAudio")
+        return 0;
+
+    // On Windows this is the default, and deliberately: the low latency mode
+    // is what makes a stock machine with no extra drivers playable. It opened
+    // at 7 ms here against DirectSound's 87.
+    if (typeName.containsIgnoreCase ("Low Latency"))
+        return 1;
+
+    if (typeName.containsIgnoreCase ("Windows Audio"))
+        return typeName.containsIgnoreCase ("Exclusive") ? 3 : 2;
+
+    if (typeName == "ALSA")
+        return 2;
+
+    // Last, always. DirectSound is the one backend on a Windows machine that
+    // cannot do low latency, whatever it is asked for.
+    if (typeName.containsIgnoreCase ("DirectSound"))
+        return 9;
+
+    return 5;
 }
 
 AudioEngine::~AudioEngine()
@@ -131,6 +132,21 @@ juce::String AudioEngine::initialise (const juce::StringArray& preferredDeviceNa
         return error;
 
     deviceChoiceReason = "default device";
+
+    // The first initialise above opens whatever type JUCE starts on, which is
+    // DirectSound on Windows. Move to the best available type straight away, so
+    // a run that never gets past this point is still on a playable backend
+    // rather than one that cannot do low latency.
+    if (const auto types = typesByPreference (deviceManager); ! types.isEmpty())
+    {
+        const auto& best = types.getFirst()->getTypeName();
+
+        if (deviceManager.getCurrentAudioDeviceType() != best)
+        {
+            deviceManager.setCurrentAudioDeviceType (best, true);
+            deviceChoiceReason = "default device on " + best;
+        }
+    }
 
     const auto openNamed = [this] (juce::AudioIODeviceType& type, const juce::String& name)
     {

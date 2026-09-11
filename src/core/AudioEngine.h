@@ -55,6 +55,13 @@ public:
         Returns null before a device is open. */
     std::unique_ptr<juce::XmlElement> getDeviceState();
 
+    /** How much a device type is worth reaching for, lower being better.
+
+        Public because it is the one rule in the device search worth pinning
+        down in a test: a build that quietly started preferring DirectSound
+        again would sound broken and nothing would fail. */
+    static int preferenceForDeviceType (const juce::String& typeName);
+
     /** Takes the device away before anything else is torn down.
 
         The destructor does this too, but by then the decks, the mixer and the

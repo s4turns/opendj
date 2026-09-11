@@ -806,3 +806,59 @@ TEST_CASE ("all four channels reach the master at once", "[mixer]")
     // alone. Two channels working and two ignored would read half of it.
     REQUIRE_THAT (peak, WithinAbs (0.8f, 0.03f));
 }
+
+//==============================================================================
+// Which audio backend gets reached for first. Pinned down because a build that
+// quietly went back to preferring DirectSound would sound broken on every
+// Windows machine and no test would fail.
+
+TEST_CASE ("the low latency backend is preferred on Windows", "[engine][device]")
+{
+    using opendj::AudioEngine;
+
+    const auto lowLatency = AudioEngine::preferenceForDeviceType ("Windows Audio (Low Latency Mode)");
+    const auto shared = AudioEngine::preferenceForDeviceType ("Windows Audio");
+    const auto exclusive = AudioEngine::preferenceForDeviceType ("Windows Audio (Exclusive Mode)");
+    const auto directSound = AudioEngine::preferenceForDeviceType ("DirectSound");
+
+    // Lower is better, so every one of these is "beats".
+    REQUIRE (lowLatency < shared);
+    REQUIRE (lowLatency < exclusive);
+    REQUIRE (lowLatency < directSound);
+    REQUIRE (shared < directSound);
+    REQUIRE (exclusive < directSound);
+}
+
+TEST_CASE ("DirectSound is the last resort", "[engine][device]")
+{
+    using opendj::AudioEngine;
+
+    const auto directSound = AudioEngine::preferenceForDeviceType ("DirectSound");
+
+    for (const auto* other : { "ASIO", "JACK", "CoreAudio", "ALSA",
+                               "Windows Audio", "Windows Audio (Low Latency Mode)",
+                               "something nobody has heard of" })
+    {
+        INFO (other);
+        REQUIRE (AudioEngine::preferenceForDeviceType (other) < directSound);
+    }
+}
+
+TEST_CASE ("a driver written for the job outranks everything", "[engine][device]")
+{
+    using opendj::AudioEngine;
+
+    const auto lowLatency = AudioEngine::preferenceForDeviceType ("Windows Audio (Low Latency Mode)");
+
+    for (const auto* dedicated : { "ASIO", "JACK", "CoreAudio" })
+    {
+        INFO (dedicated);
+        REQUIRE (AudioEngine::preferenceForDeviceType (dedicated) <= lowLatency);
+    }
+
+    // An unknown backend sits between the ones worth having and DirectSound,
+    // so a platform nobody has thought about here still gets tried.
+    const auto unknown = AudioEngine::preferenceForDeviceType ("Some Future Backend");
+    REQUIRE (unknown > lowLatency);
+    REQUIRE (unknown < AudioEngine::preferenceForDeviceType ("DirectSound"));
+}

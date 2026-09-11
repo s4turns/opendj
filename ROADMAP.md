@@ -344,12 +344,19 @@ Running it turned up something worse than the crash: the default device opened a
 amount of care above it can make up for it. Startup also took eight to twelve seconds, nearly
 all of it scanning devices.
 
+On Windows the answer is **Windows Audio (Low Latency Mode)**, and that is now the default in
+every path through the search rather than only the last one. `AudioEngine::preferenceForDeviceType`
+is public and has three tests on it, because a build that quietly went back to preferring
+DirectSound would sound broken on every Windows machine and nothing would fail.
+
 The search took JUCE's own order of device types, which on Windows puts DirectSound first.
 DirectSound is the one backend on the machine that cannot do low latency. Types are now ranked
 and tried best first: ASIO, JACK and CoreAudio, then a low latency mode, then shared WASAPI or
-ALSA, with DirectSound last. The last resort asks the best type for its own default by name
-rather than taking whatever JUCE started on, and `tightenBufferSize` asks a device sitting on
-something enormous for about 256 samples instead.
+ALSA, with DirectSound last. JUCE's first open has to happen before the types can be listed at all, so
+the manager is moved onto the best type immediately afterwards: a run that never gets past that
+point is still on a playable backend. The last resort asks the best type for its own default by
+name rather than taking whatever JUCE started on, and `tightenBufferSize` asks a device sitting
+on something enormous for about 256 samples instead.
 
 Measured on Windows, on the same machine, before and after:
 
