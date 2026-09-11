@@ -102,12 +102,56 @@ std::unique_ptr<DecodedAudio> TrackDecoder::decode (juce::AudioFormatManager& fo
         return nullptr;
     }
 
-    if (! reader->read (&decoded->audio, 0, numSamples, 0, true, true))
+    // Read in chunks rather than in one call, and keep whatever decoded.
+    //
+    // A compressed file's length is an estimate. An MP3's is worked out from its
+    // frame headers, and for a file whose last frame is short or padded the
+    // estimate overshoots what the decoder can actually produce, by a few
+    // thousand samples at the very end. Demanding the whole reported length in
+    // one read then fails on the final chunk, and refusing the track over the
+    // last ninety milliseconds of it is the wrong answer: the other 99.9 percent
+    // is perfectly good audio.
+    // On a failure the chunk is halved and tried again, down to a small floor.
+    // Without that, a short file whose tail is bad loses everything, because a
+    // single chunk covers the whole of it; with it, what is salvaged is within
+    // a few hundred samples of the truth whatever the file's length.
+    constexpr int chunkSamples = 1 << 16;
+    constexpr int smallestChunk = 512;
+
+    int decodedSamples = 0;
+
+    while (decodedSamples < numSamples)
+    {
+        auto count = juce::jmin (chunkSamples, numSamples - decodedSamples);
+        auto read = false;
+
+        while (! (read = reader->read (&decoded->audio, decodedSamples, count,
+                                       decodedSamples, true, true))
+               && count > smallestChunk)
+        {
+            count /= 2;
+        }
+
+        if (! read)
+            break;
+
+        decodedSamples += count;
+    }
+
+    if (decodedSamples == 0)
     {
         report (failureReason,
                 "The file opened as " + reader->getFormatName()
-                    + " but decoding failed part way through. It is probably damaged.");
+                    + " but no audio could be decoded from it. It is probably damaged.");
         return nullptr;
+    }
+
+    if (decodedSamples < numSamples)
+    {
+        // Trim to what really decoded, so the length, the waveform and the beat
+        // grid all describe the same audio rather than trailing off into a tail
+        // of silence nobody asked for.
+        decoded->audio.setSize (2, decodedSamples, true, false, true);
     }
 
     // A mono file reads into channel 0 only, so mirror it across.
