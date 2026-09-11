@@ -122,6 +122,11 @@ juce_add_gui_app(OpenDJ
     COMPANY_NAME  "OpenDJ"
     BUNDLE_ID     "me.interdo.opendj"
     VERSION       ${PROJECT_VERSION}
+    # The same mark the repository carries, so the taskbar, the title bar and
+    # the readme are recognisably one product. JUCE builds the platform icon
+    # from these: an .ico on Windows, an .icns in a macOS bundle.
+    ICON_BIG      ${CMAKE_SOURCE_DIR}/images/icon.png
+    ICON_SMALL    ${CMAKE_SOURCE_DIR}/images/icon-256.png
     NEEDS_CURL    FALSE)
 
 juce_generate_juce_header(OpenDJ)

@@ -1,4 +1,6 @@
-# OpenDJ
+<p align="center">
+  <img src="images/banner.png" alt="OpenDJ, free and open source DJ software" width="900">
+</p>
 
 | Branch | Build and tests |
 | --- | --- |
