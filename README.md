@@ -18,8 +18,8 @@ and the code are entirely original and entirely open.
 **Status: early development, but it mixes.** Four decks with turntable platters you can scratch,
 waveforms, beat grids, automatic BPM and key detection, sync, key lock, beat-locked loops and
 rolls, stem separation with a knob per stem, a mixer with a filter, a beat-synced echo and a reverb per channel, hot cues, an eight slot sampler, a
-searchable track library, set recording with a tracklist, and Roland DJ-202 support including its
-own audio interface and its platters.
+searchable track library, set recording with a tracklist, broadcasting to Icecast, and Roland
+DJ-202 support including its own audio interface and its platters.
 
 ## Design goals
 
@@ -80,6 +80,28 @@ is usually used, and any channel can be moved onto either side.
 Q, W, O and P follow the side rather than the deck, so they keep meaning the deck on the left
 and the deck on the right after a swap. Sync matches the nearest deck that is playing and has a
 beat grid.
+
+## Broadcasting
+
+Press Stream in the bottom bar, fill in your server, and press Go live. OpenDJ encodes the master
+output as Ogg Vorbis and sends it to any Icecast server, which covers Icecast itself, most
+internet radio hosts, and the Icecast-compatible half of Shoutcast. The button counts up while
+you are on air and the status bar says where to.
+
+A dropped connection comes back on its own, waiting a little longer after each failure, and the
+music in the room never stops while it does. If the network cannot keep up, the stream loses
+those samples rather than the room losing audio, and the status bar says so.
+
+Two honest limitations. Track titles do not show on an Ogg mount, because Icecast carries Ogg
+metadata inside the stream and its title mechanism is for MP3 sources. And your listeners hear
+you a few seconds late, which is true of every internet radio stream.
+
+Your server password is stored in the settings file in clear text, as it is in every DJ
+application. The dialog says so too.
+
+YouTube, Twitch and Mixcloud are not supported yet. All three need an H.264 video track and will
+not accept audio alone, so they need a different machine underneath: see
+[ROADMAP.md](ROADMAP.md).
 
 ## The sampler
 

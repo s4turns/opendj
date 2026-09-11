@@ -183,6 +183,10 @@ MainComponent::MainComponent()
     audioSettingsButton.onClick = [this] { showAudioSettings(); };
     addAndMakeVisible (audioSettingsButton);
 
+    streamButton.setTooltip ("Broadcast the master output to an Icecast server");
+    streamButton.onClick = [this] { toggleBroadcast(); };
+    addAndMakeVisible (streamButton);
+
     midiSettingsButton.onClick = [this] { showMidiSettings(); };
     addAndMakeVisible (midiSettingsButton);
 
@@ -356,6 +360,40 @@ void MainComponent::timerCallback()
         recordButton.setButtonText ("Record");
         recordButton.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff2c2c34));
     }
+
+    auto& broadcaster = engine.getBroadcaster();
+
+    switch (broadcaster.getState())
+    {
+        case Broadcaster::State::live:
+        {
+            const auto seconds = (int) broadcaster.getSecondsLive();
+            streamButton.setButtonText ("On air " + juce::String (seconds / 60) + ":"
+                                        + juce::String (seconds % 60).paddedLeft ('0', 2));
+            streamButton.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff27ae60));
+            break;
+        }
+
+        case Broadcaster::State::connecting:
+        case Broadcaster::State::reconnecting:
+            streamButton.setButtonText ("Connecting");
+            streamButton.setColour (juce::TextButton::buttonColourId, juce::Colour (0xffb9770e));
+            break;
+
+        case Broadcaster::State::failed:
+            streamButton.setButtonText ("Stream");
+            streamButton.setColour (juce::TextButton::buttonColourId, juce::Colour (0xffc0392b));
+            break;
+
+        case Broadcaster::State::offline:
+        default:
+            streamButton.setButtonText ("Stream");
+            streamButton.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff2c2c34));
+            break;
+    }
+
+    if (const auto broadcastStatus = broadcaster.getStatusMessage(); broadcastStatus.isNotEmpty())
+        status << "  |  " << broadcastStatus;
 
     statusLabel.setText (status, juce::dontSendNotification);
 }
@@ -658,6 +696,164 @@ void MainComponent::toggleRecording()
             juce::MessageBoxIconType::WarningIcon, "Could not start recording", error);
 }
 
+void MainComponent::toggleBroadcast()
+{
+    auto& broadcaster = engine.getBroadcaster();
+
+    if (broadcaster.isBroadcasting())
+    {
+        broadcaster.stop();
+        statusLabel.setText ("Broadcast stopped.", juce::dontSendNotification);
+        return;
+    }
+
+    showBroadcastSettings();
+}
+
+void MainComponent::showBroadcastSettings()
+{
+    /** The server details, and a button that goes live with them. One panel
+        rather than a settings dialog and a separate switch: nobody fills a
+        server in and then wants to be asked where it was. */
+    struct BroadcastSetup final : public juce::Component
+    {
+        BroadcastSetup (AudioEngine& engineToUse, BroadcastSettings starting,
+                        std::function<void (BroadcastSettings)> onChanged)
+            : engine (engineToUse), settings (std::move (starting)), changed (std::move (onChanged))
+        {
+            addField (host, "Server", settings.host);
+            addField (port, "Port", juce::String (settings.port));
+            addField (mount, "Mount", settings.mount);
+            addField (user, "User", settings.user);
+            addField (password, "Password", settings.password);
+            password.setPasswordCharacter ((juce::juce_wchar) 0x2022);
+            addField (name, "Stream name", settings.name);
+            addField (genre, "Genre", settings.genre);
+
+            listed.setButtonText ("List this stream in public directories");
+            listed.setToggleState (settings.isPublic, juce::dontSendNotification);
+            listed.setColour (juce::ToggleButton::textColourId, juce::Colours::white);
+            addAndMakeVisible (listed);
+
+            note.setText ("The password is kept in clear text in your settings file, as every "
+                          "DJ application does. Anything that can read your user profile can "
+                          "read it.", juce::dontSendNotification);
+            note.setColour (juce::Label::textColourId, juce::Colours::grey);
+            note.setFont (juce::FontOptions (12.0f));
+            note.setJustificationType (juce::Justification::topLeft);
+            addAndMakeVisible (note);
+
+            status.setColour (juce::Label::textColourId, juce::Colours::white);
+            status.setFont (juce::FontOptions (12.0f));
+            addAndMakeVisible (status);
+
+            goLive.setButtonText ("Go live");
+            goLive.onClick = [this] { connect(); };
+            addAndMakeVisible (goLive);
+        }
+
+        void addField (juce::TextEditor& editor, const juce::String& labelText,
+                       const juce::String& value)
+        {
+            auto* label = labels.add (new juce::Label());
+            label->setText (labelText, juce::dontSendNotification);
+            label->setColour (juce::Label::textColourId, juce::Colours::white);
+            label->setFont (juce::FontOptions (12.0f));
+            addAndMakeVisible (*label);
+
+            editor.setText (value, juce::dontSendNotification);
+            editor.setColour (juce::TextEditor::backgroundColourId, juce::Colour (0xff101014));
+            addAndMakeVisible (editor);
+        }
+
+        BroadcastSettings collect() const
+        {
+            auto result = settings;
+            result.host = host.getText().trim();
+            result.port = port.getText().getIntValue();
+            result.mount = mount.getText().trim();
+            result.user = user.getText().trim();
+            result.password = password.getText();
+            result.name = name.getText();
+            result.genre = genre.getText();
+            result.isPublic = listed.getToggleState();
+            return result;
+        }
+
+        void connect()
+        {
+            settings = collect();
+            changed (settings);
+
+            auto* device = engine.getDeviceManager().getCurrentAudioDevice();
+            const auto rate = device != nullptr ? device->getCurrentSampleRate() : 48000.0;
+
+            juce::String error;
+
+            if (engine.getBroadcaster().start (settings, rate, error))
+            {
+                if (auto* window = findParentComponentOfClass<juce::DialogWindow>())
+                    window->exitModalState (0);
+            }
+            else
+            {
+                status.setText (error, juce::dontSendNotification);
+            }
+        }
+
+        void resized() override
+        {
+            auto area = getLocalBounds().reduced (10);
+
+            juce::TextEditor* editors[] = { &host, &port, &mount, &user, &password, &name, &genre };
+
+            for (int i = 0; i < (int) std::size (editors); ++i)
+            {
+                auto row = area.removeFromTop (26);
+                labels[i]->setBounds (row.removeFromLeft (96));
+                editors[i]->setBounds (row);
+                area.removeFromTop (4);
+            }
+
+            area.removeFromTop (4);
+            listed.setBounds (area.removeFromTop (24));
+            area.removeFromTop (6);
+            note.setBounds (area.removeFromTop (52));
+
+            auto footer = area.removeFromBottom (28);
+            goLive.setBounds (footer.removeFromRight (110));
+            footer.removeFromRight (8);
+            status.setBounds (footer);
+        }
+
+        AudioEngine& engine;
+        BroadcastSettings settings;
+        std::function<void (BroadcastSettings)> changed;
+
+        juce::OwnedArray<juce::Label> labels;
+        juce::TextEditor host, port, mount, user, password, name, genre;
+        juce::ToggleButton listed;
+        juce::Label note, status;
+        juce::TextButton goLive;
+    };
+
+    auto content = std::make_unique<BroadcastSetup> (engine, settings.broadcast,
+                                                     [this] (BroadcastSettings updated)
+                                                     {
+                                                         settings.broadcast = std::move (updated);
+                                                     });
+    content->setSize (460, 400);
+
+    juce::DialogWindow::LaunchOptions options;
+    options.content.setOwned (content.release());
+    options.dialogTitle = "Broadcast";
+    options.dialogBackgroundColour = juce::Colour (0xff1c1c22);
+    options.escapeKeyTriggersCloseButton = true;
+    options.useNativeTitleBar = true;
+    options.resizable = false;
+    options.launchAsync();
+}
+
 void MainComponent::showMidiSettings()
 {
     juce::DialogWindow::LaunchOptions options;
@@ -683,6 +879,8 @@ void MainComponent::resized()
     audioSettingsButton.setBounds (footer.removeFromLeft (100));
     footer.removeFromLeft (6);
     recordButton.setBounds (footer.removeFromLeft (110));
+    footer.removeFromLeft (6);
+    streamButton.setBounds (footer.removeFromLeft (110));
     footer.removeFromLeft (6);
     midiSettingsButton.setBounds (footer.removeFromLeft (94));
     footer.removeFromLeft (12);

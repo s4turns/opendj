@@ -44,6 +44,8 @@ that was listed after it except video.
 | Record the master output | ✅ | `src/core/SetRecorder.*`, with a tracklist |
 | Split output cue | ✅ | `src/core/OutputRouter.*`, headphones on a stereo interface |
 | Settings that survive a restart | ✅ | `src/app/Settings.*` |
+| Broadcasting to Icecast | ✅ | `src/stream/`, verified against a real Icecast 2.4.4 |
+| Broadcasting to YouTube and Twitch | ⬜ | RTMP, so it needs ffmpeg as a separate program. Designed, not built |
 | Video | ⬜ | Very large. Probably a separate project |
 
 ## What to pick up next
@@ -249,6 +251,41 @@ to pre-listen on a plain sound card, where the cue bus previously had nowhere to
 
 Eleven tests: both modes against one, two and four outputs, inactive channels skipped, an
 oversized block trimmed, and canaries proving nothing is written past the block.
+
+## Broadcasting
+
+The master output to an Icecast server, encoded as Ogg Vorbis, while you play. The same tap the
+recorder uses, so listeners hear exactly what the room hears.
+
+It needed **no new dependencies**. JUCE already bundles a Vorbis encoder in
+`juce_audio_formats/codecs/oggvorbis` and a socket in `juce_core/network`, which between them
+are the whole job.
+
+| Decision | Why |
+| --- | --- |
+| The encoder writes to a socket through an `OutputStream` | That is the seam JUCE's Ogg writer already has. Encoding, buffering and the background thread come from `ThreadedWriter` unchanged, exactly as the recorder gets them |
+| A full FIFO drops samples rather than blocking | The same bargain the recorder makes, and the reason it is the right one: the people in the room paid to be there, and the stream is what gives way |
+| A reconnect rebuilds the stream rather than resuming it | Ogg carries its headers at the front, so a server joining halfway through one has nothing to decode. The backoff runs 1, 2, 4 seconds up to 30 while the audio carries on untouched |
+| `PUT` first, then `SOURCE` | Icecast 2.4 and later want the HTTP verb; older servers and most Icecast-alikes only know the original one. Trying both costs a round trip on an old server and nothing on a new one |
+| The request is built by a function that touches no socket | The handshake is the part most likely to be subtly wrong and the easiest to test if it is kept away from the network |
+| Settings that cannot work are refused before a socket opens | A typo becomes a sentence rather than a timeout |
+
+**Track titles do not appear on an Ogg mount.** Measured against Icecast 2.4.4, which answers
+"Mountpoint will not accept URL updates". That is correct behaviour, not a fault: Ogg carries
+metadata in band in its Vorbis comment header, and the admin URL exists for MP3 and Shoutcast
+sources that have nowhere else to put it. The code is kept, and works the day an MP3 mount does.
+
+**A broadcast lags the room**, by the encoder and the network. Vorbis fills an Ogg page before it
+emits one, and a quiet passage fills it slowly: a pure tone at quality 5 took five seconds to
+produce a couple of pages. That is normal for every internet radio stream.
+
+Ten tests cover it, including one that stands a fake server on a loopback socket, broadcasts at
+it, and checks the request arrived and Ogg pages followed. There is also a hidden `[.live]` test
+for a real server; `tests/Broadcast_test.cpp` says how to run it.
+
+Verified end to end against Icecast 2.4.4 in Docker: the source registered at 160 kbps, 48 kHz,
+stereo, with its genre intact, and a listener pulled 40 KB of `audio/ogg` beginning with the
+`OggS` marker while it was live.
 
 ## Picking a device worth playing on
 

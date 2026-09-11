@@ -83,6 +83,10 @@ private:
     void showAudioSettings();
     void showMidiSettings();
     void toggleRecording();
+
+    /** Opens the broadcast dialog, or stops a broadcast already running. */
+    void toggleBroadcast();
+    void showBroadcastSettings();
     void loadOntoDeck (const juce::File& file, int deckIndex);
     /** Every folder that may hold controller mappings, in precedence order. */
     juce::Array<juce::File> findMappingsFolders() const;
@@ -121,6 +125,7 @@ private:
     juce::TextButton audioSettingsButton { "Audio setup" };
     juce::TextButton midiSettingsButton { "Controller" };
     juce::TextButton recordButton { "Record" };
+    juce::TextButton streamButton { "Stream" };
     juce::Label statusLabel;
     juce::String startupError;
 

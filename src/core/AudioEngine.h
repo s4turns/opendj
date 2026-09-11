@@ -15,6 +15,7 @@
 #include "core/OutputRouter.h"
 #include "core/Sampler.h"
 #include "core/SetRecorder.h"
+#include "stream/Broadcaster.h"
 
 #include <array>
 #include <atomic>
@@ -209,6 +210,9 @@ public:
         crossfader and the master gain. */
     SetRecorder& getRecorder() noexcept { return recorder; }
 
+    /** Sends that same master output to a broadcast server. */
+    Broadcaster& getBroadcaster() noexcept { return broadcaster; }
+
     /** Starts recording at the open device's sample rate. Returns the file, or
         an invalid file with `error` filled in. */
     juce::File startRecording (juce::String& error);
@@ -250,6 +254,7 @@ private:
 
     Sampler sampler;
     SetRecorder recorder;
+    Broadcaster broadcaster;
 
     std::array<std::atomic<double>, numDecks> echoBeats {};
 

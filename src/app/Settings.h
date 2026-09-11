@@ -10,6 +10,7 @@
 #include "core/Mixer.h"
 #include "core/OutputRouter.h"
 #include "core/Sampler.h"
+#include "stream/IcecastConnection.h"
 
 #include <array>
 
@@ -62,6 +63,11 @@ struct SessionState
     std::array<bool, Sampler::numSlots> samplerLooping {};
     std::array<float, Sampler::numSlots> samplerGains { 1.0f, 1.0f, 1.0f, 1.0f,
                                                         1.0f, 1.0f, 1.0f, 1.0f };
+
+    /** The broadcast server, password included. Kept in clear text, which the
+        dialog says out loud: it is what every DJ application does, and telling
+        somebody is better than quietly deciding for them. */
+    BroadcastSettings broadcast;
 
     /** The window, so it opens where it was left rather than in the middle of
         whichever monitor the system picks. Empty until one has been saved. */

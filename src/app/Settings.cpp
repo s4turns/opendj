@@ -174,6 +174,20 @@ juce::var SessionState::toVar() const
     root->setProperty ("visible_decks", visible);
 
     root->setProperty ("output_mode", opendj::toString (outputMode));
+
+    auto* server = new juce::DynamicObject();
+    server->setProperty ("host", broadcast.host);
+    server->setProperty ("port", broadcast.port);
+    server->setProperty ("mount", broadcast.mount);
+    server->setProperty ("user", broadcast.user);
+    server->setProperty ("password", broadcast.password);
+    server->setProperty ("name", broadcast.name);
+    server->setProperty ("description", broadcast.description);
+    server->setProperty ("genre", broadcast.genre);
+    server->setProperty ("url", broadcast.url);
+    server->setProperty ("public", broadcast.isPublic);
+    server->setProperty ("quality", broadcast.quality);
+    root->setProperty ("broadcast", juce::var (server));
     root->setProperty ("sampler_gain", samplerGain);
     root->setProperty ("sampler_cue", samplerCue);
     root->setProperty ("sampler_files", files);
@@ -221,6 +235,26 @@ SessionState SessionState::fromVar (const juce::var& source)
         }
 
     state.outputMode = outputModeFromString (text (source, "output_mode"));
+
+    if (const auto server = arrayOf (source, "broadcast"); server.getDynamicObject() != nullptr)
+    {
+        auto& b = state.broadcast;
+
+        // Field by field, like everything else here, so a settings file written
+        // before broadcasting existed still loads.
+        if (const auto value = text (server, "host"); value.isNotEmpty())        b.host = value;
+        if (const auto value = text (server, "mount"); value.isNotEmpty())       b.mount = value;
+        if (const auto value = text (server, "user"); value.isNotEmpty())        b.user = value;
+        if (const auto value = text (server, "password"); value.isNotEmpty())    b.password = value;
+        if (const auto value = text (server, "name"); value.isNotEmpty())        b.name = value;
+        if (const auto value = text (server, "genre"); value.isNotEmpty())       b.genre = value;
+
+        b.description = text (server, "description");
+        b.url = text (server, "url");
+        b.port = (int) number (server, "port", b.port, 1.0, 65535.0);
+        b.quality = (int) number (server, "quality", b.quality, 0.0, 10.0);
+        b.isPublic = flag (server, "public", b.isPublic);
+    }
     state.samplerGain = (float) number (source, "sampler_gain", state.samplerGain, 0.0, 1.0);
     state.samplerCue = flag (source, "sampler_cue", state.samplerCue);
 

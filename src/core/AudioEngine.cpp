@@ -102,6 +102,8 @@ void AudioEngine::stop()
     // A recording still open would otherwise be left without its final flush.
     if (recorder.isRecording())
         recorder.stop();
+
+    broadcaster.stop();
 }
 
 juce::String AudioEngine::initialise (const juce::StringArray& preferredDeviceNames,
@@ -288,7 +290,13 @@ void AudioEngine::loadTrackAsync (int deckIndex, const juce::File& file,
         // A loaded track goes into the tracklist, so a recorded set comes with
         // one rather than two unbroken hours nobody can navigate.
         if (succeeded)
-            recorder.noteTrack (decks[(size_t) deckIndex]->getTrackTitle());
+        {
+            const auto title = decks[(size_t) deckIndex]->getTrackTitle();
+            recorder.noteTrack (title);
+
+            // Listeners see the same thing the tracklist records.
+            broadcaster.noteTrack (title);
+        }
 
         if (onComplete != nullptr)
             juce::MessageManager::callAsync ([onComplete, succeeded] { onComplete (succeeded); });
@@ -632,6 +640,10 @@ void AudioEngine::renderNextBlock (float* const* outputs, int numOutputChannels,
     // Recorded after the mixer and before the device, so the file holds exactly
     // what the room heard: crossfader, master gain, soft clip and all.
     recorder.write (masterView, numSamples);
+
+    // The same tap feeds the broadcast, so a listener hears what the room
+    // hears. Both drop samples rather than stall, and neither can block here.
+    broadcaster.write (masterView, numSamples);
 
     routeOutputs (masterView, cueView, outputs, numOutputChannels, numSamples,
                   outputMode.load (std::memory_order_relaxed));
