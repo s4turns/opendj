@@ -12,6 +12,7 @@
 #include "analysis/StemSeparator.h"
 #include "core/Deck.h"
 #include "core/Mixer.h"
+#include "core/SetRecorder.h"
 
 #include <array>
 #include <atomic>
@@ -113,6 +114,14 @@ public:
     /** A one line summary of the open device, for the status bar. */
     juce::String getDeviceDescription() const;
 
+    /** Records the master output, exactly what the room hears, including the
+        crossfader and the master gain. */
+    SetRecorder& getRecorder() noexcept { return recorder; }
+
+    /** Starts recording at the open device's sample rate. Returns the file, or
+        an invalid file with `error` filled in. */
+    juce::File startRecording (juce::String& error);
+
 private:
     void audioDeviceIOCallbackWithContext (const float* const* inputChannelData,
                                            int numInputChannels,
@@ -146,6 +155,8 @@ private:
 
     std::atomic<bool> cueOutputAvailable { false };
     juce::String deviceChoiceReason;
+
+    SetRecorder recorder;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AudioEngine)
 };

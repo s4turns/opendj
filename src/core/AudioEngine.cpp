@@ -163,6 +163,11 @@ void AudioEngine::loadTrackAsync (int deckIndex, const juce::File& file,
 
         loading[(size_t) deckIndex].store (false, std::memory_order_relaxed);
 
+        // A loaded track goes into the tracklist, so a recorded set comes with
+        // one rather than two unbroken hours nobody can navigate.
+        if (succeeded)
+            recorder.noteTrack (decks[(size_t) deckIndex]->getTrackTitle());
+
         if (onComplete != nullptr)
             juce::MessageManager::callAsync ([onComplete, succeeded] { onComplete (succeeded); });
     });
@@ -258,6 +263,30 @@ bool AudioEngine::syncDeck (int followerIndex, int leaderIndex)
 
     follower.seekToSeconds (nearestBeat + proportion * followerBeat);
     return true;
+}
+
+juce::File AudioEngine::startRecording (juce::String& error)
+{
+    auto* device = deviceManager.getCurrentAudioDevice();
+
+    if (device == nullptr)
+    {
+        error = "There is no audio device open to record from.";
+        return {};
+    }
+
+    const auto file = recorder.start (SetRecorder::defaultFolder(),
+                                      device->getCurrentSampleRate(), error);
+
+    // Whatever is already playing belongs at the top of the tracklist. Recording
+    // usually starts a minute into the first track, not before it, and a list
+    // that begins with the second record is missing the one people ask about.
+    if (file != juce::File())
+        for (auto& deck : decks)
+            if (deck->isLoaded() && deck->isPlaying())
+                recorder.noteTrack (deck->getTrackTitle());
+
+    return file;
 }
 
 juce::String AudioEngine::getDeviceDescription() const
@@ -363,6 +392,10 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const*,
                                                    numSamples);
         }
     };
+
+    // Recorded after the mixer and before the device, so the file holds exactly
+    // what the room heard: crossfader, master gain, soft clip and all.
+    recorder.write (masterView, numSamples);
 
     copyPair (masterView, 0);
 

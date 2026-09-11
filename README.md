@@ -11,7 +11,7 @@ with the workflow name and offers no way to change that, so the branch is named 
 
 Free and open source DJ software, built in C++ with [JUCE](https://juce.com).
 
-![Two decks with waveforms and beat grids, loop and stem controls, the mixer between them, and the track library underneath](images/screen1.jpg)
+![Two decks with waveforms and beat grids, loop lengths and stem knobs on each, the mixer between them, the track library underneath showing tempo and key, and a Record button in the bottom bar](images/screen2.jpg)
 
 The goal is an application a VirtualDJ user can sit down at and already know how to use:
 the same deck layout, the same workflow, the same muscle memory. The artwork, the naming
@@ -20,8 +20,8 @@ and the code are entirely original and entirely open.
 **Status: early development, but it mixes.** Two decks with turntable platters you can scratch,
 waveforms, beat grids, automatic BPM and key detection, sync, key lock, beat-locked loops and
 rolls, stem separation with a knob per stem, a mixer with a filter per channel, hot cues, a
-searchable track library, and Roland DJ-202 support including its own audio interface and its
-platters. No effects or sampler yet.
+searchable track library, set recording with a tracklist, and Roland DJ-202 support including its
+own audio interface and its platters. No effects or sampler yet.
 
 ## Design goals
 
@@ -86,6 +86,20 @@ analysis and nothing else.
 
 Tempo detection was checked against 60 tracks from a 13,000 track techno collection, and agrees
 with Mixxx on 57 of them; [ROADMAP.md](ROADMAP.md) has the detail and the method.
+
+## Recording a set
+
+Press Record in the bottom bar. The master output goes to a 24-bit WAV in your music folder
+under OpenDJ, named for the date and time, and the button turns red and counts up while it
+runs. Press it again to stop.
+
+Beside the audio you get a text file listing what you played and when, timed against the
+recording rather than the clock. Whatever was already playing when you pressed Record is the
+first entry.
+
+If the disk cannot keep up, the recording loses those samples rather than the room losing
+audio, and you are told: in the status bar while it happens, in the dialog when you stop, and
+in the tracklist file, which is the one still there tomorrow.
 
 ## Controllers
 

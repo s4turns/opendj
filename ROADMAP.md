@@ -179,6 +179,24 @@ The loop actions are in the registry as `loop.in`, `loop.out`, `loop.toggle`, `l
 be mapped to them without touching any engine code. `loop.beats` and `loop.roll` take a slot,
 which `loopBeatsForSlot` turns into a length.
 
+## Recording a set
+
+The Record button in the bottom bar writes the master output to a 24-bit WAV in the user's
+music folder, named for the date and time, with a tracklist in a text file beside it.
+
+| Decision | Why |
+| --- | --- |
+| Tapped after the mixer, before the device | So the file holds exactly what the room heard: crossfader, master gain, soft clip and all |
+| Written through JUCE's `ThreadedWriter` | The audio thread copies a block into a FIFO and returns. Encoding and disk writes happen on a background thread, so a slow disk never stalls the callback |
+| A full FIFO drops samples rather than blocking | That is the right way round: the recording loses them, the room does not. But the count is kept and reported |
+| Dropouts are said out loud | In the status bar while it happens, in the dialog when it stops, and in the tracklist file, which is the only one still there tomorrow. A set with a hole in it must not look complete |
+| The tracklist is timed against the recording | Not the wall clock, so it stays right even if samples were dropped |
+| Whatever is already playing seeds the list | Recording usually starts a minute into the first track. A list beginning with the second record is missing the one people ask about |
+
+Verified end to end in the running application, not only in tests: eight seconds of playback
+recorded to a 48 kHz 24-bit stereo file that reads back at the right length with real audio in
+it, and a tracklist beside it.
+
 ## Beyond milestone 1
 
 | Item | Status | Notes |
@@ -189,8 +207,8 @@ which `loopBeatsForSlot` turns into a length.
 | Loops and loop rolls | ✅ | `Deck::setLoopBeats` and friends, with a loop row on each deck. See above |
 | Effects | ⬜ | Filter, echo, reverb. The DJ-202 effects section is on MIDI channels 9 and 10, unmapped |
 | Sampler | ⬜ | The DJ-202 pads send sampler notes on 0x21 to 0x30, unmapped |
-| Record the master output | ⬜ | Straightforward: tap the master buffer in `AudioEngine` |
-| Stem separation | ⬜ | Large. Needs a model and a licence decision about shipping weights |
+| Record the master output | ✅ | `src/core/SetRecorder.*`, with a tracklist written beside the audio. See above |
+| Stem separation | ✅ | `src/analysis/StemSeparator.*` and `StemDsp.*`, with a knob per stem on each deck |
 | Video | ⬜ | Very large. Probably a separate project |
 
 ## Working on this

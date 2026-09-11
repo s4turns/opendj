@@ -62,6 +62,7 @@ private:
 
     void showAudioSettings();
     void showMidiSettings();
+    void toggleRecording();
     void loadOntoDeck (const juce::File& file, int deckIndex);
     /** Every folder that may hold controller mappings, in precedence order. */
     juce::Array<juce::File> findMappingsFolders() const;
@@ -94,6 +95,7 @@ private:
 
     juce::TextButton audioSettingsButton { "Audio setup" };
     juce::TextButton midiSettingsButton { "Controller" };
+    juce::TextButton recordButton { "Record" };
     juce::Label statusLabel;
     juce::String startupError;
 

@@ -142,6 +142,10 @@ MainComponent::MainComponent()
     midiSettingsButton.onClick = [this] { showMidiSettings(); };
     addAndMakeVisible (midiSettingsButton);
 
+    recordButton.setTooltip ("Record the master output to a WAV file, with a tracklist beside it");
+    recordButton.onClick = [this] { toggleRecording(); };
+    addAndMakeVisible (recordButton);
+
     statusLabel.setColour (juce::Label::textColourId, juce::Colours::grey);
     statusLabel.setJustificationType (juce::Justification::centredLeft);
     statusLabel.setFont (juce::FontOptions (12.0f));
@@ -272,6 +276,24 @@ void MainComponent::timerCallback()
     if (libraryError.isNotEmpty())
         status << "  |  Library error: " << libraryError;
 
+    const auto& recorder = engine.getRecorder();
+
+    if (recorder.isRecording())
+    {
+        const auto seconds = static_cast<int> (recorder.getRecordedSeconds());
+
+        recordButton.setButtonText (juce::String (seconds / 60) + ":"
+                                    + juce::String (seconds % 60).paddedLeft ('0', 2));
+        recordButton.setColour (juce::TextButton::buttonColourId, juce::Colour (0xffc0392b));
+
+        status << "  |  recording" << (recorder.hadDropouts() ? " WITH DROPOUTS" : "");
+    }
+    else
+    {
+        recordButton.setButtonText ("Record");
+        recordButton.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff2c2c34));
+    }
+
     statusLabel.setText (status, juce::dontSendNotification);
 }
 
@@ -367,6 +389,40 @@ void MainComponent::showAudioSettings()
     options.launchAsync();
 }
 
+void MainComponent::toggleRecording()
+{
+    auto& recorder = engine.getRecorder();
+
+    if (recorder.isRecording())
+    {
+        const auto file = recorder.stop();
+
+        juce::String message;
+        message << "Saved to " << file.getFullPathName() << "." << juce::newLine << juce::newLine
+                << "The tracklist is beside it as "
+                << file.withFileExtension (".txt").getFileName() << ".";
+
+        // A recording with holes in it is worth saying out loud, now, while
+        // there is still a chance to do something about the cause.
+        if (recorder.hadDropouts())
+            message << juce::newLine << juce::newLine
+                    << "Some audio was dropped because the disk could not keep up, "
+                       "so the recording has gaps. The tracklist file says how much.";
+
+        juce::NativeMessageBox::showMessageBoxAsync (
+            recorder.hadDropouts() ? juce::MessageBoxIconType::WarningIcon
+                                   : juce::MessageBoxIconType::InfoIcon,
+            "Recording saved", message);
+        return;
+    }
+
+    juce::String error;
+
+    if (engine.startRecording (error) == juce::File())
+        juce::NativeMessageBox::showMessageBoxAsync (
+            juce::MessageBoxIconType::WarningIcon, "Could not start recording", error);
+}
+
 void MainComponent::showMidiSettings()
 {
     juce::DialogWindow::LaunchOptions options;
@@ -390,6 +446,8 @@ void MainComponent::resized()
 
     auto footer = area.removeFromBottom (26);
     audioSettingsButton.setBounds (footer.removeFromLeft (100));
+    footer.removeFromLeft (6);
+    recordButton.setBounds (footer.removeFromLeft (110));
     footer.removeFromLeft (6);
     midiSettingsButton.setBounds (footer.removeFromLeft (94));
     footer.removeFromLeft (12);
