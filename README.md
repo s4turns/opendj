@@ -210,14 +210,27 @@ cmake --build build --parallel
 
 ### ASIO on Windows
 
-ASIO is off by default because Steinberg's SDK cannot be redistributed. Download it
-yourself, then configure with:
+ASIO is off by default because Steinberg's SDK cannot be redistributed.
+
+**The SDK is not a driver.** ASIO4ALL, FL Studio ASIO and whatever came with an audio interface
+are drivers: they are what you play through. The SDK is a set of headers needed to build support
+for any of them, and installing a driver does not put it on your machine. Download it from
+steinberg.net, unpack it, and point the build at it once:
+
+```
+pwsh scripts/build.ps1 -Asio -AsioSdkPath C:\path	osiosdk
+```
+
+The path can be left off if the SDK is unpacked as `external/asiosdk`, in your Downloads folder,
+or at `C:\SDKssiosdk`. By hand it is:
 
 ```
 cmake -S . -B build -DOPENDJ_ENABLE_ASIO=ON -DOPENDJ_ASIO_SDK_PATH=C:/path/to/asiosdk
 ```
 
-Without it the app uses WASAPI, which is fine for development but not for a live set.
+Without it the app uses Windows Audio in its low latency mode, which measured 7 ms of output
+latency on a plain desktop and is genuinely usable. ASIO is still worth having for an interface
+with a driver written for it.
 
 ## Running the tests
 

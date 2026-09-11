@@ -3,6 +3,14 @@
     Visual Studio Build Tools, so nothing extra has to be installed.
 
     Usage:  pwsh scripts/build.ps1 [-Config RelWithDebInfo] [-Clean] [-Test] [-Run [files]]
+                                   [-Asio [path to the Steinberg ASIO SDK]]
+
+    -Asio needs Steinberg's SDK, which is the headers and cannot be shipped with
+    anything. It is not the same thing as an ASIO driver: ASIO4ALL, FL Studio
+    ASIO and the driver that came with an interface are drivers, and none of
+    them contains the SDK. Download it from steinberg.net, unpack it anywhere,
+    and pass the folder once. Without a path the usual unpack locations are
+    checked.
 #>
 [CmdletBinding()]
 param(
@@ -11,6 +19,8 @@ param(
     [switch]$Clean,
     [switch]$Test,
     [switch]$Run,
+    [switch]$Asio,
+    [string]$AsioSdkPath = '',
     [Parameter(ValueFromRemainingArguments = $true)]
     [string[]]$TrackFiles
 )
@@ -18,6 +28,32 @@ param(
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $buildDir = Join-Path $repoRoot 'build'
+
+$asioArgs = @()
+
+if ($Asio) {
+    $candidates = @($AsioSdkPath) + @(
+        (Join-Path $repoRoot 'external\asiosdk'),
+        (Join-Path $env:USERPROFILE 'Downloads\asiosdk'),
+        'C:\SDKs\asiosdk')
+
+    # Recognised by the one header JUCE actually needs, so a folder that merely
+    # has the right name is not mistaken for the SDK.
+    $sdk = $candidates | Where-Object { $_ } |
+           Where-Object { Test-Path (Join-Path $_ 'common\iasiodrv.h') } |
+           Select-Object -First 1
+
+    if (-not $sdk) {
+        $looked = ($candidates | Where-Object { $_ }) -join ', '
+        throw ("-Asio needs Steinberg's ASIO SDK and none was found. Looked in: $looked. " +
+               'An ASIO driver such as ASIO4ALL is not the SDK: drivers are what you play ' +
+               'through, the SDK is the headers needed to build support for them. Download ' +
+               'it from steinberg.net, unpack it, and pass -AsioSdkPath <folder>.')
+    }
+
+    Write-Host "ASIO enabled, SDK at $sdk"
+    $asioArgs = @('-DOPENDJ_ENABLE_ASIO=ON', "-DOPENDJ_ASIO_SDK_PATH=$sdk")
+}
 
 $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
 if (-not (Test-Path $vswhere)) {
@@ -61,7 +97,7 @@ if ($Clean -and (Test-Path $buildDir)) {
 }
 
 Write-Host "Configuring ($Config)..." -ForegroundColor Cyan
-& $cmake -S $repoRoot -B $buildDir @generatorArgs
+& $cmake -S $repoRoot -B $buildDir @generatorArgs @asioArgs
 if ($LASTEXITCODE -ne 0) { throw "Configure failed with exit code $LASTEXITCODE." }
 
 Write-Host 'Building...' -ForegroundColor Cyan
