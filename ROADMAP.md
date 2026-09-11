@@ -33,7 +33,7 @@ check behind it, not just code that compiles.
 
 | Platform | Builds | Runs | Notes |
 | --- | :---: | :---: | --- |
-| Windows | ✅ | ✅ | Built and run with MSVC 19.44. WASAPI by default, ASIO opt-in. CI needs a self-hosted runner, see below |
+| Windows | ✅ | ✅ | Built and run with MSVC 19.44. WASAPI by default, ASIO opt-in. No CI job: checked by building there directly, see below |
 | Fedora | ✅ | ✅ | Built and run on Fedora 44 with GCC 16, on a DJ-202's own four-channel interface through PipeWire's JACK. Decks, platters, browser, analysis and the library all exercised |
 | Debian and Ubuntu | ✅ | ⬜ | Same, via the Debian CI job |
 | Arch | ⬜ | ⬜ | `scripts/build.sh` knows the packages, untested |
@@ -247,17 +247,48 @@ requests, and on demand from the Actions tab.
 ### Re-running a workflow
 
 Open the Actions tab, pick the workflow, and use **Run workflow** for a fresh run, or open a
-finished run and use its re-run button. Neither needs a commit. That matters because most
-Windows failures are not the code: the runner is a console program on a desktop machine, so it
-goes down when the session that started it does, and a job already in flight is then left with
-no runner and fails for reasons that have nothing to do with the build.
+finished run and use its re-run button. Neither needs a commit.
 
-If a Windows job fails or sits unclaimed, check the machine before reading the log:
+| Job | Runs on | Status |
+| --- | --- | :---: |
+| fedora | `fedora:latest` container on the Linux runner | ✅ |
+| debian | the Linux runner's own image | ✅ |
+| windows | removed | ⬜ |
+
+### Why there is no Windows job
+
+There was one, it worked, and it was removed anyway. The only Windows runner available was a
+desktop someone works on, and a five minute MSVC build landing on it for every push made that
+machine unusable to type on. CI that costs more than it catches is not worth running.
+
+Windows is still checked, by building and running the tests there directly, which is what has
+actually been catching things: the `NOMINMAX` failure, the MP3 decode bug and the loop work were
+all found that way rather than by a CI tick.
+
+To bring it back, on a machine nobody is working on, see below. The job itself is kept as a
+comment at the foot of `.gitea/workflows/build.yml` so it can be pasted back in one piece.
+
+Two things about the remaining jobs are worth knowing before changing them.
+
+| Detail | Why |
+| --- | --- |
+| The Fedora job installs `nodejs` and `git` before anything else | `actions/checkout` is a JavaScript action, and the stock Fedora image has neither. Without that step the job fails in two seconds, long before a compiler is involved |
+| A Windows job, if restored, should call `scripts/build.ps1` rather than CMake directly | The script finds the CMake, Ninja and MSVC environment inside Visual Studio Build Tools, so a self-hosted machine needs nothing on PATH but git and node |
+
+The README carries a status badge per branch. Gitea's badges are per workflow rather than per
+job, so one badge covers both platforms and goes red if either fails.
+
+### If a restored Windows job misbehaves
+
+The runner is a console program on a desktop machine, so it goes down when the session that
+started it does, and a job already in flight is then left with no runner and fails for reasons
+that have nothing to do with the build. Check the machine before reading the log:
 
 | Check | Command |
 | --- | --- |
 | Is the service running? | `Get-Service GiteaRunner` |
 | Start or restart it | `Restart-Service GiteaRunner` |
+| Stop it eating the machine | `Stop-Service GiteaRunner; Set-Service GiteaRunner -StartupType Manual` |
 | What did it say? | `Get-Content C:\gitea-runner\logs\runner.err.log -Tail 40` |
 
 The runner writes its ordinary progress to stderr, so `runner.err.log` is the interesting file
@@ -265,29 +296,11 @@ and `runner.log` stays empty. An empty `runner.log` is not a sign that anything 
 
 A last result of `0xC000013A` means it was killed by the session ending rather than crashing.
 
-| Job | Runs on | Status |
-| --- | --- | :---: |
-| fedora | `fedora:latest` container on the Linux runner | ✅ |
-| debian | the Linux runner's own image | ✅ |
-| windows | a self-hosted Windows runner | ✅ |
-
-Two things about this setup are worth knowing before changing it.
-
-| Detail | Why |
-| --- | --- |
-| The Fedora job installs `nodejs` and `git` before anything else | `actions/checkout` is a JavaScript action, and the stock Fedora image has neither. Without that step the job fails in two seconds, long before a compiler is involved |
-| The Windows job calls `scripts/build.ps1` rather than CMake directly | The script finds the CMake, Ninja and MSVC environment inside Visual Studio Build Tools, so a self-hosted machine needs nothing on PATH but git and node |
-
-The README carries a status badge per branch. Gitea's badges are per workflow rather than per
-job, so one badge covers all three platforms and goes red if any of them fails.
-
 ### Registering a Windows runner
 
-One is already registered as `INTERHOME-windows`, running as a Windows service, so Windows CI
-works whether or not anyone is signed in. To add another, or to replace it: the
-Linux runner advertises `ubuntu-latest` and has no MSVC, so it will never take the Windows job,
-and that job is simply never scheduled without a Windows machine. On a machine with Visual
-Studio Build Tools, git and Node installed:
+There is no Windows job to run at the moment, so this is only needed if one is restored. The
+Linux runner advertises `ubuntu-latest` and has no MSVC, so it will never take a Windows job.
+On a machine nobody is working on, with Visual Studio Build Tools, git and Node installed:
 
 ```
 pwsh scripts/setup-windows-runner.ps1 -Token <registration token>

@@ -67,15 +67,21 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure
 
-  windows:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      # The build script locates the CMake, Ninja and MSVC environment that ship
-      # with Visual Studio Build Tools, so a self-hosted runner needs nothing on
-      # PATH beyond git and node. It falls back to a CMake on PATH where there is
-      # one, so this works on a GitHub-hosted image too.
-      - name: Build and test
-        shell: pwsh
-        run: ./scripts/build.ps1 -Config RelWithDebInfo -Test
+# There is deliberately no windows job.
+#
+# The only Windows runner available is a desktop that is also used for
+# developing, and a five minute MSVC build landing on it for every push made
+# that machine unusable. CI that costs more than it catches is not worth
+# running. Windows is checked by building and testing there directly, which is
+# what has actually been catching things.
+#
+# To bring it back: register a Windows runner with scripts/setup-windows-runner.ps1,
+# preferably on a machine nobody is working on, then restore the job:
+#
+#   windows:
+#     runs-on: windows-latest
+#     steps:
+#       - uses: actions/checkout@v4
+#       - name: Build and test
+#         shell: pwsh
+#         run: ./scripts/build.ps1 -Config RelWithDebInfo -Test

@@ -5,9 +5,13 @@
 | [`main`](https://git.interdo.me/interdome/opendj/actions?workflow=build.yml&branch=main) | [![main](https://git.interdo.me/interdome/opendj/actions/workflows/build.yml/badge.svg?branch=main)](https://git.interdo.me/interdome/opendj/actions?workflow=build.yml&branch=main) |
 | [`testing`](https://git.interdo.me/interdome/opendj/actions?workflow=build.yml&branch=testing) | [![testing](https://git.interdo.me/interdome/opendj/actions/workflows/build.yml/badge.svg?branch=testing)](https://git.interdo.me/interdome/opendj/actions?workflow=build.yml&branch=testing) |
 
-Each badge is a build and the full test suite on Fedora, Debian and Windows, and goes red if
-any one of the three fails. The badge itself only ever says "build", because Gitea labels it
-with the workflow name and offers no way to change that, so the branch is named beside it.
+Each badge is a build and the full test suite on Fedora and Debian, and goes red if either
+fails. Windows has no CI job: the only runner available was a desktop somebody works on, and a
+build landing on it every push made that machine unusable. It is checked by building and testing
+there directly, which is what has caught things in practice.
+
+The badge itself only ever says "build", because Gitea labels it with the workflow name and
+offers no way to change that, so the branch is named beside it.
 
 Free and open source DJ software, built in C++ with [JUCE](https://juce.com).
 
