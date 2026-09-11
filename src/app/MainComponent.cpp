@@ -308,6 +308,13 @@ void MainComponent::loadInitialTracks (const juce::StringArray& paths)
 
 void MainComponent::timerCallback()
 {
+    // Noted while the window is alive and healthy, never asked for on the way
+    // out: by the time this component is destroyed the window that owns it is
+    // already half gone, and asking it anything then is an access violation.
+    if (auto* window = getTopLevelComponent(); window != nullptr && window != this)
+        settings.windowBounds = window->getBounds().toString();
+
+
     for (auto& view : deckViews)
         view->refresh();
 
@@ -463,9 +470,6 @@ void MainComponent::saveSettings()
         state.tempoRanges[(size_t) deck] = dispatcher.getTempoRange (deck);
 
     state.visibleDecks = visibleDecks;
-
-    if (auto* window = getTopLevelComponent(); window != nullptr)
-        state.windowBounds = window->getBounds().toString();
 
     state.writeTo (SessionState::defaultFile());
 

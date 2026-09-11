@@ -310,6 +310,30 @@ Eight tests cover it: both round trips, a missing file, a half damaged file fall
 field, values out of range being clamped, the state reaching a mixer and a sampler and being
 read back off them, and a save over an existing file leaving no temporary behind.
 
+## Known problem: the application crashes as it closes
+
+Closing the window ends the process with an access violation, exit code `0xC0000005`, on
+Windows. The window itself runs normally and the crash happens after the user has finished, so
+it is easy to miss, but it can cost the settings file: a run that crashes before the save
+completes leaves nothing written.
+
+What is known so far:
+
+| Observed | Detail |
+| --- | --- |
+| Where | On exit only, after `CloseMainWindow`, which is the same path as clicking the close button |
+| Symptom | Exit code `-1073741819`, and `audio-device.xml` never written |
+| Not the cause | Reading the window's bounds during teardown. That was one fault, it is fixed, and the crash outlived it |
+| Untested | Whether it predates the settings work. Building the previous commit to compare is the obvious next step and has not been done |
+
+Worth ruling out next, in order: the engine's timer still running while the decks are torn
+down, the sampler or the decks being destroyed while the device callback is live, and the
+stem separator's thread pool.
+
+Also seen while testing: the window takes about eight seconds to appear, nearly all of it
+inside device setup, and the default device comes up as DirectSound at 2560 samples, which is
+87 ms out. Neither is a fault, but both are worth attention.
+
 ## Beyond milestone 1
 
 | Item | Status | Notes |
