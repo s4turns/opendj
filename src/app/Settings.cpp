@@ -173,6 +173,7 @@ juce::var SessionState::toVar() const
     root->setProperty ("tempo_ranges", ranges);
     root->setProperty ("visible_decks", visible);
 
+    root->setProperty ("output_mode", opendj::toString (outputMode));
     root->setProperty ("sampler_gain", samplerGain);
     root->setProperty ("sampler_cue", samplerCue);
     root->setProperty ("sampler_files", files);
@@ -219,6 +220,7 @@ SessionState SessionState::fromVar (const juce::var& source)
                 state.visibleDecks[(size_t) side] = deck;
         }
 
+    state.outputMode = outputModeFromString (text (source, "output_mode"));
     state.samplerGain = (float) number (source, "sampler_gain", state.samplerGain, 0.0, 1.0);
     state.samplerCue = flag (source, "sampler_cue", state.samplerCue);
 

@@ -97,6 +97,16 @@ built with the SDK, then shared or exclusive Windows Audio, and DirectSound last
 cannot do low latency. On Linux it means JACK or PipeWire ahead of ALSA. It also asks a device sitting on a huge buffer for a smaller one. On a
 plain Windows desktop that is the difference between 87 ms of output latency and 7 ms.
 
+## Headphones on a stereo interface
+
+Headphone cue normally lives on outputs 3 and 4, which a four channel interface such as the
+DJ-202's has and a plain sound card does not. Audio setup offers a split instead: the master on
+output 1 and the cue on output 2, both in mono, for use with a splitter cable. One half goes to
+the speakers and the other to the headphones.
+
+It is off unless you choose it, because a split puts a mono master into one speaker, and the
+choice is remembered.
+
 ## What it remembers
 
 The audio device you picked, the master and headphone levels, the crossfader curve and which

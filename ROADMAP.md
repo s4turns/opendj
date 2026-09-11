@@ -372,13 +372,70 @@ Asking by name also settled the one thing left open about the settings file: JUC
 state for a device that was asked for, so the device is now remembered, and a second launch
 reopens it and skips the scan entirely. That is where the quarter of a second comes from.
 
+## Four decks shipped broken, and how that was found
+
+Decks C and D produced no audio at all, from the day four decks landed until this was caught.
+The device callback built its deck views from a two element list written when there were two
+decks:
+
+```cpp
+std::array<juce::AudioBuffer<float>, numDecks> deckViews
+{
+    juce::AudioBuffer<float> (deckBuffers[0]...),
+    juce::AudioBuffer<float> (deckBuffers[1]...)
+};
+```
+
+Views 2 and 3 were default constructed: no channels, no samples. Both extra decks rendered into
+nothing and the mixer was handed pointers to empty buffers. That is also where the crash on exit
+came from. The length guard added to `Mixer::processBlock` to stop that crash was correct and
+stays, but it turned the fault into silence rather than fixing it.
+
+Nothing caught it because the per block work lived inside a private device callback, so no test
+could reach it without a sound card. The fix is as much about that as about the loop:
+
+| Change | Why |
+| --- | --- |
+| `AudioEngine::prepareToPlay` and `renderNextBlock` are public | The device callback is one caller of them, not a privileged one. An offline render or a plugin wrapper would want the same seam, and a test needs it |
+| Views are built in a loop over `numDecks` | A list written by hand is a list that goes stale when a constant changes |
+| Pointed at storage with `setDataToReferTo` | Assigning an `AudioBuffer` copies, and copying allocates. On the audio thread that is its own bug |
+| Six tests in `tests/AudioEngine_test.cpp` | Every deck is loaded with a tone and required to reach the master bus. Reintroducing the two element list was tried, and the tests fail, so they are known to catch it rather than merely to pass |
+
+## Hearing the cue bus on a stereo device
+
+The cue bus lives on outputs 3 and 4, so on a plain stereo interface there was no way to
+pre-listen at all: the status bar said `cue bus: unavailable` and that was the end of it.
+
+`src/core/OutputRouter.*` now holds the routing rules, out of the callback and testable on their
+own. Two modes:
+
+| Mode | Master | Cue |
+| --- | --- | --- |
+| Separate outputs | 1 and 2, stereo | 3 and 4, stereo, when the device has them |
+| Split output | 1, mono | 2, mono |
+
+A split is the trick that predates DJ interfaces: one stereo output, a splitter cable, one half
+to the speakers and the other to the headphones. It costs stereo in both.
+
+| Decision | Why |
+| --- | --- |
+| Split is never the default | It puts a mono master into one speaker. Nobody should meet that without having asked for it, so it is a choice in Audio setup and it is remembered |
+| A split uses only outputs 1 and 2, whatever else the device has | A split is a statement about a cable, not about the hardware |
+| Mono is the average of both sides, not their sum | A loud stereo mix would clip on the way down otherwise |
+| Fewer than four outputs on separate pairs drops the cue bus | Putting it anywhere else would send the headphone feed to the room |
+| The mode is applied before the device opens | So the first block is routed correctly and the startup line tells the truth |
+
+Eleven tests cover the routing: both modes against one, two and four outputs, inactive channels
+skipped, an oversized block trimmed, canaries proving nothing is written past the block, and the
+mode surviving being written to the settings file.
+
 ## Beyond milestone 1
 
 | Item | Status | Notes |
 | --- | :---: | --- |
 | Slip mode | ✅ | `Deck::setSlipEnabled`, sharing the shadow playhead with loop rolls. Action `deck.slip_toggle` for the DJ-202's note 0x07 |
 | Key detection | ✅ | `src/analysis/KeyDetector.*`, shown in the browser's Key column. See above |
-| Four decks | ✅ | Four decks, four mixer strips, a crossfader assignment per channel and a swap button per side. See above. Actions `deck.select`, `deck.swap` and `mixer.crossfader_assign` are in the registry, so the DJ-202 deck-toggle button needs only a mapping entry |
+| Four decks | ✅ | Four decks, four mixer strips, a crossfader assignment per channel and a swap button per side. Shipped with C and D silent; see below. See above. Actions `deck.select`, `deck.swap` and `mixer.crossfader_assign` are in the registry, so the DJ-202 deck-toggle button needs only a mapping entry |
 | Loops and loop rolls | ✅ | `Deck::setLoopBeats` and friends, with a loop row on each deck. See above |
 | Effects | ✅ | A filter, a beat-synced echo and a reverb on every channel strip. The DJ-202 effects section is on MIDI channels 9 and 10, still unmapped |
 | Sampler | ✅ | `src/core/Sampler.*`, eight slots on a row of pads under the browser. See above. Actions `sampler.trigger`, `sampler.stop` and `sampler.gain` are in the registry; the DJ-202 pads send sampler notes on 0x21 to 0x30 and need only a mapping entry |

@@ -542,18 +542,18 @@ juce::String AudioEngine::getDeviceDescription() const
                 << "  |  " << juce::String (sampleRate, 0) << " Hz"
                 << "  |  " << bufferSize << " samples"
                 << "  |  " << juce::String (latencyMs, 1) << " ms out"
-                << "  |  cue bus: " << (hasCueOutput() ? "outputs 3-4" : "unavailable");
+                << "  |  cue bus: "
+                << (! hasCueOutput()                             ? "unavailable"
+                  : getOutputMode() == OutputMode::splitStereo   ? "split across outputs 1-2"
+                                                                 : "outputs 3-4");
 
     return description;
 }
 
 //==============================================================================
 
-void AudioEngine::audioDeviceAboutToStart (juce::AudioIODevice* device)
+void AudioEngine::prepareToPlay (double sampleRate, int blockSize)
 {
-    const auto sampleRate = device->getCurrentSampleRate();
-    const auto blockSize = device->getCurrentBufferSizeSamples();
-
     for (auto& buffer : deckBuffers)
         buffer.setSize (2, blockSize, false, true, true);
 
@@ -565,9 +565,14 @@ void AudioEngine::audioDeviceAboutToStart (juce::AudioIODevice* device)
 
     mixer.prepare (sampleRate, blockSize);
     sampler.prepare (sampleRate);
+}
 
-    cueOutputAvailable.store (device->getActiveOutputChannels().countNumberOfSetBits() >= 4,
-                              std::memory_order_relaxed);
+void AudioEngine::audioDeviceAboutToStart (juce::AudioIODevice* device)
+{
+    prepareToPlay (device->getCurrentSampleRate(), device->getCurrentBufferSizeSamples());
+
+    deviceOutputChannels.store (device->getActiveOutputChannels().countNumberOfSetBits(),
+                                std::memory_order_relaxed);
 }
 
 void AudioEngine::audioDeviceStopped()
@@ -586,33 +591,37 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const*,
                                                     int numSamples,
                                                     const juce::AudioIODeviceCallbackContext&)
 {
+    renderNextBlock (outputChannelData, numOutputChannels, numSamples);
+}
+
+void AudioEngine::renderNextBlock (float* const* outputs, int numOutputChannels, int numSamples)
+{
     for (int ch = 0; ch < numOutputChannels; ++ch)
-        if (outputChannelData[ch] != nullptr)
-            juce::FloatVectorOperations::clear (outputChannelData[ch], numSamples);
+        if (outputs[ch] != nullptr)
+            juce::FloatVectorOperations::clear (outputs[ch], numSamples);
 
     // The device can hand us a shorter block than it advertised, so never grow
     // a buffer here; that would allocate on the audio thread.
-    if (numSamples > masterBuffer.getNumSamples())
+    if (numSamples <= 0 || numSamples > masterBuffer.getNumSamples())
         return;
 
-    // Wrap the preallocated storage in views of exactly this block's length.
-    // AudioBuffer's pointer constructor does not allocate.
-    std::array<juce::AudioBuffer<float>, numDecks> deckViews
-    {
-        juce::AudioBuffer<float> (deckBuffers[0].getArrayOfWritePointers(), 2, numSamples),
-        juce::AudioBuffer<float> (deckBuffers[1].getArrayOfWritePointers(), 2, numSamples)
-    };
-
-    juce::AudioBuffer<float> masterView (masterBuffer.getArrayOfWritePointers(), 2, numSamples);
-    juce::AudioBuffer<float> cueView (cueBuffer.getArrayOfWritePointers(), 2, numSamples);
-
+    // Views of exactly this block's length over storage that already exists.
+    // Default construction allocates nothing and neither does setDataToReferTo,
+    // where assigning a buffer would copy and therefore allocate. Every deck
+    // gets one: building this list by hand is how decks C and D came to render
+    // into nothing at all.
+    std::array<juce::AudioBuffer<float>, numDecks> deckViews;
     std::array<juce::AudioBuffer<float>*, numDecks> deckPointers {};
 
     for (size_t i = 0; i < (size_t) numDecks; ++i)
     {
+        deckViews[i].setDataToReferTo (deckBuffers[i].getArrayOfWritePointers(), 2, numSamples);
         decks[i]->processBlock (deckViews[i]);
         deckPointers[i] = &deckViews[i];
     }
+
+    juce::AudioBuffer<float> masterView (masterBuffer.getArrayOfWritePointers(), 2, numSamples);
+    juce::AudioBuffer<float> cueView (cueBuffer.getArrayOfWritePointers(), 2, numSamples);
 
     mixer.processBlock (deckPointers, masterView, cueView);
 
@@ -620,28 +629,12 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const*,
     // a sound laid over the mix rather than one of the things being mixed.
     sampler.processBlock (masterView, cueView, numSamples);
 
-    const auto copyPair = [outputChannelData, numOutputChannels, numSamples]
-                          (const juce::AudioBuffer<float>& source, int firstOutput)
-    {
-        for (int ch = 0; ch < 2; ++ch)
-        {
-            const auto destination = firstOutput + ch;
-
-            if (destination < numOutputChannels && outputChannelData[destination] != nullptr)
-                juce::FloatVectorOperations::copy (outputChannelData[destination],
-                                                   source.getReadPointer (ch),
-                                                   numSamples);
-        }
-    };
-
     // Recorded after the mixer and before the device, so the file holds exactly
     // what the room heard: crossfader, master gain, soft clip and all.
     recorder.write (masterView, numSamples);
 
-    copyPair (masterView, 0);
-
-    if (numOutputChannels >= 4)
-        copyPair (cueView, 2);
+    routeOutputs (masterView, cueView, outputs, numOutputChannels, numSamples,
+                  outputMode.load (std::memory_order_relaxed));
 }
 
 //==============================================================================

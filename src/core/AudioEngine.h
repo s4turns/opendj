@@ -12,6 +12,7 @@
 #include "analysis/StemSeparator.h"
 #include "core/Deck.h"
 #include "core/Mixer.h"
+#include "core/OutputRouter.h"
 #include "core/Sampler.h"
 #include "core/SetRecorder.h"
 
@@ -147,8 +148,46 @@ public:
             && loading[(size_t) deckIndex].load (std::memory_order_relaxed);
     }
 
-    /** True when the open device has a second output pair for the cue bus. */
-    bool hasCueOutput() const noexcept { return cueOutputAvailable.load (std::memory_order_relaxed); }
+    /** Where the master and cue busses go. Changing it takes effect on the
+        next block; the audio thread reads it once per block and nothing is
+        reopened, so this is safe to call while playing. */
+    void setOutputMode (OutputMode mode) noexcept
+    {
+        outputMode.store (mode, std::memory_order_relaxed);
+    }
+
+    OutputMode getOutputMode() const noexcept
+    {
+        return outputMode.load (std::memory_order_relaxed);
+    }
+
+    /** How many outputs the open device is actually using, or 0 with none. */
+    int getNumOutputChannels() const noexcept
+    {
+        return deviceOutputChannels.load (std::memory_order_relaxed);
+    }
+
+    /** True when the cue bus can be heard: four outputs on separate pairs, or
+        two on a split. */
+    bool hasCueOutput() const noexcept
+    {
+        return cueIsAudible (getOutputMode(), getNumOutputChannels());
+    }
+
+    //==========================================================================
+    // Driving the engine directly. The device callback is one caller of these
+    // and not a privileged one: an offline render, a test, or some future
+    // plugin wrapper is another. Keeping the per block work behind a private
+    // callback is what let four decks ship with two of them silent, because
+    // nothing outside a running sound card could reach it.
+    //==========================================================================
+
+    /** Sizes every buffer and prepares the decks, the mixer and the sampler. */
+    void prepareToPlay (double sampleRate, int blockSize);
+
+    /** Renders one block of the whole engine into the given device outputs.
+        Realtime safe: allocates nothing, locks nothing, opens nothing. */
+    void renderNextBlock (float* const* outputs, int numOutputChannels, int numSamples);
 
     /** A one line summary of the open device, for the status bar. */
     juce::String getDeviceDescription() const;
@@ -205,7 +244,8 @@ private:
     juce::AudioBuffer<float> masterBuffer;
     juce::AudioBuffer<float> cueBuffer;
 
-    std::atomic<bool> cueOutputAvailable { false };
+    std::atomic<int> deviceOutputChannels { 0 };
+    std::atomic<OutputMode> outputMode { OutputMode::separatePairs };
     juce::String deviceChoiceReason;
 
     Sampler sampler;

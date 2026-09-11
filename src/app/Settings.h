@@ -8,6 +8,7 @@
 #include <juce_core/juce_core.h>
 
 #include "core/Mixer.h"
+#include "core/OutputRouter.h"
 #include "core/Sampler.h"
 
 #include <array>
@@ -47,6 +48,11 @@ struct SessionState
     /** Which deck is on screen on each side. */
     std::array<int, 2> visibleDecks { 0, 1 };
 
+    /** Where the master and cue busses go. Separate pairs by default: a split
+        turns the master mono and puts it in one speaker, which nobody should
+        get without having asked for it. */
+    OutputMode outputMode = OutputMode::separatePairs;
+
     float samplerGain = 0.8f;
     bool samplerCue = false;
 
@@ -63,7 +69,9 @@ struct SessionState
 
     //==========================================================================
 
-    /** Reads the mixer and the sampler. Does not touch the file. */
+    /** Reads the mixer and the sampler. Does not touch the file. The output
+        mode belongs to the engine rather than either of them, so it is set by
+        whoever owns this. */
     void captureFrom (const Mixer& mixer, const Sampler& sampler);
 
     /** Writes this state onto a mixer and a sampler. Sampler slots are named

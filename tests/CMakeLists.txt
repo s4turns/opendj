@@ -13,7 +13,9 @@ juce_add_console_app(opendj-tests
     NEEDS_CURL   FALSE)
 
 target_sources(opendj-tests PRIVATE
+    AudioEngine_test.cpp
     Mixer_test.cpp
+    OutputRouter_test.cpp
     Deck_test.cpp
     Loop_test.cpp
     Sampler_test.cpp

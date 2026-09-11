@@ -81,6 +81,10 @@ MainComponent::MainComponent()
     // no headphone cue at all and a jog wheel felt through desktop latency.
     settings = SessionState::readFrom (SessionState::defaultFile());
 
+    // Before the device opens, so the routing is already right when the first
+    // block is rendered and when the startup line is written.
+    engine.setOutputMode (settings.outputMode);
+
     const auto savedDevice = juce::XmlDocument::parse (
         SessionState::defaultFile().getSiblingFile ("audio-device.xml"));
 
@@ -471,6 +475,7 @@ void MainComponent::saveSettings()
 {
     auto state = settings;
     state.captureFrom (engine.getMixer(), engine.getSampler());
+    state.outputMode = engine.getOutputMode();
 
     for (int deck = 0; deck < AudioEngine::numDecks; ++deck)
         state.tempoRanges[(size_t) deck] = dispatcher.getTempoRange (deck);
@@ -523,19 +528,94 @@ void MainComponent::swapBothSides()
 
 void MainComponent::showAudioSettings()
 {
-    auto selector = std::make_unique<juce::AudioDeviceSelectorComponent> (
-        engine.getDeviceManager(),
-        0, 0,      // no inputs yet
-        2, 8,      // enough outputs for a master pair plus a cue pair
-        false,     // MIDI has its own panel
-        false,
-        true,
-        false);
+    /** The device picker with the cue routing underneath it. Routing is not
+        something JUCE's selector knows about, and it belongs here rather than
+        on the mixer: it is a fact about how the hardware is plugged in, which
+        is exactly what the rest of this dialog is about. */
+    struct AudioSetup final : public juce::Component
+    {
+        AudioSetup (AudioEngine& engineToUse) : engine (engineToUse)
+        {
+            selector = std::make_unique<juce::AudioDeviceSelectorComponent> (
+                engine.getDeviceManager(),
+                0, 0,      // no inputs yet
+                2, 8,      // enough outputs for a master pair plus a cue pair
+                false,     // MIDI has its own panel
+                false,
+                true,
+                false);
 
-    selector->setSize (500, 420);
+            addAndMakeVisible (*selector);
+
+            label.setText ("Headphone cue", juce::dontSendNotification);
+            label.setColour (juce::Label::textColourId, juce::Colours::white);
+            addAndMakeVisible (label);
+
+            routing.addItem ("Separate outputs: master on 1-2, cue on 3-4", 1);
+            routing.addItem ("Split one stereo output: master on 1, cue on 2", 2);
+            routing.setSelectedId (engine.getOutputMode() == OutputMode::splitStereo ? 2 : 1,
+                                   juce::dontSendNotification);
+            routing.onChange = [this]
+            {
+                engine.setOutputMode (routing.getSelectedId() == 2 ? OutputMode::splitStereo
+                                                                   : OutputMode::separatePairs);
+                updateExplanation();
+            };
+            addAndMakeVisible (routing);
+
+            explanation.setColour (juce::Label::textColourId, juce::Colours::grey);
+            explanation.setFont (juce::FontOptions (12.0f));
+            explanation.setJustificationType (juce::Justification::topLeft);
+            addAndMakeVisible (explanation);
+
+            updateExplanation();
+        }
+
+        void updateExplanation()
+        {
+            const auto outputs = engine.getNumOutputChannels();
+            const auto split = engine.getOutputMode() == OutputMode::splitStereo;
+
+            juce::String text;
+
+            if (split)
+                text << "Both busses are mono. Use a splitter cable: one side to the speakers, "
+                        "the other to the headphones.";
+            else if (outputs >= 4)
+                text << "The cue bus is on outputs 3 and 4, in stereo.";
+            else
+                text << "This device has " << outputs << " output"
+                     << (outputs == 1 ? "" : "s") << ", so there is nowhere for a separate cue "
+                        "bus to go. Split the output, or use an interface with four.";
+
+            explanation.setText (text, juce::dontSendNotification);
+        }
+
+        void resized() override
+        {
+            auto area = getLocalBounds().reduced (8);
+
+            auto footer = area.removeFromBottom (96);
+            label.setBounds (footer.removeFromTop (20));
+            routing.setBounds (footer.removeFromTop (24));
+            footer.removeFromTop (6);
+            explanation.setBounds (footer);
+
+            area.removeFromBottom (8);
+            selector->setBounds (area);
+        }
+
+        AudioEngine& engine;
+        std::unique_ptr<juce::AudioDeviceSelectorComponent> selector;
+        juce::Label label, explanation;
+        juce::ComboBox routing;
+    };
+
+    auto content = std::make_unique<AudioSetup> (engine);
+    content->setSize (520, 540);
 
     juce::DialogWindow::LaunchOptions options;
-    options.content.setOwned (selector.release());
+    options.content.setOwned (content.release());
     options.dialogTitle = "Audio setup";
     options.dialogBackgroundColour = juce::Colour (0xff1c1c22);
     options.escapeKeyTriggersCloseButton = true;
