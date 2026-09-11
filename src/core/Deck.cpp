@@ -187,7 +187,13 @@ Deck::~Deck()
 
 bool Deck::loadFile (const juce::File& file, const KnownTrack* known)
 {
-    auto decoded = TrackDecoder::decode (formatManager, file);
+    juce::String reason;
+    auto decoded = TrackDecoder::decode (formatManager, file, &reason);
+
+    {
+        std::lock_guard<std::mutex> lock (loadErrorMutex);
+        lastLoadError = reason;
+    }
 
     if (decoded == nullptr)
         return false;
@@ -263,6 +269,12 @@ void Deck::unload()
 {
     publish (nullptr);
     analysisData.store (nullptr);
+}
+
+juce::String Deck::getLastLoadError() const
+{
+    std::lock_guard<std::mutex> lock (loadErrorMutex);
+    return lastLoadError;
 }
 
 std::shared_ptr<const TrackAnalysis> Deck::getAnalysis() const

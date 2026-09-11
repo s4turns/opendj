@@ -164,9 +164,12 @@ void DeckComponent::load (const juce::File& file)
         if (! succeeded)
             juce::NativeMessageBox::showMessageBoxAsync (
                 juce::MessageBoxIconType::WarningIcon,
-                "Could not load track",
-                "OpenDJ could not decode " + file.getFileName()
-                    + ".\n\nIt may be an unsupported format, longer than 30 minutes, or damaged.");
+                "Could not load " + file.getFileName(),
+                // Say which of the possible causes it was. A dialog that lists
+                // three and commits to none leaves the reader no better off.
+                safe->deck.getLastLoadError().isNotEmpty()
+                    ? safe->deck.getLastLoadError()
+                    : juce::String ("The reason is not known."));
 
         safe->refresh();
     });

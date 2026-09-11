@@ -15,6 +15,7 @@
 #include <array>
 #include <atomic>
 #include <memory>
+#include <mutex>
 #include <vector>
 
 namespace RubberBand { class RubberBandStretcher; }
@@ -60,6 +61,11 @@ public:
 
     juce::File getLoadedFile() const;
     juce::String getTrackTitle() const;
+
+    /** Why the last loadFile() returned false, in words a user can act on.
+        Written by whichever thread did the loading and read by the interface
+        afterwards, so it takes a lock; it is never touched by the audio thread. */
+    juce::String getLastLoadError() const;
 
     /** Waveform peaks and the beat grid for the loaded track, or null when
         nothing is loaded. Safe to call from the interface: the returned object
@@ -230,6 +236,9 @@ private:
 
     const int index;
     juce::AudioFormatManager& formatManager;
+
+    mutable std::mutex loadErrorMutex;
+    juce::String lastLoadError;
 
     std::atomic<Track*> activeTrack { nullptr };
 

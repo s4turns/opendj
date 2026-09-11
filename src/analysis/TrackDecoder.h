@@ -30,12 +30,21 @@ struct DecodedAudio
 class TrackDecoder
 {
 public:
-    /** Refuse absurd files rather than exhausting memory on a mistaken load. */
-    static constexpr double maxTrackMinutes = 30.0;
+    /** Refuse absurd files rather than exhausting memory on a mistaken load.
 
-    /** Returns null if the file could not be read or is too long. */
+        A minute of stereo audio held as float is about 10 MB, and separated
+        stems multiply that by four, so this is a real limit rather than a
+        formality. An hour is well past any track and into the length of a
+        recorded set, which is not what a deck is for. */
+    static constexpr double maxTrackMinutes = 60.0;
+
+    /** Returns null when the file could not be read. `failureReason`, if given,
+        is filled in with something specific enough to act on: which of the
+        several possible causes it actually was. Guessing at three of them in a
+        dialog helps nobody. */
     static std::unique_ptr<DecodedAudio> decode (juce::AudioFormatManager& formatManager,
-                                                 const juce::File& file);
+                                                 const juce::File& file,
+                                                 juce::String* failureReason = nullptr);
 };
 
 } // namespace opendj
