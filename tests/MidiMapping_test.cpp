@@ -515,3 +515,61 @@ TEST_CASE ("the shipped DJ-202 mapping reaches the deck select and sampler", "[m
         REQUIRE (level->action == opendj::Action::samplerGain);
     }
 }
+
+TEST_CASE ("the shipped DJ-202 mapping reaches the FX section", "[midi][mapping][dj202]")
+{
+    const auto file = findShippedMapping();
+
+    if (! file.existsAsFile())
+        SUCCEED ("mapping file not found beside the test binary");
+    else
+    {
+        opendj::MidiMapping mapping;
+        juce::StringArray warnings;
+        REQUIRE (opendj::MidiMapping::loadFromFile (file, mapping, warnings).wasOk());
+        INFO (warnings.joinIntoString ("; "));
+        REQUIRE (warnings.isEmpty());
+
+        // FX1 arms echo, FX2 arms reverb, on both sides and on both halves of
+        // the deck toggle. Notes 0x98/0x99 are the untoggled pair; 0x9A/0x9B
+        // are what DECK moves them to.
+        struct Select { int status, number, deck, slot; };
+
+        const Select selects[]
+        {
+            { 0x98, 0x00, 0, 0 }, { 0x98, 0x01, 0, 1 },
+            { 0x99, 0x00, 1, 0 }, { 0x99, 0x01, 1, 1 },
+            { 0x9A, 0x00, 0, 0 }, { 0x9A, 0x01, 0, 1 },
+            { 0x9B, 0x00, 1, 0 }, { 0x9B, 0x01, 1, 1 },
+        };
+
+        for (const auto& e : selects)
+        {
+            INFO (juce::String::toHexString (e.status) << " " << juce::String::toHexString (e.number));
+            const auto* control = mapping.findControl (e.status, e.number, false);
+            REQUIRE (control != nullptr);
+            REQUIRE (control->action == opendj::Action::channelFxSelect);
+            REQUIRE (control->deck == e.deck);
+            REQUIRE (control->slot == e.slot);
+        }
+
+        // FX3 and FX ON/TAP are recognised by the hardware but have nothing to
+        // reach: OpenDJ has two effects, not three, and the depth knob is
+        // already how an effect is switched off.
+        REQUIRE (mapping.findControl (0x98, 0x02, false) == nullptr);
+        REQUIRE (mapping.findControl (0x98, 0x04, false) == nullptr);
+
+        // The depth knob only binds CC 0x00 of the three the hardware sends at
+        // once for a single turn, or one hand movement would write the mapping
+        // three times.
+        for (const auto status : { 0xB8, 0xB9, 0xBA, 0xBB })
+        {
+            const auto* depth = mapping.findControl (status, 0x00, false);
+            REQUIRE (depth != nullptr);
+            REQUIRE (depth->action == opendj::Action::channelFxDepth);
+
+            REQUIRE (mapping.findControl (status, 0x01, false) == nullptr);
+            REQUIRE (mapping.findControl (status, 0x02, false) == nullptr);
+        }
+    }
+}

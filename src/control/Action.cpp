@@ -17,7 +17,7 @@ namespace
 
     // One table, read in both directions, so a name can never disagree with
     // itself between the parser and the writer.
-    constexpr std::array<Entry, 44> actionNames
+    constexpr std::array<Entry, 46> actionNames
     {{
         { Action::deckPlayToggle,   "deck.play_toggle" },
         { Action::deckPlay,         "deck.play" },
@@ -53,6 +53,8 @@ namespace
         { Action::channelFilter,    "mixer.filter" },
         { Action::channelEcho,      "mixer.echo" },
         { Action::channelReverb,    "mixer.reverb" },
+        { Action::channelFxSelect,  "mixer.fx_select" },
+        { Action::channelFxDepth,   "mixer.fx_depth" },
         { Action::channelCrossfaderAssign, "mixer.crossfader_assign" },
         { Action::crossfader,       "mixer.crossfader" },
         { Action::masterGain,       "mixer.master" },
@@ -108,6 +110,7 @@ bool isContinuous (Action action)
         case Action::channelFilter:
         case Action::channelEcho:
         case Action::channelReverb:
+        case Action::channelFxDepth:
         case Action::crossfader:
         case Action::masterGain:
         case Action::cueGain:

@@ -1,7 +1,7 @@
 # OpenDJ roadmap
 
 Where the project is and what to pick up next. Anything ticked has tests or a verified manual
-check behind it, not just code that compiles. The suite is **216 tests**; anything touching
+check behind it, not just code that compiles. The suite is **232 tests**; anything touching
 audio is tested by measuring the output, not by checking that the code ran.
 
 | Symbol | Meaning |
@@ -53,7 +53,7 @@ that was listed after it except video.
 | Item | Notes |
 | --- | --- |
 | DJ-202 tempo fader polarity | The one assumption never checked on hardware: mapped `"inverted": true`. If the fader reads backwards, set it to `false` in the mapping |
-| DJ-202 effects, sampler pads and deck toggle | Engine side is done and named in the action registry, so each needs a mapping entry and no C++ |
+| DJ-202 TR-S sequencer and pad modes beyond hot cue | Not in the action registry yet; effects, sampler pads and deck toggle are all mapped now |
 | Arch and macOS | `scripts/build.sh` knows the Arch packages but has never been run there. macOS has never been tried |
 | Video | Unstarted, and probably its own project |
 
@@ -210,6 +210,22 @@ hardware: repeats fall into the room.
 The tests measure output. For the echo, a click goes in and the level is sampled where each
 repeat is due and halfway between: loud on the beat and quiet between is what the right delay
 length means, and neither half alone would show it.
+
+**Binding echo and reverb to the DJ-202's FX section.** The mixer has two independent effects,
+each with its own permanent knob. The hardware has one shared DEPTH knob behind three FX-select
+buttons, because it was built around a single onboard effects unit rather than two always-on
+sends. What a DJ actually gets: FX1 arms echo and FX2 arms reverb, both lighting up to show which
+one is currently armed; the DEPTH knob then always turns whichever of the two was armed last,
+echo by default. FX3 and FX ON/TAP are recognised by the mapping but sent nowhere, because there
+is no third effect for FX3 to mean and no separate bypass state for ON/TAP to flip: the knob
+already turns an effect off at zero.
+
+| Decision | Why |
+| --- | --- |
+| `mixer.fx_select` only changes which effect the knob reaches | It never touches the mixer itself, so pressing FX1 or FX2 cannot itself change a level, only where the next knob turn lands |
+| The selection lives in `ActionDispatcher`, one small integer per channel, alongside `shiftHeld` and `tempoRangePercent` | It is exactly that kind of state: not audio, not persisted, read by the next action rather than stored on a deck or the mixer |
+| Binding only CC 0x00 of the DEPTH knob | Measured on real hardware: the knob broadcasts the same value on 0x00, 0x01 and 0x02 at once, so binding all three would write the mapping three times for one hand movement |
+| FX3 and FX ON/TAP left unmapped | OpenDJ has two effects, not three, and a continuous knob already has an off position; inventing a use for either button would be design bolted onto a limitation the hardware does not actually have on this engine |
 
 ## Sampler
 
