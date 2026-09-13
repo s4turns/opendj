@@ -259,6 +259,14 @@ void ActionDispatcher::dispatch (const ActionMessage& message)
             mixer.setChannelFilter (deckIndex, message.value);
             break;
 
+        case Action::channelEcho:
+            mixer.setChannelEcho (deckIndex, message.value);
+            break;
+
+        case Action::channelReverb:
+            mixer.setChannelReverb (deckIndex, message.value);
+            break;
+
         case Action::channelCueToggle:
             if (pressed)
                 mixer.toggleChannelCue (deckIndex);

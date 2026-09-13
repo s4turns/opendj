@@ -1,7 +1,7 @@
 {
   "name": "Roland DJ-202",
   "author": "The OpenDJ contributors",
-  "description": "Two-deck mapping for the Roland DJ-202. Control assignments were taken from Roland's MIDI implementation chart and cross checked against the Mixxx community mapping by Silvio Ankermann, Sebastian Reusse and Rene Kraus (https://github.com/mixxxdj/mixxx/wiki/Roland-Dj-202), which is GPLv2 or later and so compatible with this project. The DJ-202 powers up in a standalone mode in which it sends nothing at all; initMessages asks it to talk to a computer, and keepAlive holds it there, since it falls back after about a second and a half without one. The platters report relative ticks on CC 0x06, centred on 64. They also stream 14-bit absolute position as pitch bend on 0xE0/0xE1, but that flows whenever a hand merely rests on the wheel, so it is deliberately left unmapped. Pressing DECK moves a side onto MIDI channels 3 and 4; those are routed back to the same decks, so a stray press cannot leave one dead. LOOP IN and LOOP OUT set a loop by hand, and the parameter buttons beside them halve and double it. The browse encoder scrolls the library and the load buttons put the selected track on a deck. Deck-toggle, effects, the TR-S sequencer and the pad modes beyond hot cue are recognised by the hardware but not yet mapped here.",
+  "description": "Two-deck mapping for the Roland DJ-202. Control assignments were taken from Roland's MIDI implementation chart and cross checked against the Mixxx community mapping by Silvio Ankermann, Sebastian Reusse and Rene Kraus (https://github.com/mixxxdj/mixxx/wiki/Roland-Dj-202), which is GPLv2 or later and so compatible with this project. The DJ-202 powers up in a standalone mode in which it sends nothing at all; initMessages asks it to talk to a computer, and keepAlive holds it there, since it falls back after about a second and a half without one. The platters report relative ticks on CC 0x06, centred on 64. They also stream 14-bit absolute position as pitch bend on 0xE0/0xE1, but that flows whenever a hand merely rests on the wheel, so it is deliberately left unmapped. Pressing DECK moves a side onto MIDI channels 3 and 4; those are routed back to the same decks, so a stray press cannot leave one dead. DECK swaps the A/B pair for the C/D pair and back, the same button the hardware itself uses to switch MIDI channel. The TR/SAMPLER row triggers the eight sampler slots and sets their shared level. LOOP IN and LOOP OUT set a loop by hand, and the parameter buttons beside them halve and double it. The browse encoder scrolls the library and the load buttons put the selected track on a deck. Deck-toggle, effects, the TR-S sequencer and the pad modes beyond hot cue are recognised by the hardware but not yet mapped here.",
   "deviceNameHints": [
     "DJ-202",
     "DJ202"
@@ -1164,6 +1164,96 @@
       "number": "0x46",
       "action": "loop.double",
       "deck": 1
+    },
+    {
+      "name": "Deck A deck select",
+      "status": "0x90",
+      "number": "0x08",
+      "action": "deck.swap",
+      "deck": 0
+    },
+    {
+      "name": "Deck A deck select (deck toggled)",
+      "status": "0x92",
+      "number": "0x08",
+      "action": "deck.swap",
+      "deck": 0
+    },
+    {
+      "name": "Deck B deck select",
+      "status": "0x91",
+      "number": "0x08",
+      "action": "deck.swap",
+      "deck": 1
+    },
+    {
+      "name": "Deck B deck select (deck toggled)",
+      "status": "0x93",
+      "number": "0x08",
+      "action": "deck.swap",
+      "deck": 1
+    },
+    {
+      "name": "Sampler trigger 1",
+      "status": "0x9F",
+      "number": "0x21",
+      "action": "sampler.trigger",
+      "slot": 0
+    },
+    {
+      "name": "Sampler trigger 2",
+      "status": "0x9F",
+      "number": "0x22",
+      "action": "sampler.trigger",
+      "slot": 1
+    },
+    {
+      "name": "Sampler trigger 3",
+      "status": "0x9F",
+      "number": "0x23",
+      "action": "sampler.trigger",
+      "slot": 2
+    },
+    {
+      "name": "Sampler trigger 4",
+      "status": "0x9F",
+      "number": "0x24",
+      "action": "sampler.trigger",
+      "slot": 3
+    },
+    {
+      "name": "Sampler trigger 5",
+      "status": "0x9F",
+      "number": "0x25",
+      "action": "sampler.trigger",
+      "slot": 4
+    },
+    {
+      "name": "Sampler trigger 6",
+      "status": "0x9F",
+      "number": "0x26",
+      "action": "sampler.trigger",
+      "slot": 5
+    },
+    {
+      "name": "Sampler trigger 7",
+      "status": "0x9F",
+      "number": "0x2E",
+      "action": "sampler.trigger",
+      "slot": 6
+    },
+    {
+      "name": "Sampler trigger 8",
+      "status": "0x9F",
+      "number": "0x2F",
+      "action": "sampler.trigger",
+      "slot": 7
+    },
+    {
+      "name": "Sampler level",
+      "status": "0xBF",
+      "number": "0x1A",
+      "action": "sampler.gain"
     }
   ]
 }

@@ -74,6 +74,8 @@ enum class Action
     channelCueToggle,
     channelCue,
     channelFilter,      ///< 0.5 is out of the way, down is a low pass, up a high pass
+    channelEcho,        ///< 0 is off, a beat-synced echo above that
+    channelReverb,      ///< 0 is off, a wash of tail above that
 
     /** Which side of the crossfader a channel answers to. slot picks it:
         0 the A side, 1 neither, 2 the B side. */

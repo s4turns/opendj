@@ -463,3 +463,55 @@ TEST_CASE ("the four deck and sampler actions are reachable from a mapping", "[m
     REQUIRE (! isContinuous (Action::samplerTrigger));
     REQUIRE (! isContinuous (Action::deckSwap));
 }
+
+TEST_CASE ("the shipped DJ-202 mapping reaches the deck select and sampler", "[midi][mapping][dj202]")
+{
+    const auto file = findShippedMapping();
+
+    if (! file.existsAsFile())
+        SUCCEED ("mapping file not found beside the test binary");
+    else
+    {
+        opendj::MidiMapping mapping;
+        juce::StringArray warnings;
+        REQUIRE (opendj::MidiMapping::loadFromFile (file, mapping, warnings).wasOk());
+        INFO (warnings.joinIntoString ("; "));
+        REQUIRE (warnings.isEmpty());
+
+        // DECK swaps the A/B pair for C/D: the DJ-202 has two jog wheels, so
+        // there is never a reason to look at one side of each pair at once.
+        for (const auto status : { 0x90, 0x91 })
+        {
+            const auto* control = mapping.findControl (status, 0x08, false);
+            REQUIRE (control != nullptr);
+            REQUIRE (control->action == opendj::Action::deckSwap);
+        }
+
+        // And it survives a stray press of DECK itself.
+        REQUIRE (mapping.findControl (0x92, 0x08, false) != nullptr);
+        REQUIRE (mapping.findControl (0x93, 0x08, false) != nullptr);
+
+        // The TR/SAMPLER row is global, not per deck, which is where OpenDJ's
+        // sampler lives too.
+        struct Expected { int number; int slot; };
+
+        const Expected triggers[]
+        {
+            { 0x21, 0 }, { 0x22, 1 }, { 0x23, 2 }, { 0x24, 3 },
+            { 0x25, 4 }, { 0x26, 5 }, { 0x2E, 6 }, { 0x2F, 7 },
+        };
+
+        for (const auto& e : triggers)
+        {
+            INFO ("note " << juce::String::toHexString (e.number));
+            const auto* control = mapping.findControl (0x9F, e.number, false);
+            REQUIRE (control != nullptr);
+            REQUIRE (control->action == opendj::Action::samplerTrigger);
+            REQUIRE (control->slot == e.slot);
+        }
+
+        const auto* level = mapping.findControl (0xBF, 0x1A, false);
+        REQUIRE (level != nullptr);
+        REQUIRE (level->action == opendj::Action::samplerGain);
+    }
+}
