@@ -637,6 +637,14 @@ bool MidiControlSurface::feedbackStateFor (const MidiControl& control) const
             // a turn of the knob will move.
             return dispatcher.getFxDepthTarget (deckIndex) == control.slot;
 
+        case Action::micToggle:
+            // Lit while the mic is live, which is the one light that matters
+            // most not to miss.
+            return const_cast<AudioEngine&> (engine).getMic().isEnabled();
+
+        case Action::micTalkover:
+            return const_cast<AudioEngine&> (engine).getMic().isTalkoverEnabled();
+
         default:
             return false;
     }

@@ -7,6 +7,7 @@
 
 #include <juce_core/juce_core.h>
 
+#include "core/MicInput.h"
 #include "core/Mixer.h"
 #include "core/OutputRouter.h"
 #include "core/Sampler.h"
@@ -65,6 +66,13 @@ struct SessionState
     std::array<float, Sampler::numSlots> samplerGains { 1.0f, 1.0f, 1.0f, 1.0f,
                                                         1.0f, 1.0f, 1.0f, 1.0f };
 
+    /** The mic's level, talkover and where it is heard. Whether it is on is
+        deliberately not kept: an open mic in front of the speakers howls, and
+        nobody should get that from opening the application. */
+    float micGain = 1.0f;
+    bool micTalkover = false;
+    MicInput::Routing micRouting = MicInput::Routing::everywhere;
+
     /** The broadcast server, password included. Kept in clear text, which the
         dialog says out loud: it is what every DJ application does, and telling
         somebody is better than quietly deciding for them. */
@@ -89,6 +97,12 @@ struct SessionState
         rather than loaded here, since loading decodes a file and this must stay
         usable from a test with no audio files in reach. */
     void applyTo (Mixer& mixer, Sampler& sampler) const;
+
+    /** Reads the mic's level, talkover and routing, never whether it is on. */
+    void captureFrom (const MicInput& mic);
+
+    /** Writes them back and leaves the mic off. */
+    void applyTo (MicInput& mic) const;
 
     /** Round trips through JSON. Anything missing keeps its default, so a file
         written by an older build still loads and only the new settings start

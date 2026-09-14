@@ -106,6 +106,28 @@ namespace
             return peak;
         }
 
+        /** The same, with something on the device's inputs. `input` is written
+            to the given input channel before every block, which is what lets a
+            test point an input at one of the engine's own output channels. */
+        float renderWithInput (int outputChannel, std::vector<float>& input, float level, int blocks = 24)
+        {
+            auto peak = 0.0f;
+            const float* inputs[] = { input.data() };
+
+            for (int block = 0; block < blocks; ++block)
+            {
+                std::fill (input.begin(), input.end(), level);
+                engine.renderNextBlock (outputs.data(), (int) outputs.size(), blockSize, inputs, 1);
+
+                peak = 0.0f;
+
+                for (const auto sample : storage[(size_t) outputChannel])
+                    peak = juce::jmax (peak, std::abs (sample));
+            }
+
+            return peak;
+        }
+
         void loadAndPlay (int deckIndex, const juce::File& file)
         {
             auto& deck = engine.getDeck (deckIndex);
@@ -239,4 +261,53 @@ TEST_CASE ("a block longer than the engine prepared for comes out silent", "[eng
 
     for (const auto sample : wide)
         REQUIRE (sample == 0.0f);
+}
+
+TEST_CASE ("a mic that is off is not heard", "[engine][mic]")
+{
+    ScopedJuce scoped;
+    Harness h;
+    std::vector<float> input ((size_t) blockSize);
+
+    REQUIRE (h.renderWithInput (0, input, 0.25f) == 0.0f);
+}
+
+TEST_CASE ("a mic reaches the speakers but not the headphones", "[engine][mic]")
+{
+    ScopedJuce scoped;
+    Harness h;
+    std::vector<float> input ((size_t) blockSize);
+
+    h.engine.getMic().setEnabled (true);
+
+    // Master on outputs 1 and 2, cue on 3 and 4: the voice is on the first
+    // pair at its own level and nowhere in the second.
+    REQUIRE_THAT (h.renderWithInput (0, input, 0.25f), WithinAbs (0.25f, 1.0e-3f));
+    REQUIRE_THAT (h.renderWithInput (1, input, 0.25f), WithinAbs (0.25f, 1.0e-3f));
+    REQUIRE (h.renderWithInput (2, input, 0.25f) == 0.0f);
+}
+
+TEST_CASE ("a mic kept out of the speakers is not heard in them", "[engine][mic]")
+{
+    ScopedJuce scoped;
+    Harness h;
+    std::vector<float> input ((size_t) blockSize);
+
+    h.engine.getMic().setEnabled (true);
+    h.engine.getMic().setRouting (opendj::MicInput::Routing::recordingOnly);
+
+    REQUIRE (h.renderWithInput (0, input, 0.25f) == 0.0f);
+}
+
+TEST_CASE ("a mic on an input that shares memory with an output is still heard", "[engine][mic]")
+{
+    ScopedJuce scoped;
+    Harness h;
+
+    h.engine.getMic().setEnabled (true);
+
+    // The input is the engine's own first output channel. Clearing the outputs
+    // before reading the inputs would silence it, and the voice would never
+    // arrive.
+    REQUIRE_THAT (h.renderWithInput (0, h.storage[0], 0.25f), WithinAbs (0.25f, 1.0e-3f));
 }

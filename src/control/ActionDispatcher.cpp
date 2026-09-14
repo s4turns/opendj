@@ -263,6 +263,20 @@ void ActionDispatcher::dispatch (const ActionMessage& message)
             engine.getSampler().setGain (message.value);
             break;
 
+        case Action::micToggle:
+            if (pressed)
+                engine.getMic().setEnabled (! engine.getMic().isEnabled());
+            break;
+
+        case Action::micGain:
+            engine.getMic().setGain (message.value * 2.0f);
+            break;
+
+        case Action::micTalkover:
+            if (pressed)
+                engine.getMic().setTalkover (! engine.getMic().isTalkoverEnabled());
+            break;
+
         case Action::channelFilter:
             mixer.setChannelFilter (deckIndex, message.value);
             break;

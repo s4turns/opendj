@@ -1,7 +1,7 @@
 # OpenDJ roadmap
 
 Where the project is and what to pick up next. Anything ticked has tests or a verified manual
-check behind it, not just code that compiles. The suite is **241 tests** on Linux and 240 on
+check behind it, not just code that compiles. The suite is **256 tests** on Linux and 255 on
 Windows, where the stderr test has no pipe to fill; anything touching
 audio is tested by measuring the output, not by checking that the code ran.
 
@@ -41,6 +41,7 @@ that was listed after it except video.
 | Key detection | ✅ | `src/analysis/KeyDetector.*`, in the browser's Key column |
 | Effects: filter, echo, reverb | ✅ | `src/core/Mixer.*`, one knob each per channel |
 | Sampler | ✅ | `src/core/Sampler.*`, eight pads |
+| Mic input | 🚧 | `src/core/MicInput.*`, `src/ui/MicComponent.*`, with talkover and a stream-only switch. Tested by measuring the output; not yet tried with a real mic |
 | Stem separation | ✅ | `src/analysis/StemSeparator.*`, `StemDsp.*`, a knob per stem |
 | Record the master output | ✅ | `src/core/SetRecorder.*`, with a tracklist |
 | Split output cue | ✅ | `src/core/OutputRouter.*`, headphones on a stereo interface |
@@ -245,6 +246,25 @@ empty pad, dropping a file on it, or the pad menu. The number row fires the eigh
 Sixteen tests, including a 44.1 kHz sound playing for its own length out of a 48 kHz device
 rather than eight per cent fast.
 
+## Mic input
+
+A mic from the device's inputs, laid over the mix after the sampler. Up to two inputs are enabled
+in Audio setup; the strip at the end of the sampler row turns the mic on, sets its level, meters
+it, and holds the talkover and routing switches. A controller reaches it through `mic.toggle`,
+`mic.gain` and `mic.talkover`.
+
+| Decision | Why |
+| --- | --- |
+| Never on at launch, and whether it was on is not saved | An open mic in front of speakers howls, and nobody should get that from opening the application |
+| It joins after the mixer and the sampler | No fader or crossfader should be able to take a voice away |
+| Stream only builds a second mix, rather than taking the voice back out of the speakers | The recorder and both broadcasters read that mix and the speakers get the ducked music alone. With the mic off and talkover let go, the second mix is not built at all |
+| Talkover is 10 dB, in 50 ms, back over half a second | Enough for a voice to sit on the music without stopping it, and slow enough coming back that a pause between sentences does not pump it |
+| Two inputs are summed, not averaged | A mic is mono and inputs are offered in pairs, so a mic in either half of a pair arrives at full level |
+| Its own soft clip above 0.9, only where a voice is added | The mixer rounds off above 0.7 before the mic arrives. Shaping the music a second time would cost it level, and a shout still has to be rounded off rather than torn |
+| Inputs are copied before the outputs are cleared | In case a backend hands over input and output channels that share memory. A test points the mic at the engine's own output to prove it is still heard |
+| The device search stays output-only | Opening inputs on every device it tries adds failure points and, on Windows, microphone permission prompts. The input is chosen once in Audio setup and kept with the device |
+| Not sent to the headphones | A voice heard back a few milliseconds late is distracting, and the room and the stream are where it matters |
+
 ## Output routing and the cue bus
 
 `src/core/OutputRouter.*` holds the rules, out of the device callback and testable on its own.
@@ -417,6 +437,7 @@ audio device in JUCE's own `audio-device.xml` next to it.
 | Crossfader curve and per-channel assignment | EQ, filter, echo and reverb settings |
 | Tempo fader ranges, which decks are on screen | |
 | The sampler pads, their files, loops and gains | |
+| The mic's level, talkover and routing | Whether the mic was on |
 | The window's size and position | |
 
 | Decision | Why |

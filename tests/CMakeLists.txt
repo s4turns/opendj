@@ -21,6 +21,7 @@ target_sources(opendj-tests PRIVATE
     OutputRouter_test.cpp
     Deck_test.cpp
     Loop_test.cpp
+    MicInput_test.cpp
     Sampler_test.cpp
     Settings_test.cpp
     ${CMAKE_SOURCE_DIR}/src/app/Settings.cpp

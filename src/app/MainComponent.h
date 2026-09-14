@@ -23,6 +23,7 @@
 #include "ui/MixerComponent.h"
 #include "app/Settings.h"
 #include "ui/SamplerComponent.h"
+#include "ui/MicComponent.h"
 
 #include <array>
 #include <memory>
@@ -124,6 +125,7 @@ private:
     std::unique_ptr<MixerComponent> mixerView;
     std::unique_ptr<BrowserComponent> browser;
     std::unique_ptr<SamplerComponent> samplerView;
+    std::unique_ptr<MicComponent> micView;
 
     juce::StretchableLayoutManager verticalLayout;
     std::unique_ptr<juce::StretchableLayoutResizerBar> resizerBar;

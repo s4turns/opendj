@@ -568,12 +568,15 @@ void AudioEngine::prepareToPlay (double sampleRate, int blockSize)
 
     masterBuffer.setSize (2, blockSize, false, true, true);
     cueBuffer.setSize (2, blockSize, false, true, true);
+    recordingBuffer.setSize (2, blockSize, false, true, true);
+    inputBuffer.setSize (2, blockSize, false, true, true);
 
     for (auto& deck : decks)
         deck->prepare (sampleRate, blockSize);
 
     mixer.prepare (sampleRate, blockSize);
     sampler.prepare (sampleRate);
+    mic.prepare (sampleRate);
 }
 
 void AudioEngine::audioDeviceAboutToStart (juce::AudioIODevice* device)
@@ -582,6 +585,8 @@ void AudioEngine::audioDeviceAboutToStart (juce::AudioIODevice* device)
 
     deviceOutputChannels.store (device->getActiveOutputChannels().countNumberOfSetBits(),
                                 std::memory_order_relaxed);
+    deviceInputChannels.store (device->getActiveInputChannels().countNumberOfSetBits(),
+                               std::memory_order_relaxed);
 }
 
 void AudioEngine::audioDeviceStopped()
@@ -593,18 +598,39 @@ void AudioEngine::audioDeviceStopped()
     sampler.stopAll();
 }
 
-void AudioEngine::audioDeviceIOCallbackWithContext (const float* const*,
-                                                    int,
+void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputChannelData,
+                                                    int numInputChannels,
                                                     float* const* outputChannelData,
                                                     int numOutputChannels,
                                                     int numSamples,
                                                     const juce::AudioIODeviceCallbackContext&)
 {
-    renderNextBlock (outputChannelData, numOutputChannels, numSamples);
+    renderNextBlock (outputChannelData, numOutputChannels, numSamples,
+                     inputChannelData, numInputChannels);
 }
 
-void AudioEngine::renderNextBlock (float* const* outputs, int numOutputChannels, int numSamples)
+void AudioEngine::renderNextBlock (float* const* outputs, int numOutputChannels, int numSamples,
+                                  const float* const* inputs, int numInputChannels)
 {
+    // The mic's inputs are copied before the outputs are cleared, in case a
+    // backend hands over input and output channels that share memory. Two at
+    // most, which is all the mic reads.
+    const float* micChannels[2] = { nullptr, nullptr };
+    auto numMicChannels = 0;
+
+    if (inputs != nullptr && numSamples > 0 && numSamples <= inputBuffer.getNumSamples())
+    {
+        for (int ch = 0; ch < numInputChannels && numMicChannels < 2; ++ch)
+        {
+            if (inputs[ch] == nullptr)
+                continue;
+
+            inputBuffer.copyFrom (numMicChannels, 0, inputs[ch], numSamples);
+            micChannels[numMicChannels] = inputBuffer.getReadPointer (numMicChannels);
+            ++numMicChannels;
+        }
+    }
+
     for (int ch = 0; ch < numOutputChannels; ++ch)
         if (outputs[ch] != nullptr)
             juce::FloatVectorOperations::clear (outputs[ch], numSamples);
@@ -638,19 +664,28 @@ void AudioEngine::renderNextBlock (float* const* outputs, int numOutputChannels,
     // a sound laid over the mix rather than one of the things being mixed.
     sampler.processBlock (masterView, cueView, numSamples);
 
+    // The mic joins last, over the music and the sampler, and ducks them for
+    // talkover. When it is kept out of the speakers it builds the mix to record
+    // and broadcast in a buffer of its own, and the taps below read that.
+    juce::AudioBuffer<float> recordingView (recordingBuffer.getArrayOfWritePointers(), 2, numSamples);
+    const auto& tap = mic.processBlock (micChannels, numMicChannels, masterView, recordingView, numSamples)
+                    ? recordingView
+                    : masterView;
+
     // Recorded after the mixer and before the device, so the file holds exactly
-    // what the room heard: crossfader, master gain, soft clip and all.
-    recorder.write (masterView, numSamples);
+    // what the room heard: crossfader, master gain, soft clip and all. Plus the
+    // mic, including a mic the room was kept from hearing.
+    recorder.write (tap, numSamples);
 
     // The same tap feeds the broadcast, so a listener hears what the room
     // hears. Both drop samples rather than stall, and neither can block here.
-    broadcaster.write (masterView, numSamples);
+    broadcaster.write (tap, numSamples);
 
     // And the same tap again for an RTMP target, if one is live. A third
     // silent branch when neither broadcast is running, which is the common
     // case, and exactly as cheap as the other two: an atomic load and a
     // comparison against nullptr.
-    rtmpBroadcaster.write (masterView, numSamples);
+    rtmpBroadcaster.write (tap, numSamples);
 
     routeOutputs (masterView, cueView, outputs, numOutputChannels, numSamples,
                   outputMode.load (std::memory_order_relaxed));

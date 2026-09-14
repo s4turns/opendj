@@ -119,6 +119,20 @@ built with the SDK, then shared or exclusive Windows Audio, and DirectSound last
 cannot do low latency. On Linux it means JACK or PipeWire ahead of ALSA. It also asks a device sitting on a huge buffer for a smaller one. On a
 plain Windows desktop that is the difference between 87 ms of output latency and 7 ms.
 
+## The mic
+
+Plug a mic into your interface, choose that input in Audio setup, and use the strip at the end of
+the sampler row. On puts it on air. It is always off when OpenDJ opens, so a mic left in front of
+the speakers cannot howl the moment the application starts. The knob is its level, and the bar
+beside it shows what the mic hears even while it is off, so the level can be set before anybody
+hears you.
+
+Talkover drops the music by 10 dB while the mic is on, and brings it back over half a second when
+you switch the mic off. Everywhere sends your voice to the speakers, the recording and the
+stream. Stream only keeps it out of the speakers but still puts it in the recording and the
+stream, for talking to listeners from a room with the speakers in it. The mic is not sent to the
+headphones.
+
 ## Headphones on a stereo interface
 
 Headphone cue normally lives on outputs 3 and 4, which a four channel interface such as the

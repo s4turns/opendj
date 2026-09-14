@@ -469,9 +469,15 @@ TEST_CASE ("the four deck and sampler actions are reachable from a mapping", "[m
     REQUIRE (actionFromString ("sampler.trigger") == Action::samplerTrigger);
     REQUIRE (actionFromString ("sampler.stop") == Action::samplerStop);
     REQUIRE (actionFromString ("sampler.gain") == Action::samplerGain);
+    REQUIRE (actionFromString ("mic.toggle") == Action::micToggle);
+    REQUIRE (actionFromString ("mic.gain") == Action::micGain);
+    REQUIRE (actionFromString ("mic.talkover") == Action::micTalkover);
 
-    // The sampler level is a knob; the pads are buttons.
+    // The sampler and mic levels are knobs; the pads and switches are buttons.
     REQUIRE (isContinuous (Action::samplerGain));
+    REQUIRE (isContinuous (Action::micGain));
+    REQUIRE (! isContinuous (Action::micToggle));
+    REQUIRE (! isContinuous (Action::micTalkover));
     REQUIRE (! isContinuous (Action::samplerTrigger));
     REQUIRE (! isContinuous (Action::deckSwap));
 }

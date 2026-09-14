@@ -11,6 +11,7 @@
 #include "analysis/AnalysisCache.h"
 #include "analysis/StemSeparator.h"
 #include "core/Deck.h"
+#include "core/MicInput.h"
 #include "core/Mixer.h"
 #include "core/OutputRouter.h"
 #include "core/Sampler.h"
@@ -86,6 +87,10 @@ public:
         master rather than a channel because a sample is dropped on top of the
         mix, not faded into it. */
     Sampler& getSampler() noexcept { return sampler; }
+
+    /** A microphone from the device's inputs, laid over the mix after the
+        sampler, with talkover and a choice of whether the speakers hear it. */
+    MicInput& getMic() noexcept { return mic; }
 
     /** Reads a file into a sampler slot on a background thread. The callback
         runs on the message thread, with an empty string on success and the
@@ -169,6 +174,13 @@ public:
         return deviceOutputChannels.load (std::memory_order_relaxed);
     }
 
+    /** How many inputs the open device is actually using, or 0 with none. The
+        mic has nothing to hear until one is chosen in Audio setup. */
+    int getNumInputChannels() const noexcept
+    {
+        return deviceInputChannels.load (std::memory_order_relaxed);
+    }
+
     /** True when the cue bus can be heard: four outputs on separate pairs, or
         two on a split. */
     bool hasCueOutput() const noexcept
@@ -187,9 +199,11 @@ public:
     /** Sizes every buffer and prepares the decks, the mixer and the sampler. */
     void prepareToPlay (double sampleRate, int blockSize);
 
-    /** Renders one block of the whole engine into the given device outputs.
-        Realtime safe: allocates nothing, locks nothing, opens nothing. */
-    void renderNextBlock (float* const* outputs, int numOutputChannels, int numSamples);
+    /** Renders one block of the whole engine into the given device outputs,
+        with the device's inputs for the mic when there are any. Realtime safe:
+        allocates nothing, locks nothing, opens nothing. */
+    void renderNextBlock (float* const* outputs, int numOutputChannels, int numSamples,
+                          const float* const* inputs = nullptr, int numInputChannels = 0);
 
     /** A one line summary of the open device, for the status bar. */
     juce::String getDeviceDescription() const;
@@ -253,11 +267,18 @@ private:
     juce::AudioBuffer<float> masterBuffer;
     juce::AudioBuffer<float> cueBuffer;
 
+    // The mix to record and broadcast when the mic is kept out of the speakers,
+    // and the mic's inputs, copied before the outputs are cleared.
+    juce::AudioBuffer<float> recordingBuffer;
+    juce::AudioBuffer<float> inputBuffer;
+
     std::atomic<int> deviceOutputChannels { 0 };
+    std::atomic<int> deviceInputChannels { 0 };
     std::atomic<OutputMode> outputMode { OutputMode::separatePairs };
     juce::String deviceChoiceReason;
 
     Sampler sampler;
+    MicInput mic;
     SetRecorder recorder;
     Broadcaster broadcaster;
     RtmpBroadcaster rtmpBroadcaster;

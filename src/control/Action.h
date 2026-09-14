@@ -103,6 +103,11 @@ enum class Action
     samplerStop,
     samplerGain,        ///< the level of the whole sampler
 
+    // Mic. deck and slot are unused: like the sampler, it sits over the whole mix.
+    micToggle,          ///< press turns the mic on or off
+    micGain,            ///< the mic's level; 0.5 is unity, 1 about +6 dB
+    micTalkover,        ///< press turns talkover on or off
+
     // Track browser. deck and slot are unused.
     browseScroll,       ///< value is signed rows to move the selection, not normalised
 
