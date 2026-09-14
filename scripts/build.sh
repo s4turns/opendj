@@ -143,12 +143,16 @@ fi
 echo "Built $binary"
 
 if [[ $do_install -eq 1 ]]; then
+    # Stripped on the way in: the default configuration carries debug info,
+    # which is worth having in the build tree and worth nothing in the
+    # binary on the path, where it is well over ninety percent of the size.
+    #
     # Writing into somewhere the user owns needs no help; anywhere else does.
     if [[ -w "$prefix" ]] || [[ ! -e "$prefix" && -w "$(dirname "$prefix")" ]]; then
-        cmake --install "$build_dir" --component opendj
+        cmake --install "$build_dir" --component opendj --strip
     else
         echo "Installing to $prefix needs root."
-        sudo cmake --install "$build_dir" --component opendj
+        sudo cmake --install "$build_dir" --component opendj --strip
     fi
 
     # Without this the launcher does not notice the new entry until the next

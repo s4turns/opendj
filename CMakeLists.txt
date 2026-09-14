@@ -225,6 +225,19 @@ install(PROGRAMS "$<TARGET_FILE:OpenDJ>"
         RENAME opendj
         COMPONENT opendj)
 
+# `cmake --install --strip` only knows how to strip what install(TARGETS) put
+# there, and the rename above rules that form out. The default configuration
+# carries debug info that is over ninety percent of the binary, so honour the
+# flag by hand for the one file it matters for.
+if(CMAKE_STRIP)
+    install(CODE "
+        if(CMAKE_INSTALL_DO_STRIP)
+            execute_process(COMMAND \"${CMAKE_STRIP}\"
+                \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}/opendj\")
+        endif()"
+        COMPONENT opendj)
+endif()
+
 install(DIRECTORY mappings/
         DESTINATION "${CMAKE_INSTALL_DATADIR}/opendj/mappings"
         COMPONENT opendj
