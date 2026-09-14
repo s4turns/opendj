@@ -61,11 +61,16 @@ public:
         mapping's select buttons can light up the one that is armed. */
     int getFxDepthTarget (int deckIndex) const;
 
+    /** The pad mode a controller last reported for a deck, as the code it
+        sent, or 0 before it has said anything. padLoop reads it. */
+    int getPadMode (int deckIndex) const;
+
 private:
     AudioEngine& engine;
     std::atomic<bool> shiftHeld { false };
     std::array<std::atomic<double>, AudioEngine::numDecks> tempoRangePercent;
     std::array<std::atomic<int>, AudioEngine::numDecks> fxDepthTarget {};
+    std::array<std::atomic<int>, AudioEngine::numDecks> padMode {};
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ActionDispatcher)
 };

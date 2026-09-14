@@ -1,7 +1,7 @@
 {
   "name": "Roland DJ-202",
   "author": "The OpenDJ contributors",
-  "description": "Two-deck mapping for the Roland DJ-202. Control assignments were taken from Roland's MIDI implementation chart and cross checked against the Mixxx community mapping by Silvio Ankermann, Sebastian Reusse and Rene Kraus (https://github.com/mixxxdj/mixxx/wiki/Roland-Dj-202), which is GPLv2 or later and so compatible with this project. The DJ-202 powers up in a standalone mode in which it sends nothing at all; initMessages asks it to talk to a computer, and keepAlive holds it there, since it falls back after about a second and a half without one. The platters report relative ticks on CC 0x06, centred on 64. They also stream 14-bit absolute position as pitch bend on 0xE0/0xE1, but that flows whenever a hand merely rests on the wheel, so it is deliberately left unmapped. Pressing DECK moves a side onto MIDI channels 3 and 4; those are routed back to the same decks, so a stray press cannot leave one dead. DECK swaps the A/B pair for the C/D pair and back, the same button the hardware itself uses to switch MIDI channel. The TR/SAMPLER row triggers the eight sampler slots and sets their shared level. LOOP IN and LOOP OUT set a loop by hand, and the parameter buttons beside them halve and double it. The browse encoder scrolls the library and the load buttons put the selected track on a deck. FX1 and FX2 arm echo and reverb for the single DEPTH knob behind them, mixer.fx_select and mixer.fx_depth existing for exactly that one-knob-two-effects hardware shape; FX3 and FX ON/TAP are recognised but left unmapped, since OpenDJ's mixer has no third effect or separate bypass to send them to. The DEPTH knob broadcasts its value on CC 0x00, 0x01 and 0x02 at once, so only 0x00 is bound; binding all three would write the mapping three times for one hand movement. The TR-S sequencer and the pad modes beyond hot cue are recognised by the hardware but not yet mapped here.",
+  "description": "Two-deck mapping for the Roland DJ-202. Control assignments were taken from Roland's MIDI implementation chart and cross checked against the Mixxx community mapping by Silvio Ankermann, Sebastian Reusse and Rene Kraus (https://github.com/mixxxdj/mixxx/wiki/Roland-Dj-202), which is GPLv2 or later and so compatible with this project. The DJ-202 powers up in a standalone mode in which it sends nothing at all; initMessages asks it to talk to a computer, and keepAlive holds it there, since it falls back after about a second and a half without one. The platters report relative ticks on CC 0x06, centred on 64. They also stream 14-bit absolute position as pitch bend on 0xE0/0xE1, but that flows whenever a hand merely rests on the wheel, so it is deliberately left unmapped. Pressing DECK moves a side onto MIDI channels 3 and 4; those are routed back to the same decks, so a stray press cannot leave one dead. DECK swaps the A/B pair for the C/D pair and back, the same button the hardware itself uses to switch MIDI channel. The TR/SAMPLER row triggers the eight sampler slots and sets their shared level. LOOP IN and LOOP OUT set a loop by hand, and the parameter buttons beside them halve and double it. The browse encoder scrolls the library and the load buttons put the selected track on a deck. FX1 and FX2 arm echo and reverb for the single DEPTH knob behind them, mixer.fx_select and mixer.fx_depth existing for exactly that one-knob-two-effects hardware shape; FX3 and FX ON/TAP are recognised but left unmapped, since OpenDJ's mixer has no third effect or separate bypass to send them to. The DEPTH knob broadcasts its value on CC 0x00, 0x01 and 0x02 at once, so only 0x00 is bound; binding all three would write the mapping three times for one hand movement. The pads follow the mode the hardware reports as the velocity of note 0x00: in loop mode pads 1 to 4 set loops of 1, 2, 4 and 8 beats, in roll mode they roll 1, 1/2, 1/4 and 1/8 of a beat while held, pads 7 and 8 exit and reloop, and sampler mode's pads trigger and, shifted, stop the eight sampler slots. Those were taken from Mixxx's DJ-202 script and have not yet been pressed on the hardware. Cue loop, pitch play, slicer, the parameter buttons' loop and hot cue mode notes, and the TR-S sequencer are not mapped.",
   "deviceNameHints": [
     "DJ-202",
     "DJ202"
@@ -1354,6 +1354,730 @@
       "status": "0xBF",
       "number": "0x1A",
       "action": "sampler.gain"
+    },
+    {
+      "name": "Deck A pad mode",
+      "status": "0x94",
+      "number": "0x00",
+      "action": "pad.mode",
+      "deck": 0
+    },
+    {
+      "name": "Deck A loop or roll pad 1",
+      "status": "0x94",
+      "number": "0x11",
+      "action": "pad.loop",
+      "deck": 0,
+      "slot": 0
+    },
+    {
+      "name": "Deck A loop or roll pad 2",
+      "status": "0x94",
+      "number": "0x12",
+      "action": "pad.loop",
+      "deck": 0,
+      "slot": 1
+    },
+    {
+      "name": "Deck A loop or roll pad 3",
+      "status": "0x94",
+      "number": "0x13",
+      "action": "pad.loop",
+      "deck": 0,
+      "slot": 2
+    },
+    {
+      "name": "Deck A loop or roll pad 4",
+      "status": "0x94",
+      "number": "0x14",
+      "action": "pad.loop",
+      "deck": 0,
+      "slot": 3
+    },
+    {
+      "name": "Deck A loop exit",
+      "status": "0x94",
+      "number": "0x17",
+      "action": "loop.toggle",
+      "deck": 0
+    },
+    {
+      "name": "Deck A reloop",
+      "status": "0x94",
+      "number": "0x18",
+      "action": "loop.reloop",
+      "deck": 0
+    },
+    {
+      "name": "Deck A sampler pad 1",
+      "status": "0x94",
+      "number": "0x21",
+      "action": "sampler.trigger",
+      "deck": 0,
+      "slot": 0
+    },
+    {
+      "name": "Deck A sampler pad 2",
+      "status": "0x94",
+      "number": "0x22",
+      "action": "sampler.trigger",
+      "deck": 0,
+      "slot": 1
+    },
+    {
+      "name": "Deck A sampler pad 3",
+      "status": "0x94",
+      "number": "0x23",
+      "action": "sampler.trigger",
+      "deck": 0,
+      "slot": 2
+    },
+    {
+      "name": "Deck A sampler pad 4",
+      "status": "0x94",
+      "number": "0x24",
+      "action": "sampler.trigger",
+      "deck": 0,
+      "slot": 3
+    },
+    {
+      "name": "Deck A sampler pad 5",
+      "status": "0x94",
+      "number": "0x25",
+      "action": "sampler.trigger",
+      "deck": 0,
+      "slot": 4
+    },
+    {
+      "name": "Deck A sampler pad 6",
+      "status": "0x94",
+      "number": "0x26",
+      "action": "sampler.trigger",
+      "deck": 0,
+      "slot": 5
+    },
+    {
+      "name": "Deck A sampler pad 7",
+      "status": "0x94",
+      "number": "0x27",
+      "action": "sampler.trigger",
+      "deck": 0,
+      "slot": 6
+    },
+    {
+      "name": "Deck A sampler pad 8",
+      "status": "0x94",
+      "number": "0x28",
+      "action": "sampler.trigger",
+      "deck": 0,
+      "slot": 7
+    },
+    {
+      "name": "Deck A sampler pad 1 stop",
+      "status": "0x94",
+      "number": "0x29",
+      "action": "sampler.stop",
+      "deck": 0,
+      "slot": 0
+    },
+    {
+      "name": "Deck A sampler pad 2 stop",
+      "status": "0x94",
+      "number": "0x2A",
+      "action": "sampler.stop",
+      "deck": 0,
+      "slot": 1
+    },
+    {
+      "name": "Deck A sampler pad 3 stop",
+      "status": "0x94",
+      "number": "0x2B",
+      "action": "sampler.stop",
+      "deck": 0,
+      "slot": 2
+    },
+    {
+      "name": "Deck A sampler pad 4 stop",
+      "status": "0x94",
+      "number": "0x2C",
+      "action": "sampler.stop",
+      "deck": 0,
+      "slot": 3
+    },
+    {
+      "name": "Deck A sampler pad 5 stop",
+      "status": "0x94",
+      "number": "0x2D",
+      "action": "sampler.stop",
+      "deck": 0,
+      "slot": 4
+    },
+    {
+      "name": "Deck A sampler pad 6 stop",
+      "status": "0x94",
+      "number": "0x2E",
+      "action": "sampler.stop",
+      "deck": 0,
+      "slot": 5
+    },
+    {
+      "name": "Deck A sampler pad 7 stop",
+      "status": "0x94",
+      "number": "0x2F",
+      "action": "sampler.stop",
+      "deck": 0,
+      "slot": 6
+    },
+    {
+      "name": "Deck A sampler pad 8 stop",
+      "status": "0x94",
+      "number": "0x30",
+      "action": "sampler.stop",
+      "deck": 0,
+      "slot": 7
+    },
+    {
+      "name": "Deck B pad mode",
+      "status": "0x95",
+      "number": "0x00",
+      "action": "pad.mode",
+      "deck": 1
+    },
+    {
+      "name": "Deck B loop or roll pad 1",
+      "status": "0x95",
+      "number": "0x11",
+      "action": "pad.loop",
+      "deck": 1,
+      "slot": 0
+    },
+    {
+      "name": "Deck B loop or roll pad 2",
+      "status": "0x95",
+      "number": "0x12",
+      "action": "pad.loop",
+      "deck": 1,
+      "slot": 1
+    },
+    {
+      "name": "Deck B loop or roll pad 3",
+      "status": "0x95",
+      "number": "0x13",
+      "action": "pad.loop",
+      "deck": 1,
+      "slot": 2
+    },
+    {
+      "name": "Deck B loop or roll pad 4",
+      "status": "0x95",
+      "number": "0x14",
+      "action": "pad.loop",
+      "deck": 1,
+      "slot": 3
+    },
+    {
+      "name": "Deck B loop exit",
+      "status": "0x95",
+      "number": "0x17",
+      "action": "loop.toggle",
+      "deck": 1
+    },
+    {
+      "name": "Deck B reloop",
+      "status": "0x95",
+      "number": "0x18",
+      "action": "loop.reloop",
+      "deck": 1
+    },
+    {
+      "name": "Deck B sampler pad 1",
+      "status": "0x95",
+      "number": "0x21",
+      "action": "sampler.trigger",
+      "deck": 1,
+      "slot": 0
+    },
+    {
+      "name": "Deck B sampler pad 2",
+      "status": "0x95",
+      "number": "0x22",
+      "action": "sampler.trigger",
+      "deck": 1,
+      "slot": 1
+    },
+    {
+      "name": "Deck B sampler pad 3",
+      "status": "0x95",
+      "number": "0x23",
+      "action": "sampler.trigger",
+      "deck": 1,
+      "slot": 2
+    },
+    {
+      "name": "Deck B sampler pad 4",
+      "status": "0x95",
+      "number": "0x24",
+      "action": "sampler.trigger",
+      "deck": 1,
+      "slot": 3
+    },
+    {
+      "name": "Deck B sampler pad 5",
+      "status": "0x95",
+      "number": "0x25",
+      "action": "sampler.trigger",
+      "deck": 1,
+      "slot": 4
+    },
+    {
+      "name": "Deck B sampler pad 6",
+      "status": "0x95",
+      "number": "0x26",
+      "action": "sampler.trigger",
+      "deck": 1,
+      "slot": 5
+    },
+    {
+      "name": "Deck B sampler pad 7",
+      "status": "0x95",
+      "number": "0x27",
+      "action": "sampler.trigger",
+      "deck": 1,
+      "slot": 6
+    },
+    {
+      "name": "Deck B sampler pad 8",
+      "status": "0x95",
+      "number": "0x28",
+      "action": "sampler.trigger",
+      "deck": 1,
+      "slot": 7
+    },
+    {
+      "name": "Deck B sampler pad 1 stop",
+      "status": "0x95",
+      "number": "0x29",
+      "action": "sampler.stop",
+      "deck": 1,
+      "slot": 0
+    },
+    {
+      "name": "Deck B sampler pad 2 stop",
+      "status": "0x95",
+      "number": "0x2A",
+      "action": "sampler.stop",
+      "deck": 1,
+      "slot": 1
+    },
+    {
+      "name": "Deck B sampler pad 3 stop",
+      "status": "0x95",
+      "number": "0x2B",
+      "action": "sampler.stop",
+      "deck": 1,
+      "slot": 2
+    },
+    {
+      "name": "Deck B sampler pad 4 stop",
+      "status": "0x95",
+      "number": "0x2C",
+      "action": "sampler.stop",
+      "deck": 1,
+      "slot": 3
+    },
+    {
+      "name": "Deck B sampler pad 5 stop",
+      "status": "0x95",
+      "number": "0x2D",
+      "action": "sampler.stop",
+      "deck": 1,
+      "slot": 4
+    },
+    {
+      "name": "Deck B sampler pad 6 stop",
+      "status": "0x95",
+      "number": "0x2E",
+      "action": "sampler.stop",
+      "deck": 1,
+      "slot": 5
+    },
+    {
+      "name": "Deck B sampler pad 7 stop",
+      "status": "0x95",
+      "number": "0x2F",
+      "action": "sampler.stop",
+      "deck": 1,
+      "slot": 6
+    },
+    {
+      "name": "Deck B sampler pad 8 stop",
+      "status": "0x95",
+      "number": "0x30",
+      "action": "sampler.stop",
+      "deck": 1,
+      "slot": 7
+    },
+    {
+      "name": "Deck A pad mode (deck toggled)",
+      "status": "0x96",
+      "number": "0x00",
+      "action": "pad.mode",
+      "deck": 0
+    },
+    {
+      "name": "Deck A loop or roll pad 1 (deck toggled)",
+      "status": "0x96",
+      "number": "0x11",
+      "action": "pad.loop",
+      "deck": 0,
+      "slot": 0
+    },
+    {
+      "name": "Deck A loop or roll pad 2 (deck toggled)",
+      "status": "0x96",
+      "number": "0x12",
+      "action": "pad.loop",
+      "deck": 0,
+      "slot": 1
+    },
+    {
+      "name": "Deck A loop or roll pad 3 (deck toggled)",
+      "status": "0x96",
+      "number": "0x13",
+      "action": "pad.loop",
+      "deck": 0,
+      "slot": 2
+    },
+    {
+      "name": "Deck A loop or roll pad 4 (deck toggled)",
+      "status": "0x96",
+      "number": "0x14",
+      "action": "pad.loop",
+      "deck": 0,
+      "slot": 3
+    },
+    {
+      "name": "Deck A loop exit (deck toggled)",
+      "status": "0x96",
+      "number": "0x17",
+      "action": "loop.toggle",
+      "deck": 0
+    },
+    {
+      "name": "Deck A reloop (deck toggled)",
+      "status": "0x96",
+      "number": "0x18",
+      "action": "loop.reloop",
+      "deck": 0
+    },
+    {
+      "name": "Deck A sampler pad 1 (deck toggled)",
+      "status": "0x96",
+      "number": "0x21",
+      "action": "sampler.trigger",
+      "deck": 0,
+      "slot": 0
+    },
+    {
+      "name": "Deck A sampler pad 2 (deck toggled)",
+      "status": "0x96",
+      "number": "0x22",
+      "action": "sampler.trigger",
+      "deck": 0,
+      "slot": 1
+    },
+    {
+      "name": "Deck A sampler pad 3 (deck toggled)",
+      "status": "0x96",
+      "number": "0x23",
+      "action": "sampler.trigger",
+      "deck": 0,
+      "slot": 2
+    },
+    {
+      "name": "Deck A sampler pad 4 (deck toggled)",
+      "status": "0x96",
+      "number": "0x24",
+      "action": "sampler.trigger",
+      "deck": 0,
+      "slot": 3
+    },
+    {
+      "name": "Deck A sampler pad 5 (deck toggled)",
+      "status": "0x96",
+      "number": "0x25",
+      "action": "sampler.trigger",
+      "deck": 0,
+      "slot": 4
+    },
+    {
+      "name": "Deck A sampler pad 6 (deck toggled)",
+      "status": "0x96",
+      "number": "0x26",
+      "action": "sampler.trigger",
+      "deck": 0,
+      "slot": 5
+    },
+    {
+      "name": "Deck A sampler pad 7 (deck toggled)",
+      "status": "0x96",
+      "number": "0x27",
+      "action": "sampler.trigger",
+      "deck": 0,
+      "slot": 6
+    },
+    {
+      "name": "Deck A sampler pad 8 (deck toggled)",
+      "status": "0x96",
+      "number": "0x28",
+      "action": "sampler.trigger",
+      "deck": 0,
+      "slot": 7
+    },
+    {
+      "name": "Deck A sampler pad 1 stop (deck toggled)",
+      "status": "0x96",
+      "number": "0x29",
+      "action": "sampler.stop",
+      "deck": 0,
+      "slot": 0
+    },
+    {
+      "name": "Deck A sampler pad 2 stop (deck toggled)",
+      "status": "0x96",
+      "number": "0x2A",
+      "action": "sampler.stop",
+      "deck": 0,
+      "slot": 1
+    },
+    {
+      "name": "Deck A sampler pad 3 stop (deck toggled)",
+      "status": "0x96",
+      "number": "0x2B",
+      "action": "sampler.stop",
+      "deck": 0,
+      "slot": 2
+    },
+    {
+      "name": "Deck A sampler pad 4 stop (deck toggled)",
+      "status": "0x96",
+      "number": "0x2C",
+      "action": "sampler.stop",
+      "deck": 0,
+      "slot": 3
+    },
+    {
+      "name": "Deck A sampler pad 5 stop (deck toggled)",
+      "status": "0x96",
+      "number": "0x2D",
+      "action": "sampler.stop",
+      "deck": 0,
+      "slot": 4
+    },
+    {
+      "name": "Deck A sampler pad 6 stop (deck toggled)",
+      "status": "0x96",
+      "number": "0x2E",
+      "action": "sampler.stop",
+      "deck": 0,
+      "slot": 5
+    },
+    {
+      "name": "Deck A sampler pad 7 stop (deck toggled)",
+      "status": "0x96",
+      "number": "0x2F",
+      "action": "sampler.stop",
+      "deck": 0,
+      "slot": 6
+    },
+    {
+      "name": "Deck A sampler pad 8 stop (deck toggled)",
+      "status": "0x96",
+      "number": "0x30",
+      "action": "sampler.stop",
+      "deck": 0,
+      "slot": 7
+    },
+    {
+      "name": "Deck B pad mode (deck toggled)",
+      "status": "0x97",
+      "number": "0x00",
+      "action": "pad.mode",
+      "deck": 1
+    },
+    {
+      "name": "Deck B loop or roll pad 1 (deck toggled)",
+      "status": "0x97",
+      "number": "0x11",
+      "action": "pad.loop",
+      "deck": 1,
+      "slot": 0
+    },
+    {
+      "name": "Deck B loop or roll pad 2 (deck toggled)",
+      "status": "0x97",
+      "number": "0x12",
+      "action": "pad.loop",
+      "deck": 1,
+      "slot": 1
+    },
+    {
+      "name": "Deck B loop or roll pad 3 (deck toggled)",
+      "status": "0x97",
+      "number": "0x13",
+      "action": "pad.loop",
+      "deck": 1,
+      "slot": 2
+    },
+    {
+      "name": "Deck B loop or roll pad 4 (deck toggled)",
+      "status": "0x97",
+      "number": "0x14",
+      "action": "pad.loop",
+      "deck": 1,
+      "slot": 3
+    },
+    {
+      "name": "Deck B loop exit (deck toggled)",
+      "status": "0x97",
+      "number": "0x17",
+      "action": "loop.toggle",
+      "deck": 1
+    },
+    {
+      "name": "Deck B reloop (deck toggled)",
+      "status": "0x97",
+      "number": "0x18",
+      "action": "loop.reloop",
+      "deck": 1
+    },
+    {
+      "name": "Deck B sampler pad 1 (deck toggled)",
+      "status": "0x97",
+      "number": "0x21",
+      "action": "sampler.trigger",
+      "deck": 1,
+      "slot": 0
+    },
+    {
+      "name": "Deck B sampler pad 2 (deck toggled)",
+      "status": "0x97",
+      "number": "0x22",
+      "action": "sampler.trigger",
+      "deck": 1,
+      "slot": 1
+    },
+    {
+      "name": "Deck B sampler pad 3 (deck toggled)",
+      "status": "0x97",
+      "number": "0x23",
+      "action": "sampler.trigger",
+      "deck": 1,
+      "slot": 2
+    },
+    {
+      "name": "Deck B sampler pad 4 (deck toggled)",
+      "status": "0x97",
+      "number": "0x24",
+      "action": "sampler.trigger",
+      "deck": 1,
+      "slot": 3
+    },
+    {
+      "name": "Deck B sampler pad 5 (deck toggled)",
+      "status": "0x97",
+      "number": "0x25",
+      "action": "sampler.trigger",
+      "deck": 1,
+      "slot": 4
+    },
+    {
+      "name": "Deck B sampler pad 6 (deck toggled)",
+      "status": "0x97",
+      "number": "0x26",
+      "action": "sampler.trigger",
+      "deck": 1,
+      "slot": 5
+    },
+    {
+      "name": "Deck B sampler pad 7 (deck toggled)",
+      "status": "0x97",
+      "number": "0x27",
+      "action": "sampler.trigger",
+      "deck": 1,
+      "slot": 6
+    },
+    {
+      "name": "Deck B sampler pad 8 (deck toggled)",
+      "status": "0x97",
+      "number": "0x28",
+      "action": "sampler.trigger",
+      "deck": 1,
+      "slot": 7
+    },
+    {
+      "name": "Deck B sampler pad 1 stop (deck toggled)",
+      "status": "0x97",
+      "number": "0x29",
+      "action": "sampler.stop",
+      "deck": 1,
+      "slot": 0
+    },
+    {
+      "name": "Deck B sampler pad 2 stop (deck toggled)",
+      "status": "0x97",
+      "number": "0x2A",
+      "action": "sampler.stop",
+      "deck": 1,
+      "slot": 1
+    },
+    {
+      "name": "Deck B sampler pad 3 stop (deck toggled)",
+      "status": "0x97",
+      "number": "0x2B",
+      "action": "sampler.stop",
+      "deck": 1,
+      "slot": 2
+    },
+    {
+      "name": "Deck B sampler pad 4 stop (deck toggled)",
+      "status": "0x97",
+      "number": "0x2C",
+      "action": "sampler.stop",
+      "deck": 1,
+      "slot": 3
+    },
+    {
+      "name": "Deck B sampler pad 5 stop (deck toggled)",
+      "status": "0x97",
+      "number": "0x2D",
+      "action": "sampler.stop",
+      "deck": 1,
+      "slot": 4
+    },
+    {
+      "name": "Deck B sampler pad 6 stop (deck toggled)",
+      "status": "0x97",
+      "number": "0x2E",
+      "action": "sampler.stop",
+      "deck": 1,
+      "slot": 5
+    },
+    {
+      "name": "Deck B sampler pad 7 stop (deck toggled)",
+      "status": "0x97",
+      "number": "0x2F",
+      "action": "sampler.stop",
+      "deck": 1,
+      "slot": 6
+    },
+    {
+      "name": "Deck B sampler pad 8 stop (deck toggled)",
+      "status": "0x97",
+      "number": "0x30",
+      "action": "sampler.stop",
+      "deck": 1,
+      "slot": 7
     }
   ]
 }

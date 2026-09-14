@@ -424,7 +424,15 @@ void MidiControlSurface::handleIncomingMidiMessage (juce::MidiInput*, const juce
         // being touched, so the deck stays in a scratch that never ends, and a
         // cue button never comes back up.
         if (control == nullptr && isNoteOff)
+        {
             control = mapping.findControl (status + 0x10, lookupNumber, dispatcher.isShiftHeld());
+
+            // Except a note that reports a state in its velocity rather than
+            // being pressed. A release of it would read as a state of zero,
+            // which on the DJ-202 is hot cue mode, chosen by nobody.
+            if (control != nullptr && control->action == Action::padMode)
+                control = nullptr;
+        }
     }
 
     {

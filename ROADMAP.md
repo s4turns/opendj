@@ -1,7 +1,7 @@
 # OpenDJ roadmap
 
 Where the project is and what to pick up next. Anything ticked has tests or a verified manual
-check behind it, not just code that compiles. The suite is **256 tests** on Linux and 255 on
+check behind it, not just code that compiles. The suite is **260 tests** on Linux and 259 on
 Windows, where the stderr test has no pipe to fill; anything touching
 audio is tested by measuring the output, not by checking that the code ran.
 
@@ -54,7 +54,7 @@ that was listed after it except video.
 
 | Item | Notes |
 | --- | --- |
-| DJ-202 TR-S sequencer and pad modes beyond hot cue | Not in the action registry yet; effects, sampler pads and deck toggle are all mapped now |
+| DJ-202 pad modes on the hardware, then the rest | Loop, roll and sampler modes are mapped from Mixxx's DJ-202 script and need pressing on the controller. Cue loop, pitch play, slicer, the parameter buttons and the TR-S sequencer are not mapped |
 | Arch and macOS | `scripts/build.sh` knows the Arch packages but has never been run there. macOS has never been tried |
 | Video | Unstarted, and probably its own project |
 | RTMP against a real YouTube or Twitch account | Verified so far only against ffmpeg's own loopback RTMP listener; the handshake has never reached an actual platform |
@@ -464,6 +464,11 @@ would say so.
 | `sampler.trigger` | `slot` | Starts that pad; with shift, stops it |
 | `sampler.stop` | `slot` | |
 | `sampler.gain` | value | The level of the whole sampler |
+| `pad.mode` | value | The pad mode a controller reports, as the code in its velocity, stored per deck |
+| `pad.loop` | `deck`, `slot` | Pads 1 to 4: a loop of 1, 2, 4 or 8 beats, or in roll mode a roll of 1 to 1/8 of a beat while held |
+| `mic.toggle` | nothing | Turns the mic on or off |
+| `mic.gain` | value | The mic's level; 0.5 is unity |
+| `mic.talkover` | nothing | Turns talkover on or off |
 
 Plus the loop family: `loop.in`, `loop.out`, `loop.toggle`, `loop.beats`, `loop.roll`,
 `loop.halve`, `loop.double`, `loop.reloop`. `loop.beats` and `loop.roll` take a slot, which
@@ -528,6 +533,7 @@ Measured on the hardware rather than taken from the documentation.
 | Note off behaviour | ✅ | Both forms occur, depending on the sequencer's MIDI version: as a UMP client releases arrive as note off, as a legacy client as note on with velocity zero. A release is taken from the message rather than the mapping, and a note off falls back to the note on control of the same number |
 | Jog tick rate | ✅ | 800, not the 512 the Mixxx mapping states: two turns produced 1590 ticks |
 | Platter encoding | ✅ | Controller 6, relative, centred on 64. The wheel also streams 14-bit absolute position as pitch bend, but that flows whenever a hand merely rests on it, so it is deliberately unmapped |
+| Pad modes | 🚧 | The mode arrives as the velocity of note 0x00 on each pad channel, and pads 1 to 4 send the same notes in loop and roll mode, so `pad.mode` stores it and `pad.loop` reads it. Codes and notes taken from Mixxx's DJ-202 script (`github.com/mrtnGLSR/DJ-202`), not yet pressed on the hardware |
 | Tempo fader polarity | ✅ | Controller 9 coarse, 59 fine. The top of the travel reports 0x3FFF and the bottom 0, and Roland prints the + at the bottom, so `"inverted": true` is right: the fast end has to come out as 1. Pinned by a test on the shipped mapping |
 
 ## The one that cost the most: controller 6 and MIDI 2.0

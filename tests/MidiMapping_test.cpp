@@ -431,6 +431,59 @@ TEST_CASE ("the shipped DJ-202 mapping reaches the loop section", "[midi][mappin
     }
 }
 
+TEST_CASE ("the shipped DJ-202 mapping reaches the pad modes", "[midi][mapping][dj202]")
+{
+    const auto file = findShippedMapping();
+
+    if (! file.existsAsFile())
+        SUCCEED ("mapping file not found beside the test binary");
+    else
+    {
+        opendj::MidiMapping mapping;
+        juce::StringArray warnings;
+        REQUIRE (opendj::MidiMapping::loadFromFile (file, mapping, warnings).wasOk());
+        INFO (warnings.joinIntoString ("; "));
+        REQUIRE (warnings.isEmpty());
+
+        using opendj::Action;
+        struct Expected { int status, number; Action action; int deck, slot; };
+
+        // Every pad channel, deck toggled or not: the mode note, loop and roll
+        // pads 1 to 4, exit and reloop, and sampler mode's pads and their stops.
+        const Expected expected[]
+        {
+            { 0x94, 0x00, Action::padMode,        0, 0 },
+            { 0x97, 0x00, Action::padMode,        1, 0 },
+            { 0x94, 0x11, Action::padLoop,        0, 0 },
+            { 0x96, 0x12, Action::padLoop,        0, 1 },
+            { 0x95, 0x14, Action::padLoop,        1, 3 },
+            { 0x94, 0x17, Action::loopToggle,     0, 0 },
+            { 0x97, 0x18, Action::loopReloop,     1, 0 },
+            { 0x94, 0x21, Action::samplerTrigger, 0, 0 },
+            { 0x95, 0x28, Action::samplerTrigger, 1, 7 },
+            { 0x96, 0x29, Action::samplerStop,    0, 0 },
+            { 0x97, 0x30, Action::samplerStop,    1, 7 },
+        };
+
+        for (const auto& e : expected)
+        {
+            INFO (juce::String::toHexString (e.status) << " " << juce::String::toHexString (e.number));
+            const auto* control = mapping.findControl (e.status, e.number, false);
+            REQUIRE (control != nullptr);
+            REQUIRE (control->action == e.action);
+            REQUIRE (control->deck == e.deck);
+            REQUIRE (control->slot == e.slot);
+        }
+
+        // The mode is carried in the velocity, so it is read as a value.
+        REQUIRE (mapping.findControl (0x94, 0x00, false)->mode == opendj::ValueMode::absolute);
+
+        // Loop in and out share the loop pads' note range and are unchanged.
+        REQUIRE (mapping.findControl (0x94, 0x15, false)->action == Action::loopIn);
+        REQUIRE (mapping.findControl (0x95, 0x16, false)->action == Action::loopOut);
+    }
+}
+
 //==============================================================================
 // The action registry itself. A mapping file names actions as strings, so a
 // name that does not round-trip is a control that silently stops working.

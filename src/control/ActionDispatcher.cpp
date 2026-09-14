@@ -36,6 +36,25 @@ int ActionDispatcher::getFxDepthTarget (int deckIndex) const
         : 0;
 }
 
+int ActionDispatcher::getPadMode (int deckIndex) const
+{
+    return juce::isPositiveAndBelow (deckIndex, AudioEngine::numDecks)
+        ? padMode[(size_t) deckIndex].load (std::memory_order_relaxed)
+        : 0;
+}
+
+namespace
+{
+    /** The Roland DJ-202's codes for its two roll modes, with and without
+        shift. It is the only controller that reports its pad mode, so its
+        codes are the ones there are; anything else, loop mode included, makes
+        pads 1 to 4 set loops. Taken from Mixxx's DJ-202 script. */
+    bool isRollMode (int code) noexcept
+    {
+        return code == 0x11 || code == 0x13;
+    }
+}
+
 void ActionDispatcher::dispatch (const ActionMessage& message)
 {
     const auto deckIndex = juce::jlimit (0, AudioEngine::numDecks - 1, message.deck);
@@ -216,6 +235,34 @@ void ActionDispatcher::dispatch (const ActionMessage& message)
             if (pressed)
                 deck.clearHotCue (message.slot);
             break;
+
+        case Action::padMode:
+            padMode[(size_t) deckIndex].store (juce::roundToInt (message.value * 127.0f),
+                                               std::memory_order_relaxed);
+            notify = false;
+            break;
+
+        case Action::padLoop:
+        {
+            const auto pad = juce::jlimit (0, 3, message.slot);
+
+            if (pressed)
+            {
+                // The same four pads, longest first in one mode and shortest
+                // first in the other, which is how the DJ-202 prints them.
+                if (isRollMode (getPadMode (deckIndex)))
+                    deck.beginLoopRoll (1.0 / (double) (1 << pad));
+                else
+                    deck.toggleLoopBeats ((double) (1 << pad));
+            }
+            else if (deck.isLoopRolling())
+            {
+                // Whatever mode the pads are in now: a roll held while the mode
+                // changed still ends when the pad lets go.
+                deck.endLoopRoll();
+            }
+            break;
+        }
 
         case Action::channelFader:
             mixer.setChannelFader (deckIndex, message.value);
