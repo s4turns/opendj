@@ -5,7 +5,9 @@
 
 #include "stream/RtmpConnection.h"
 
+#include <atomic>
 #include <cstring>
+#include <mutex>
 #include <vector>
 
 #if JUCE_WINDOWS
@@ -79,6 +81,39 @@ namespace
         return output.contains ("libx264");
     }
 
+    /** The font `drawtext` should use, already escaped for a filtergraph, or
+        empty to let ffmpeg find one itself. On Linux and macOS fontconfig does
+        that. The Windows builds of ffmpeg carry fontconfig with no config file
+        to read, and there `drawtext` without a font file does not fail
+        cleanly: measured with ffmpeg 8.1.2, it prints "Cannot load default
+        config file" and crashes. So Windows names a font it ships with. */
+    juce::String titleFontFile()
+    {
+       #if JUCE_WINDOWS
+        const auto fonts = juce::File (juce::SystemStats::getEnvironmentVariable ("WINDIR", "C:\\Windows"))
+                               .getChildFile ("Fonts");
+
+        for (const auto* name : { "segoeui.ttf", "arial.ttf" })
+            if (const auto font = fonts.getChildFile (name); font.existsAsFile())
+                return font.getFullPathName().replaceCharacter ('\\', '/').replace (":", "\\:");
+       #endif
+
+        return {};
+    }
+
+    /** Whether a title can be drawn at all. False only on a Windows machine
+        missing both fonts above, where the title is left off rather than
+        handing ffmpeg a filter it would crash on. */
+    bool canDrawTitle (const juce::String& fontFile)
+    {
+       #if JUCE_WINDOWS
+        return fontFile.isNotEmpty();
+       #else
+        juce::ignoreUnused (fontFile);
+        return true;
+       #endif
+    }
+
 }
 
 //==============================================================================
@@ -129,11 +164,11 @@ juce::StringArray buildFfmpegArguments (const RtmpSettings& settings, double sam
     args.add ("-nostdin");
 
     // The one-off lines "info" prints, `Output #0` among them, are what
-    // `RtmpConnection::connect` watches for. The periodic progress line
-    // ("frame=... time=...") is a different thing entirely and nothing here
-    // ever reads it back out: left on, it would eventually fill the stderr
-    // pipe on a set long enough and block ffmpeg on a write nobody is
-    // draining. `-nostats` turns off only that line.
+    // `RtmpConnection::waitForConfirmation` watches for. The stderr pipe is
+    // drained on every write for as long as the broadcast runs, so nothing
+    // here can fill it; `-nostats` only turns off the periodic progress line
+    // ("frame=... time=..."), which would otherwise crowd the real reason for
+    // a failure out of the short tail kept for error messages.
     args.add ("-nostats");
 
     // The video track: a plain colour with the stream title drawn on it by
@@ -150,9 +185,18 @@ juce::StringArray buildFfmpegArguments (const RtmpSettings& settings, double sam
     // that the encoder is not sitting there waiting on real time for frames
     // that carry no new information anyway.
     juce::String videoFilter;
-    videoFilter << "color=c=0x1a1a2e:s=" << settings.videoWidth << "x" << settings.videoHeight << ":r=2"
-                << ",drawtext=text='" << sanitiseForDrawtext (settings.streamTitle) << "'"
-                << ":fontcolor=white:fontsize=36:x=(w-text_w)/2:y=(h-text_h)/2";
+    videoFilter << "color=c=0x1a1a2e:s=" << settings.videoWidth << "x" << settings.videoHeight << ":r=2";
+
+    if (const auto fontFile = titleFontFile(); canDrawTitle (fontFile))
+    {
+        videoFilter << ",drawtext=";
+
+        if (fontFile.isNotEmpty())
+            videoFilter << "fontfile='" << fontFile << "':";
+
+        videoFilter << "text='" << sanitiseForDrawtext (settings.streamTitle) << "'"
+                    << ":fontcolor=white:fontsize=36:x=(w-text_w)/2:y=(h-text_h)/2";
+    }
 
     args.add ("-f"); args.add ("lavfi");
     args.add ("-re");
@@ -177,14 +221,30 @@ juce::StringArray buildFfmpegArguments (const RtmpSettings& settings, double sam
     // exactly this pairing of a fast audio input and a slow video one.
     args.add ("-thread_queue_size"); args.add ("4096");
 
+    // No probing. By default ffmpeg reads up to five seconds of an input
+    // before it opens its outputs, and it prints `Output #0`, the line
+    // `waitForConfirmation` waits for, only after that. The format, rate and
+    // channel count are all given above, so there is nothing to find out.
+    // Measured: given a quarter second of silence and a pipe left open, it
+    // never connected at all; with probing off it connected in a third of a
+    // second. In the app the audio device eventually supplies the five
+    // seconds, so a broadcast only started slowly; a test that waits for
+    // confirmation before sending more failed every time.
+    args.add ("-analyzeduration"); args.add ("0");
+    args.add ("-probesize"); args.add ("32");
+
     args.add ("-i"); args.add ("pipe:0");
 
-    // Asks ffmpeg to stop once its shortest mapped stream ends. It does not,
-    // on its own, turn out to be enough: measured directly, a looped colour
-    // source has no natural end for this to compare against, and ffmpeg kept
-    // running past the audio pipe's end of file regardless. It is left on
-    // anyway, since it can only help, but what actually stops the process is
-    // `Process::stop` sending it a real signal; see the comment there.
+    // No `-shortest`. It used to be here on the reasoning that it could only
+    // help, but it never stopped ffmpeg (a looped colour source has no end to
+    // compare against; `Process::stop` sends a signal instead), and in ffmpeg
+    // 8 it does real harm: it holds every stream back until the others catch
+    // up, and audio arriving ahead of a real-time video track means nothing
+    // is encoded and the audio pipe stops being read. Measured with the
+    // loopback test's own pattern, a quarter second, a pause, then eight
+    // seconds at once: with it, no frames at all in ten seconds, until the
+    // send timeout killed ffmpeg; without it, all eight seconds went through.
+    // That was the loopback test's "stall".
 
     args.add ("-map"); args.add ("0:v");
     args.add ("-map"); args.add ("1:a");
@@ -223,7 +283,6 @@ juce::StringArray buildFfmpegArguments (const RtmpSettings& settings, double sam
     // stalling forever. This asks for a queue that can actually hold a
     // second's worth of audio.
     args.add ("-max_muxing_queue_size"); args.add ("1024");
-    args.add ("-shortest");
 
     args.add ("-f"); args.add ("flv");
     args.add (settings.fullUrl());
@@ -237,9 +296,9 @@ juce::StringArray buildFfmpegArguments (const RtmpSettings& settings, double sam
 /** The Windows half: an anonymous pipe wired to the child's stdin via
     inheritable handles, and `CreateProcess` in place of `posix_spawn`. Same
     shape as the POSIX half below; only the operating system calls differ.
-    Written to compile and reasoned through against the documented Win32
-    behaviour, but never run: there is no Windows machine in reach that has
-    ffmpeg on it. See the platform table in ROADMAP.md. */
+    Verified with the loopback test on Windows 11 and ffmpeg 8.1.2. ffmpeg's
+    stderr goes to this process's own rather than a pipe, so confirmation is
+    only "still running" here; see `stderrSawConnectSignal`. */
 class RtmpConnection::Process
 {
 public:
@@ -339,6 +398,10 @@ public:
         means connected", a weaker check than the POSIX one. Worth tightening
         alongside whoever first runs this on Windows. */
     bool stderrSawConnectSignal() const { return isRunning(); }
+
+    /** Nothing to report for the same reason: ffmpeg's output goes to this
+        process's own stderr rather than a pipe it could be read back from. */
+    juce::String lastDiagnostic() const { return {}; }
 
     void stop()
     {
@@ -485,16 +548,45 @@ public:
         auto* bytes = static_cast<const char*> (data);
         size_t remaining = numBytes;
 
+        // One deadline for the whole write rather than one per poll, so an
+        // ffmpeg that keeps printing but never reads its stdin still times out.
+        const auto deadline = juce::Time::getMillisecondCounter() + (juce::uint32) sendTimeoutMs;
+
         while (remaining > 0)
         {
-            pollfd pfd { stdinFd, POLLOUT, 0 };
-            const auto ready = ::poll (&pfd, 1, sendTimeoutMs);
+            const auto now = juce::Time::getMillisecondCounter();
 
-            if (ready <= 0)
+            if (now >= deadline)
             {
                 stop();
                 return false;
             }
+
+            // Stderr is watched here as well as stdin, and drained whenever it
+            // has anything. ffmpeg goes on printing warnings for as long as it
+            // runs, and once nobody reads them its stderr pipe fills, it blocks
+            // on that write and stops reading stdin, while this waits for it to
+            // read stdin: two idle processes, each waiting on the other. That
+            // was the loopback test's intermittent stall.
+            pollfd fds[2] { { stdinFd, POLLOUT, 0 }, { stderrFd, POLLIN, 0 } };
+            const auto ready = ::poll (fds, 2, (int) (deadline - now));
+
+            if (ready < 0)
+            {
+                if (errno == EINTR)
+                    continue;
+
+                stop();
+                return false;
+            }
+
+            if ((fds[1].revents & (POLLIN | POLLHUP | POLLERR)) != 0)
+                drain();
+
+            // Nothing writable yet. A pipe the child has closed reports an
+            // error instead, and the write below turns that into a stop.
+            if ((fds[0].revents & (POLLOUT | POLLERR | POLLHUP)) == 0)
+                continue;
 
             const auto written = ::write (stdinFd, bytes, remaining);
 
@@ -529,7 +621,7 @@ public:
     bool stderrSawConnectSignal()
     {
         drain();
-        return recent.contains ("Output #0");
+        return sawConnectSignal;
     }
 
     juce::String lastDiagnostic()
@@ -589,6 +681,8 @@ public:
             pid = -1;
         }
 
+        const std::lock_guard<std::mutex> lock (stderrMutex);
+
         if (stderrFd >= 0)
         {
             ::close (stderrFd);
@@ -599,6 +693,12 @@ public:
 private:
     void drain()
     {
+        // `write` drains from the broadcast's writer thread while
+        // `waitForConfirmation` and `lastDiagnostic` drain from whichever
+        // thread is starting or reconnecting, so the pipe and the tail are
+        // shared between threads and take turns.
+        const std::lock_guard<std::mutex> lock (stderrMutex);
+
         if (stderrFd < 0)
             return;
 
@@ -607,6 +707,20 @@ private:
 
         while ((read = ::read (stderrFd, buffer, sizeof (buffer))) > 0)
             recent += juce::String::fromUTF8 (buffer, (int) read);
+
+        // End of file: ffmpeg has closed its stderr or exited. Closed here so
+        // `write` stops polling a pipe that would report a hangup forever.
+        if (read == 0)
+        {
+            ::close (stderrFd);
+            stderrFd = -1;
+        }
+
+        // Noted before the tail is cut, not searched for afterwards: anything
+        // ffmpeg prints after `Output #0` in the same read would otherwise
+        // push the line out of the tail before anybody looked for it.
+        if (! sawConnectSignal && recent.contains ("Output #0"))
+            sawConnectSignal = true;
 
         // Kept short on purpose: this exists to say why a connection failed,
         // not to archive ffmpeg's console.
@@ -620,6 +734,8 @@ private:
     int stdinFd = -1;
     int stderrFd = -1;
     juce::String recent;
+    std::atomic<bool> sawConnectSignal { false };
+    std::mutex stderrMutex;
 };
 
 #endif
