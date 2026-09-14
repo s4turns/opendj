@@ -187,6 +187,10 @@ MainComponent::MainComponent()
     streamButton.onClick = [this] { toggleBroadcast(); };
     addAndMakeVisible (streamButton);
 
+    rtmpButton.setTooltip ("Broadcast to YouTube, Twitch, or anything else that takes RTMP, through ffmpeg");
+    rtmpButton.onClick = [this] { toggleRtmpBroadcast(); };
+    addAndMakeVisible (rtmpButton);
+
     midiSettingsButton.onClick = [this] { showMidiSettings(); };
     addAndMakeVisible (midiSettingsButton);
 
@@ -394,6 +398,40 @@ void MainComponent::timerCallback()
 
     if (const auto broadcastStatus = broadcaster.getStatusMessage(); broadcastStatus.isNotEmpty())
         status << "  |  " << broadcastStatus;
+
+    auto& rtmpBroadcaster = engine.getRtmpBroadcaster();
+
+    switch (rtmpBroadcaster.getState())
+    {
+        case RtmpBroadcaster::State::live:
+        {
+            const auto seconds = (int) rtmpBroadcaster.getSecondsLive();
+            rtmpButton.setButtonText ("On air " + juce::String (seconds / 60) + ":"
+                                      + juce::String (seconds % 60).paddedLeft ('0', 2));
+            rtmpButton.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff27ae60));
+            break;
+        }
+
+        case RtmpBroadcaster::State::connecting:
+        case RtmpBroadcaster::State::reconnecting:
+            rtmpButton.setButtonText ("Connecting");
+            rtmpButton.setColour (juce::TextButton::buttonColourId, juce::Colour (0xffb9770e));
+            break;
+
+        case RtmpBroadcaster::State::failed:
+            rtmpButton.setButtonText ("RTMP");
+            rtmpButton.setColour (juce::TextButton::buttonColourId, juce::Colour (0xffc0392b));
+            break;
+
+        case RtmpBroadcaster::State::offline:
+        default:
+            rtmpButton.setButtonText ("RTMP");
+            rtmpButton.setColour (juce::TextButton::buttonColourId, juce::Colour (0xff2c2c34));
+            break;
+    }
+
+    if (const auto rtmpStatus = rtmpBroadcaster.getStatusMessage(); rtmpStatus.isNotEmpty())
+        status << "  |  " << rtmpStatus;
 
     statusLabel.setText (status, juce::dontSendNotification);
 }
@@ -854,6 +892,148 @@ void MainComponent::showBroadcastSettings()
     options.launchAsync();
 }
 
+void MainComponent::toggleRtmpBroadcast()
+{
+    auto& rtmpBroadcaster = engine.getRtmpBroadcaster();
+
+    if (rtmpBroadcaster.isBroadcasting())
+    {
+        rtmpBroadcaster.stop();
+        statusLabel.setText ("RTMP broadcast stopped.", juce::dontSendNotification);
+        return;
+    }
+
+    showRtmpBroadcastSettings();
+}
+
+void MainComponent::showRtmpBroadcastSettings()
+{
+    /** The same "fill it in, press Go live" panel `BroadcastSetup` is, with
+        an RTMP target's much smaller set of fields: a server, a stream key,
+        and the title that ends up on the static video frame. See the RTMP
+        design note in ROADMAP.md for why there is no more to it than that. */
+    struct RtmpSetup final : public juce::Component
+    {
+        RtmpSetup (AudioEngine& engineToUse, RtmpSettings starting,
+                   std::function<void (RtmpSettings)> onChanged)
+            : engine (engineToUse), settings (std::move (starting)), changed (std::move (onChanged))
+        {
+            addField (server, "Server", settings.server);
+            addField (streamKey, "Stream key", settings.streamKey);
+            streamKey.setPasswordCharacter ((juce::juce_wchar) 0x2022);
+            addField (streamTitle, "Title", settings.streamTitle);
+
+            note.setText ("The stream key is kept in clear text in your settings file, the same way "
+                          "the Icecast password is. The video is a static frame with this title on "
+                          "it, not a live picture: see ROADMAP.md if that needs to grow into more.",
+                          juce::dontSendNotification);
+            note.setColour (juce::Label::textColourId, juce::Colours::grey);
+            note.setFont (juce::FontOptions (12.0f));
+            note.setJustificationType (juce::Justification::topLeft);
+            addAndMakeVisible (note);
+
+            status.setColour (juce::Label::textColourId, juce::Colours::white);
+            status.setFont (juce::FontOptions (12.0f));
+            addAndMakeVisible (status);
+
+            goLive.setButtonText ("Go live");
+            goLive.onClick = [this] { connect(); };
+            addAndMakeVisible (goLive);
+        }
+
+        void addField (juce::TextEditor& editor, const juce::String& labelText, const juce::String& value)
+        {
+            auto* label = labels.add (new juce::Label());
+            label->setText (labelText, juce::dontSendNotification);
+            label->setColour (juce::Label::textColourId, juce::Colours::white);
+            label->setFont (juce::FontOptions (12.0f));
+            addAndMakeVisible (*label);
+
+            editor.setText (value, juce::dontSendNotification);
+            editor.setColour (juce::TextEditor::backgroundColourId, juce::Colour (0xff101014));
+            addAndMakeVisible (editor);
+        }
+
+        RtmpSettings collect() const
+        {
+            auto result = settings;
+            result.server = server.getText().trim();
+            result.streamKey = streamKey.getText().trim();
+            result.streamTitle = streamTitle.getText();
+            return result;
+        }
+
+        void connect()
+        {
+            settings = collect();
+            changed (settings);
+
+            auto* device = engine.getDeviceManager().getCurrentAudioDevice();
+            const auto rate = device != nullptr ? device->getCurrentSampleRate() : 48000.0;
+
+            juce::String error;
+
+            if (engine.getRtmpBroadcaster().start (settings, rate, error))
+            {
+                if (auto* window = findParentComponentOfClass<juce::DialogWindow>())
+                    window->exitModalState (0);
+            }
+            else
+            {
+                status.setText (error, juce::dontSendNotification);
+            }
+        }
+
+        void resized() override
+        {
+            auto area = getLocalBounds().reduced (10);
+
+            juce::TextEditor* editors[] = { &server, &streamKey, &streamTitle };
+
+            for (int i = 0; i < (int) std::size (editors); ++i)
+            {
+                auto row = area.removeFromTop (26);
+                labels[i]->setBounds (row.removeFromLeft (96));
+                editors[i]->setBounds (row);
+                area.removeFromTop (4);
+            }
+
+            area.removeFromTop (6);
+            note.setBounds (area.removeFromTop (60));
+
+            auto footer = area.removeFromBottom (28);
+            goLive.setBounds (footer.removeFromRight (110));
+            footer.removeFromRight (8);
+            status.setBounds (footer);
+        }
+
+        AudioEngine& engine;
+        RtmpSettings settings;
+        std::function<void (RtmpSettings)> changed;
+
+        juce::OwnedArray<juce::Label> labels;
+        juce::TextEditor server, streamKey, streamTitle;
+        juce::Label note, status;
+        juce::TextButton goLive;
+    };
+
+    auto content = std::make_unique<RtmpSetup> (engine, settings.rtmp,
+                                                [this] (RtmpSettings updated)
+                                                {
+                                                    settings.rtmp = std::move (updated);
+                                                });
+    content->setSize (460, 260);
+
+    juce::DialogWindow::LaunchOptions options;
+    options.content.setOwned (content.release());
+    options.dialogTitle = "RTMP broadcast";
+    options.dialogBackgroundColour = juce::Colour (0xff1c1c22);
+    options.escapeKeyTriggersCloseButton = true;
+    options.useNativeTitleBar = true;
+    options.resizable = false;
+    options.launchAsync();
+}
+
 void MainComponent::showMidiSettings()
 {
     juce::DialogWindow::LaunchOptions options;
@@ -881,6 +1061,8 @@ void MainComponent::resized()
     recordButton.setBounds (footer.removeFromLeft (110));
     footer.removeFromLeft (6);
     streamButton.setBounds (footer.removeFromLeft (110));
+    footer.removeFromLeft (6);
+    rtmpButton.setBounds (footer.removeFromLeft (110));
     footer.removeFromLeft (6);
     midiSettingsButton.setBounds (footer.removeFromLeft (94));
     footer.removeFromLeft (12);

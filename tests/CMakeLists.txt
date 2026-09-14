@@ -16,6 +16,7 @@ target_sources(opendj-tests PRIVATE
     ActionDispatcher_test.cpp
     AudioEngine_test.cpp
     Broadcast_test.cpp
+    RtmpBroadcast_test.cpp
     Mixer_test.cpp
     OutputRouter_test.cpp
     Deck_test.cpp

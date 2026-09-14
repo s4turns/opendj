@@ -11,6 +11,7 @@
 #include "core/OutputRouter.h"
 #include "core/Sampler.h"
 #include "stream/IcecastConnection.h"
+#include "stream/RtmpConnection.h"
 
 #include <array>
 
@@ -68,6 +69,10 @@ struct SessionState
         dialog says out loud: it is what every DJ application does, and telling
         somebody is better than quietly deciding for them. */
     BroadcastSettings broadcast;
+
+    /** The RTMP target, stream key included, kept the same way as
+        `broadcast`'s password: in clear text, said out loud by the dialog. */
+    RtmpSettings rtmp;
 
     /** The window, so it opens where it was left rather than in the middle of
         whichever monitor the system picks. Empty until one has been saved. */
