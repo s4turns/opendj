@@ -188,6 +188,17 @@ juce::var SessionState::toVar() const
     server->setProperty ("public", broadcast.isPublic);
     server->setProperty ("quality", broadcast.quality);
     root->setProperty ("broadcast", juce::var (server));
+
+    auto* rtmpServer = new juce::DynamicObject();
+    rtmpServer->setProperty ("server", rtmp.server);
+    rtmpServer->setProperty ("stream_key", rtmp.streamKey);
+    rtmpServer->setProperty ("stream_title", rtmp.streamTitle);
+    rtmpServer->setProperty ("video_width", rtmp.videoWidth);
+    rtmpServer->setProperty ("video_height", rtmp.videoHeight);
+    rtmpServer->setProperty ("video_bitrate_kbps", rtmp.videoBitrateKbps);
+    rtmpServer->setProperty ("audio_bitrate_kbps", rtmp.audioBitrateKbps);
+    root->setProperty ("rtmp", juce::var (rtmpServer));
+
     root->setProperty ("sampler_gain", samplerGain);
     root->setProperty ("sampler_cue", samplerCue);
     root->setProperty ("sampler_files", files);
@@ -255,6 +266,23 @@ SessionState SessionState::fromVar (const juce::var& source)
         b.quality = (int) number (server, "quality", b.quality, 0.0, 10.0);
         b.isPublic = flag (server, "public", b.isPublic);
     }
+
+    if (const auto rtmpServer = arrayOf (source, "rtmp"); rtmpServer.getDynamicObject() != nullptr)
+    {
+        auto& r = state.rtmp;
+
+        // Field by field, like `broadcast` above, so a settings file written
+        // before RTMP existed still loads.
+        if (const auto value = text (rtmpServer, "server"); value.isNotEmpty())       r.server = value;
+        if (const auto value = text (rtmpServer, "stream_title"); value.isNotEmpty()) r.streamTitle = value;
+
+        r.streamKey = text (rtmpServer, "stream_key");
+        r.videoWidth = (int) number (rtmpServer, "video_width", r.videoWidth, 160.0, 3840.0);
+        r.videoHeight = (int) number (rtmpServer, "video_height", r.videoHeight, 90.0, 2160.0);
+        r.videoBitrateKbps = (int) number (rtmpServer, "video_bitrate_kbps", r.videoBitrateKbps, 200.0, 20000.0);
+        r.audioBitrateKbps = (int) number (rtmpServer, "audio_bitrate_kbps", r.audioBitrateKbps, 64.0, 320.0);
+    }
+
     state.samplerGain = (float) number (source, "sampler_gain", state.samplerGain, 0.0, 1.0);
     state.samplerCue = flag (source, "sampler_cue", state.samplerCue);
 

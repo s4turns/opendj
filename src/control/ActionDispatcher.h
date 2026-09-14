@@ -55,10 +55,17 @@ public:
     void setTempoRange (int deckIndex, double percent);
     double getTempoRange (int deckIndex) const;
 
+    /** Which effect a channel's shared FX depth knob currently reaches: 0 for
+        echo, 1 for reverb. Echo until a select button says otherwise, which is
+        also where a controller's own FX section powers up. Exposed so the
+        mapping's select buttons can light up the one that is armed. */
+    int getFxDepthTarget (int deckIndex) const;
+
 private:
     AudioEngine& engine;
     std::atomic<bool> shiftHeld { false };
     std::array<std::atomic<double>, AudioEngine::numDecks> tempoRangePercent;
+    std::array<std::atomic<int>, AudioEngine::numDecks> fxDepthTarget {};
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ActionDispatcher)
 };

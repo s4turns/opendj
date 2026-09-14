@@ -16,6 +16,7 @@
 #include "core/Sampler.h"
 #include "core/SetRecorder.h"
 #include "stream/Broadcaster.h"
+#include "stream/RtmpBroadcaster.h"
 
 #include <array>
 #include <atomic>
@@ -213,6 +214,10 @@ public:
     /** Sends that same master output to a broadcast server. */
     Broadcaster& getBroadcaster() noexcept { return broadcaster; }
 
+    /** Sends that same master output to an RTMP target, such as YouTube or
+        Twitch, through an ffmpeg subprocess. */
+    RtmpBroadcaster& getRtmpBroadcaster() noexcept { return rtmpBroadcaster; }
+
     /** Starts recording at the open device's sample rate. Returns the file, or
         an invalid file with `error` filled in. */
     juce::File startRecording (juce::String& error);
@@ -255,6 +260,7 @@ private:
     Sampler sampler;
     SetRecorder recorder;
     Broadcaster broadcaster;
+    RtmpBroadcaster rtmpBroadcaster;
 
     std::array<std::atomic<double>, numDecks> echoBeats {};
 

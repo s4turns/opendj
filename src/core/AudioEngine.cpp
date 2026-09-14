@@ -104,6 +104,7 @@ void AudioEngine::stop()
         recorder.stop();
 
     broadcaster.stop();
+    rtmpBroadcaster.stop();
 }
 
 juce::String AudioEngine::initialise (const juce::StringArray& preferredDeviceNames,
@@ -644,6 +645,12 @@ void AudioEngine::renderNextBlock (float* const* outputs, int numOutputChannels,
     // The same tap feeds the broadcast, so a listener hears what the room
     // hears. Both drop samples rather than stall, and neither can block here.
     broadcaster.write (masterView, numSamples);
+
+    // And the same tap again for an RTMP target, if one is live. A third
+    // silent branch when neither broadcast is running, which is the common
+    // case, and exactly as cheap as the other two: an atomic load and a
+    // comparison against nullptr.
+    rtmpBroadcaster.write (masterView, numSamples);
 
     routeOutputs (masterView, cueView, outputs, numOutputChannels, numSamples,
                   outputMode.load (std::memory_order_relaxed));

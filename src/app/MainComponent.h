@@ -87,6 +87,12 @@ private:
     /** Opens the broadcast dialog, or stops a broadcast already running. */
     void toggleBroadcast();
     void showBroadcastSettings();
+
+    /** Same pair, for the RTMP target: YouTube, Twitch, or anything else that
+        takes the same protocol. */
+    void toggleRtmpBroadcast();
+    void showRtmpBroadcastSettings();
+
     void loadOntoDeck (const juce::File& file, int deckIndex);
     /** Every folder that may hold controller mappings, in precedence order. */
     juce::Array<juce::File> findMappingsFolders() const;
@@ -126,6 +132,7 @@ private:
     juce::TextButton midiSettingsButton { "Controller" };
     juce::TextButton recordButton { "Record" };
     juce::TextButton streamButton { "Stream" };
+    juce::TextButton rtmpButton { "RTMP" };
     juce::Label statusLabel;
     juce::String startupError;
 

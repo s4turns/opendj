@@ -74,6 +74,19 @@ enum class Action
     channelCueToggle,
     channelCue,
     channelFilter,      ///< 0.5 is out of the way, down is a low pass, up a high pass
+    channelEcho,        ///< 0 is off, a beat-synced echo above that
+    channelReverb,      ///< 0 is off, a wash of tail above that
+
+    /** Arms echo or reverb as the effect a shared depth knob controls next.
+        slot picks it: 0 echo, 1 reverb. For a controller with one FX knob
+        behind several effect-select buttons, such as the DJ-202's. Nothing
+        in the engine changes; this only decides where channelFxDepth goes. */
+    channelFxSelect,
+
+    /** The shared depth knob itself: writes to whichever effect
+        channelFxSelect last armed for this channel, echo until told
+        otherwise. */
+    channelFxDepth,
 
     /** Which side of the crossfader a channel answers to. slot picks it:
         0 the A side, 1 neither, 2 the B side. */

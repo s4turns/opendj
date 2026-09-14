@@ -1,7 +1,7 @@
 # OpenDJ roadmap
 
 Where the project is and what to pick up next. Anything ticked has tests or a verified manual
-check behind it, not just code that compiles. The suite is **216 tests**; anything touching
+check behind it, not just code that compiles. The suite is **239 tests**; anything touching
 audio is tested by measuring the output, not by checking that the code ran.
 
 | Symbol | Meaning |
@@ -45,7 +45,7 @@ that was listed after it except video.
 | Split output cue | ✅ | `src/core/OutputRouter.*`, headphones on a stereo interface |
 | Settings that survive a restart | ✅ | `src/app/Settings.*` |
 | Broadcasting to Icecast | ✅ | `src/stream/`, verified against a real Icecast 2.4.4 |
-| Broadcasting to YouTube and Twitch | ⬜ | RTMP, so it needs ffmpeg as a separate program. Designed, not built |
+| Broadcasting to YouTube and Twitch | 🚧 | `src/stream/RtmpBroadcaster.*`, `RtmpConnection.*`. Built and verified against ffmpeg's own loopback listener; never tried against a real platform |
 | Video | ⬜ | Very large. Probably a separate project |
 
 ## What to pick up next
@@ -53,9 +53,11 @@ that was listed after it except video.
 | Item | Notes |
 | --- | --- |
 | DJ-202 tempo fader polarity | The one assumption never checked on hardware: mapped `"inverted": true`. If the fader reads backwards, set it to `false` in the mapping |
-| DJ-202 effects, sampler pads and deck toggle | Engine side is done and named in the action registry, so each needs a mapping entry and no C++ |
+| DJ-202 TR-S sequencer and pad modes beyond hot cue | Not in the action registry yet; effects, sampler pads and deck toggle are all mapped now |
 | Arch and macOS | `scripts/build.sh` knows the Arch packages but has never been run there. macOS has never been tried |
 | Video | Unstarted, and probably its own project |
+| RTMP against a real YouTube or Twitch account | Verified so far only against ffmpeg's own loopback RTMP listener; the handshake has never reached an actual platform |
+| The RTMP loopback test's intermittent stall | See the broadcasting section for what was ruled out. Worth another look with time to actually trace ffmpeg's own behaviour, e.g. `-loglevel debug` on the ffmpeg side, rather than only watching from OpenDJ's side of the pipe |
 
 ## Platforms
 
@@ -211,6 +213,22 @@ The tests measure output. For the echo, a click goes in and the level is sampled
 repeat is due and halfway between: loud on the beat and quiet between is what the right delay
 length means, and neither half alone would show it.
 
+**Binding echo and reverb to the DJ-202's FX section.** The mixer has two independent effects,
+each with its own permanent knob. The hardware has one shared DEPTH knob behind three FX-select
+buttons, because it was built around a single onboard effects unit rather than two always-on
+sends. What a DJ actually gets: FX1 arms echo and FX2 arms reverb, both lighting up to show which
+one is currently armed; the DEPTH knob then always turns whichever of the two was armed last,
+echo by default. FX3 and FX ON/TAP are recognised by the mapping but sent nowhere, because there
+is no third effect for FX3 to mean and no separate bypass state for ON/TAP to flip: the knob
+already turns an effect off at zero.
+
+| Decision | Why |
+| --- | --- |
+| `mixer.fx_select` only changes which effect the knob reaches | It never touches the mixer itself, so pressing FX1 or FX2 cannot itself change a level, only where the next knob turn lands |
+| The selection lives in `ActionDispatcher`, one small integer per channel, alongside `shiftHeld` and `tempoRangePercent` | It is exactly that kind of state: not audio, not persisted, read by the next action rather than stored on a deck or the mixer |
+| Binding only CC 0x00 of the DEPTH knob | Measured on real hardware: the knob broadcasts the same value on 0x00, 0x01 and 0x02 at once, so binding all three would write the mapping three times for one hand movement |
+| FX3 and FX ON/TAP left unmapped | OpenDJ has two effects, not three, and a continuous knob already has an off position; inventing a use for either button would be design bolted onto a limitation the hardware does not actually have on this engine |
+
 ## Sampler
 
 Eight slots of short sounds triggered over whatever the decks are doing. Load by clicking an
@@ -286,6 +304,55 @@ for a real server; `tests/Broadcast_test.cpp` says how to run it.
 Verified end to end against Icecast 2.4.4 in Docker: the source registered at 160 kbps, 48 kHz,
 stereo, with its genre intact, and a listener pulled 40 KB of `audio/ogg` beginning with the
 `OggS` marker while it was live.
+
+## Broadcasting to YouTube and Twitch
+
+The same master tap again, but to an RTMP target this time, which is what YouTube, Twitch and
+most other streaming platforms actually take. Unlike Icecast this **does** need a dependency:
+neither JUCE nor OpenDJ can produce an H.264 video track or speak the RTMP handshake, and both
+are needed, since an RTMP ingest without a video track is not a stream it will accept. The
+dependency is `ffmpeg`, run as a subprocess: OpenDJ pipes it raw 16-bit PCM over stdin, and it
+does the encoding and the handshake.
+
+| Decision | Why |
+| --- | --- |
+| `RtmpBroadcaster` mirrors `Broadcaster` almost exactly | Audio-thread tap into a `ThreadedWriter`, a FIFO, a background thread; a full FIFO drops samples rather than blocking, the same bargain the Icecast broadcaster and the recorder both make |
+| The video track is a static frame with the stream title drawn on it, built entirely by ffmpeg's own `lavfi` and `drawtext` | The simplest thing that satisfies "needs an H.264 video track". Nothing in OpenDJ renders or ships an image for it. A live waveform or the album art is a real idea but a separate piece of work; see the note in `RtmpConnection.h` before reaching for one |
+| A reconnect relaunches ffmpeg from scratch, never resumes it | FLV carries its header at the front the same way Ogg does, so a server joining halfway through one has nothing to decode |
+| ffmpeg is found by `RtmpConnection::findFfmpeg`, not just called by the bare name on PATH | On the machine this was built on, `/usr/local/bin/ffmpeg` (no libx264) shadows `/usr/bin/ffmpeg` (has it) on PATH. Checks `OPENDJ_RTMP_FFMPEG` first, then a short list of usual install locations, then PATH, actually running `-encoders` against each candidate rather than trusting its presence. Refuses the broadcast outright if nothing on the machine can encode H.264, rather than launching a doomed one and failing opaquely later |
+| The pipe is primed with a quarter second of silence before waiting for ffmpeg to confirm the connection | ffmpeg will not open its RTMP output, and so never prints the line that confirms it, until it has read a first packet from every mapped input. Nothing guarantees the audio device has called back even once by the time a broadcast is started; the silence is what makes confirmation possible at all rather than a race against the device |
+
+**A real, previously undiagnosed bug found while finishing this feature**: `RtmpBroadcaster::start()`
+had two failure branches that called `stop()` to unwind a half-open connection, and `stop()`
+unconditionally resets the broadcaster's state to `offline`. Both branches set `state = failed`
+*before* calling `stop()`, so the failure was silently clobbered back to `offline` every time —
+the broadcaster would report itself idle rather than failed after an ffmpeg launch or handshake
+failure. Fixed by reordering both branches to call `stop()` first and set the failure state
+afterward. Verified with five consecutive isolated runs of the affected test, previously a
+reliable reproduction.
+
+**One thing is not resolved.** The full loopback test — start a broadcast, point it at ffmpeg's
+own RTMP listener on localhost, and check a real video and audio track both arrive — stalls
+outright on roughly half of runs on this machine, sitting for minutes without progress before the
+final wait gives up, rather than failing promptly the way a real problem would. Widening the
+timeout to three minutes did not help; the same run that failed at sixty seconds was still not
+done at three minutes, while the test process itself burned only a few seconds of CPU across that
+whole wall-clock wait, which rules out a hang inside OpenDJ's own process — whatever stops is
+ffmpeg's encoder or its own real-time pacing, not this code. No ffmpeg process is ever left
+behind, even on a failing run, so whatever this is, it is not a teardown bug. No cause was found
+despite a dedicated diagnostic pass, and the timeout was left at sixty seconds rather than
+widened further, since widening had already been shown not to help. The test is hidden behind
+Catch2's `[.]` tag as `[.rtmp-loopback]` for exactly this reason — a test that can silently eat
+several minutes and then fail for an unknown reason has no business being part of the default
+run every contributor gets — and runs on request:
+
+```
+opendj-tests "[.rtmp-loopback]"
+```
+
+Also unverified: no real YouTube or Twitch account was available while writing this, so the
+handshake has only been checked against ffmpeg's own RTMP listener on loopback, never against an
+actual platform. The protocol is the same either way, but that is a claim, not a measurement.
 
 ## Picking a device worth playing on
 

@@ -99,6 +99,8 @@ set(OPENDJ_ENGINE_SOURCES
     ${CMAKE_SOURCE_DIR}/src/core/OutputRouter.cpp
     ${CMAKE_SOURCE_DIR}/src/stream/Broadcaster.cpp
     ${CMAKE_SOURCE_DIR}/src/stream/IcecastConnection.cpp
+    ${CMAKE_SOURCE_DIR}/src/stream/RtmpBroadcaster.cpp
+    ${CMAKE_SOURCE_DIR}/src/stream/RtmpConnection.cpp
     ${CMAKE_SOURCE_DIR}/src/core/Sampler.cpp
     ${CMAKE_SOURCE_DIR}/src/core/SetRecorder.cpp
     ${CMAKE_SOURCE_DIR}/src/analysis/KeyDetector.cpp

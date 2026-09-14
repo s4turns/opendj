@@ -29,6 +29,13 @@ double ActionDispatcher::getTempoRange (int deckIndex) const
         : 8.0;
 }
 
+int ActionDispatcher::getFxDepthTarget (int deckIndex) const
+{
+    return juce::isPositiveAndBelow (deckIndex, AudioEngine::numDecks)
+        ? fxDepthTarget[(size_t) deckIndex].load (std::memory_order_relaxed)
+        : 0;
+}
+
 void ActionDispatcher::dispatch (const ActionMessage& message)
 {
     const auto deckIndex = juce::jlimit (0, AudioEngine::numDecks - 1, message.deck);
@@ -257,6 +264,32 @@ void ActionDispatcher::dispatch (const ActionMessage& message)
 
         case Action::channelFilter:
             mixer.setChannelFilter (deckIndex, message.value);
+            break;
+
+        case Action::channelEcho:
+            mixer.setChannelEcho (deckIndex, message.value);
+            break;
+
+        case Action::channelReverb:
+            mixer.setChannelReverb (deckIndex, message.value);
+            break;
+
+        case Action::channelFxSelect:
+            // A select button decides where the depth knob goes next; it never
+            // touches the mixer itself, so there is nothing here for the shell
+            // to redraw beyond the light on the button, which refreshFeedback
+            // already polls for.
+            if (pressed)
+                fxDepthTarget[(size_t) deckIndex].store (message.slot == 1 ? 1 : 0,
+                                                         std::memory_order_relaxed);
+            notify = false;
+            break;
+
+        case Action::channelFxDepth:
+            if (getFxDepthTarget (deckIndex) == 1)
+                mixer.setChannelReverb (deckIndex, message.value);
+            else
+                mixer.setChannelEcho (deckIndex, message.value);
             break;
 
         case Action::channelCueToggle:

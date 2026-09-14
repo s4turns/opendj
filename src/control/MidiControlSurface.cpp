@@ -631,6 +631,12 @@ bool MidiControlSurface::feedbackStateFor (const MidiControl& control) const
         case Action::channelCueToggle:
             return const_cast<AudioEngine&> (engine).getMixer().isChannelCued (deckIndex);
 
+        case Action::channelFxSelect:
+            // Lights the button for whichever effect the shared depth knob is
+            // currently reaching, so a glance at the FX section says which one
+            // a turn of the knob will move.
+            return dispatcher.getFxDepthTarget (deckIndex) == control.slot;
+
         default:
             return false;
     }
