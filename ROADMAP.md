@@ -1,7 +1,8 @@
 # OpenDJ roadmap
 
 Where the project is and what to pick up next. Anything ticked has tests or a verified manual
-check behind it, not just code that compiles. The suite is **239 tests**; anything touching
+check behind it, not just code that compiles. The suite is **241 tests** on Linux and 240 on
+Windows, where the stderr test has no pipe to fill; anything touching
 audio is tested by measuring the output, not by checking that the code ran.
 
 | Symbol | Meaning |
@@ -45,7 +46,7 @@ that was listed after it except video.
 | Split output cue | ✅ | `src/core/OutputRouter.*`, headphones on a stereo interface |
 | Settings that survive a restart | ✅ | `src/app/Settings.*` |
 | Broadcasting to Icecast | ✅ | `src/stream/`, verified against a real Icecast 2.4.4 |
-| Broadcasting to YouTube and Twitch | 🚧 | `src/stream/RtmpBroadcaster.*`, `RtmpConnection.*`. Built and verified against ffmpeg's own loopback listener; never tried against a real platform |
+| Broadcasting to YouTube and Twitch | 🚧 | `src/stream/RtmpBroadcaster.*`, `RtmpConnection.*`. The loopback test against ffmpeg's own listener passes 20 runs in 20 on Linux and 5 in 5 on Windows; never tried against a real platform |
 | Video | ⬜ | Very large. Probably a separate project |
 
 ## What to pick up next
@@ -56,7 +57,6 @@ that was listed after it except video.
 | Arch and macOS | `scripts/build.sh` knows the Arch packages but has never been run there. macOS has never been tried |
 | Video | Unstarted, and probably its own project |
 | RTMP against a real YouTube or Twitch account | Verified so far only against ffmpeg's own loopback RTMP listener; the handshake has never reached an actual platform |
-| The RTMP loopback test's intermittent stall | See the broadcasting section for what was ruled out. Worth another look with time to actually trace ffmpeg's own behaviour, e.g. `-loglevel debug` on the ffmpeg side, rather than only watching from OpenDJ's side of the pipe |
 
 ## Platforms
 
@@ -320,6 +320,10 @@ does the encoding and the handshake.
 | A reconnect relaunches ffmpeg from scratch, never resumes it | FLV carries its header at the front the same way Ogg does, so a server joining halfway through one has nothing to decode |
 | ffmpeg is found by `RtmpConnection::findFfmpeg`, not just called by the bare name on PATH | On the machine this was built on, `/usr/local/bin/ffmpeg` (no libx264) shadows `/usr/bin/ffmpeg` (has it) on PATH. Checks `OPENDJ_RTMP_FFMPEG` first, then a short list of usual install locations, then PATH, actually running `-encoders` against each candidate rather than trusting its presence. Refuses the broadcast outright if nothing on the machine can encode H.264, rather than launching a doomed one and failing opaquely later |
 | The pipe is primed with a quarter second of silence before waiting for ffmpeg to confirm the connection | ffmpeg will not open its RTMP output, and so never prints the line that confirms it, until it has read a first packet from every mapped input. Nothing guarantees the audio device has called back even once by the time a broadcast is started; the silence is what makes confirmation possible at all rather than a race against the device |
+| ffmpeg's stderr is drained on every write, not only while connecting | ffmpeg prints warnings for as long as it runs. Once nobody read them its stderr pipe filled, it blocked on that write and stopped reading stdin, while `Process::write` waited for it to: a deadlock between two idle processes. A test with a stand-in ffmpeg that floods stderr mid-broadcast fails after the ten second send timeout without this, and passes in a tenth of a second with it |
+| The audio input is not probed: `-analyzeduration 0 -probesize 32` | By default ffmpeg reads up to five seconds of an input before opening its outputs, and prints `Output #0` only after that. The format, rate and channels are all given, so there is nothing to find out. Without it, a quarter second of priming and a wait for confirmation never connected |
+| No `-shortest` | In ffmpeg 8 it holds every stream back until the others catch up. Audio arriving ahead of a real-time video track then means nothing is encoded and stdin stops being read, until the send timeout kills ffmpeg. It never stopped ffmpeg anyway; `Process::stop` sends a signal |
+| On Windows, `drawtext` is given a font file | The Windows builds of ffmpeg carry fontconfig with no config file, and `drawtext` without a font crashes there rather than failing (exit 139 with ffmpeg 8.1.2). Segoe UI, then Arial; with neither, the title is left off |
 
 **A real, previously undiagnosed bug found while finishing this feature**: `RtmpBroadcaster::start()`
 had two failure branches that called `stop()` to unwind a half-open connection, and `stop()`
@@ -330,24 +334,26 @@ failure. Fixed by reordering both branches to call `stop()` first and set the fa
 afterward. Verified with five consecutive isolated runs of the affected test, previously a
 reliable reproduction.
 
-**One thing is not resolved.** The full loopback test — start a broadcast, point it at ffmpeg's
-own RTMP listener on localhost, and check a real video and audio track both arrive — stalls
-outright on roughly half of runs on this machine, sitting for minutes without progress before the
-final wait gives up, rather than failing promptly the way a real problem would. Widening the
-timeout to three minutes did not help; the same run that failed at sixty seconds was still not
-done at three minutes, while the test process itself burned only a few seconds of CPU across that
-whole wall-clock wait, which rules out a hang inside OpenDJ's own process — whatever stops is
-ffmpeg's encoder or its own real-time pacing, not this code. No ffmpeg process is ever left
-behind, even on a failing run, so whatever this is, it is not a teardown bug. No cause was found
-despite a dedicated diagnostic pass, and the timeout was left at sixty seconds rather than
-widened further, since widening had already been shown not to help. The test is hidden behind
-Catch2's `[.]` tag as `[.rtmp-loopback]` for exactly this reason — a test that can silently eat
-several minutes and then fail for an unknown reason has no business being part of the default
-run every contributor gets — and runs on request:
+**The loopback test's stall was three faults, not one.** The test starts a broadcast, points it
+at ffmpeg's own RTMP listener on localhost, and checks a real video and audio track both arrive.
+It failed most runs, and was hidden for a while because no cause had been found. Watched from
+ffmpeg's side, with a wrapper logging each ffmpeg's stderr and exit, it came apart into the
+stderr deadlock, the five second probe and `-shortest`, all three in the table above. The probe
+alone failed every run on Ubuntu. Once it was gone, `-shortest` left ffmpeg connected but encoding
+nothing, OpenDJ's send timeout killed it, and the listener, which takes one connection, had
+already exited when the reconnect came. That looked like minutes of silence from OpenDJ's side.
+With all three fixed it passes 20 runs in 20 on Ubuntu 26.04 with ffmpeg 8, about sixteen seconds
+each, and 5 in 5 on Windows 11 with ffmpeg 8.1.2, and runs by default again; without a capable
+ffmpeg it skips with a warning:
 
 ```
-opendj-tests "[.rtmp-loopback]"
+opendj-tests "[rtmp-loopback]"
 ```
+
+Two more faults turned up running it on Windows, where it had never been built: the Windows half
+of `RtmpConnection::Process` had no `lastDiagnostic`, so nothing compiled, and the `drawtext` crash
+in the table above meant every broadcast relaunched ffmpeg into the same crash while reporting
+itself live.
 
 Also unverified: no real YouTube or Twitch account was available while writing this, so the
 handshake has only been checked against ffmpeg's own RTMP listener on loopback, never against an
