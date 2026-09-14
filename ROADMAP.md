@@ -52,7 +52,6 @@ that was listed after it except video.
 
 | Item | Notes |
 | --- | --- |
-| DJ-202 tempo fader polarity | The one assumption never checked on hardware: mapped `"inverted": true`. If the fader reads backwards, set it to `false` in the mapping |
 | DJ-202 TR-S sequencer and pad modes beyond hot cue | Not in the action registry yet; effects, sampler pads and deck toggle are all mapped now |
 | Arch and macOS | `scripts/build.sh` knows the Arch packages but has never been run there. macOS has never been tried |
 | Video | Unstarted, and probably its own project |
@@ -502,7 +501,7 @@ Measured on the hardware rather than taken from the documentation.
 | Note off behaviour | ✅ | Both forms occur, depending on the sequencer's MIDI version: as a UMP client releases arrive as note off, as a legacy client as note on with velocity zero. A release is taken from the message rather than the mapping, and a note off falls back to the note on control of the same number |
 | Jog tick rate | ✅ | 800, not the 512 the Mixxx mapping states: two turns produced 1590 ticks |
 | Platter encoding | ✅ | Controller 6, relative, centred on 64. The wheel also streams 14-bit absolute position as pitch bend, but that flows whenever a hand merely rests on it, so it is deliberately unmapped |
-| Tempo fader polarity | ⬜ | Still `"inverted": true` on an assumption. If the fader reads backwards, set it to `false` |
+| Tempo fader polarity | ✅ | Controller 9 coarse, 59 fine. The top of the travel reports 0x3FFF and the bottom 0, and Roland prints the + at the bottom, so `"inverted": true` is right: the fast end has to come out as 1. Pinned by a test on the shipped mapping |
 
 ## The one that cost the most: controller 6 and MIDI 2.0
 

@@ -123,8 +123,9 @@ void ActionDispatcher::dispatch (const ActionMessage& message)
 
         case Action::deckTempo:
         {
-            // A fader at the top is faster, so the normalised value is inverted
-            // against the usual physical layout of a pitch fader.
+            // 0 is the slow end and 1 the fast end, whichever way the hardware
+            // reports them: a mapping's `inverted` flag is where that is
+            // settled, not here.
             const auto range = getTempoRange (deckIndex);
             const auto percent = (message.value * 2.0 - 1.0) * range;
             deck.setTempoRatio (1.0 + percent / 100.0);

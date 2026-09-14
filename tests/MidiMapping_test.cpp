@@ -204,6 +204,18 @@ TEST_CASE ("the shipped DJ-202 mapping loads without warnings", "[midi][mapping]
     REQUIRE (platter->action == opendj::Action::jogTurn);
     REQUIRE (platter->mode == opendj::ValueMode::relativeOffset);
 
+    // Measured on the hardware: the fader reports 0x3FFF at the top and 0 at
+    // the bottom, and Roland prints the + at the bottom. `deck.tempo` wants
+    // 1 at the fast end, so the raw value has to be turned over.
+    for (int deck = 0; deck < 2; ++deck)
+    {
+        const auto* tempo = mapping.findControl (0xB0 + deck, 0x09, false);
+        REQUIRE (tempo != nullptr);
+        REQUIRE (tempo->action == opendj::Action::deckTempo);
+        REQUIRE (tempo->mode == opendj::ValueMode::absolute14Bit);
+        REQUIRE (tempo->inverted);
+    }
+
     // Both decks map every EQ band, in the right order.
     for (int deck = 0; deck < 2; ++deck)
     {
