@@ -59,6 +59,56 @@ that was listed after it except video.
 | Video | Unstarted, and probably its own project |
 | RTMP against a real YouTube or Twitch account | Verified so far only against ffmpeg's own loopback RTMP listener; the handshake has never reached an actual platform |
 
+## Compared with VirtualDJ
+
+The goal is that a VirtualDJ user can sit down at OpenDJ and already know how to use it. This is
+what they would still reach for and not find, checked against the code rather than assumed. The
+VirtualDJ column is a description of that product, not a measurement of it.
+
+Some of it is partly there already: pitch bend through the jog wheel's nudge, Camelot notation in
+`MusicalKey::toCamelot` that the browser does not yet show, and hot cues that a controller can
+set but nothing on screen shows or triggers.
+
+### Reached for in every set
+
+| Missing | What VirtualDJ has | Where OpenDJ is |
+| --- | --- | --- |
+| Playlists and history | Playlists, virtual and filter folders, an automatic history of played tracks, a side list for lining up the next few | Folders only. The only tracklist is the one a recording writes |
+| Hot cues on screen | Pads per deck with colours and names, and markers on the waveform | Controller only, never drawn |
+| Beat jump and quantize | Jumps of 1 to 32 beats; cues and loops snap to the grid | None. Automatic loops already start on the beat |
+| Beat grid editing | Adjust the BPM, move the downbeat, tap tempo | Detection only, so a wrong grid cannot be corrected |
+| More effects | Dozens, including flanger, phaser, gate, bitcrusher, brake, backspin, echo out and stutter, plus reverse and censor buttons | Filter, echo and reverb per channel |
+| Key tools | Key shift in semitones, key match between decks, Camelot display, harmonic hints in the browser | Detection only |
+| Auto gain | Tracks levelled by measured loudness | A trim, with no analysis behind it |
+| Automix | Unattended mixing through a playlist, beat matched | None |
+| MIDI learn and more controllers | Hundreds of controllers mapped out of the box, and a mapper that learns a control from the hardware | One mapping, written by hand. Issue #4 |
+| Recording formats | MP3, FLAC and others | WAV only |
+
+### Expected by regular users
+
+| Missing | Notes |
+| --- | --- |
+| A deeper sampler | More pads, banks, recording a sample from a deck, samples locked to tempo |
+| More from stems | Separating the library ahead of time, stem pads such as vocal off or drums only, effects on one stem |
+| Library import and metadata | iTunes and Music, rekordbox and Serato libraries; a tag editor; cover art; colours, ratings and comments |
+| Saved cue points | Hot cues kept with the track in the library |
+| Waveforms | Colour by frequency, zoom, and a strip showing both decks' beats lined up |
+| Sandbox | Previewing a later moment in the headphones while the master plays on |
+| Keyboard mapper | Shortcuts of your own; today there are only Q, W, O, P and the number row |
+| Master effects | Effects on the whole mix, and effect slots with parameters |
+| Ableton Link | Tempo shared with other applications and devices |
+| Timecode vinyl | Decks driven by real turntables or CDJs |
+
+### Large, or not only up to us
+
+| Missing | Notes |
+| --- | --- |
+| Video and karaoke | Already listed above as probably its own project |
+| A visualizer for streams | Issue #3. A smaller step towards video: the RTMP output already carries a still frame that could become a live picture |
+| Streaming services | Tidal, Beatport, SoundCloud and the rest need commercial agreements, which may not be open to a GPL project |
+| Lighting | DMX and OS2L |
+| Everything around it | A remote control app, scripting, VST effect plugins, skins, cloud sync |
+
 ## Platforms
 
 | Platform | Builds | Runs | Notes |
