@@ -9,7 +9,7 @@
 
 Free and open source DJ software, built in C++ with [JUCE](https://juce.com).
 
-![Decks A and B, each with its waveforms, loop lengths, stem knobs, turntable platter, tempo fader and a button to swap in deck C or D, a four channel mixer between them with EQ, filter, echo, reverb and a crossfader assignment per channel, the track library underneath showing tempo and key, a row of eight sampler pads, and a bottom bar with audio setup, recording, Icecast and RTMP streaming, controller setup, and the audio device running at 7 ms](images/screen4.jpg)
+![Decks A and B, each with its waveforms, loop lengths, stem knobs, turntable platter, tempo fader and a button to swap in deck C or D, a four channel mixer between them with EQ, filter, echo, reverb and a crossfader assignment per channel, the track library underneath showing tempo and key, a row of eight sampler pads with their own level and cue, a mic strip with talkover, and a bottom bar with audio setup, recording, Icecast and RTMP streaming, controller setup, and the audio device running at 10 ms](images/screen5.jpg)
 
 The goal is an application a VirtualDJ user can sit down at and already know how to use:
 the same deck layout, the same workflow, the same muscle memory. The artwork, the naming
