@@ -37,6 +37,9 @@ four decks.
 
 ## Using it
 
+The [wiki](https://git.interdo.me/interdome/opendj/wiki) is the full guide, covering every control
+on screen. What follows is the short version.
+
 Load a track from the library underneath, with the Load button on either deck, by dragging an
 audio file in from a file manager, or by naming files on the command line to start with them
 already loaded. Decoding

@@ -18,6 +18,20 @@ namespace
     // EQ knobs are laid out high to low, matching every DJ mixer ever built,
     // while the engine numbers its bands low to high.
     constexpr int bandForRow (int row) noexcept { return 2 - row; }
+
+    // The strips are short on height, so a knob row is no taller than it must
+    // be: every pixel saved here is one more pixel of channel fader.
+    constexpr int knobRowHeight  = 36;
+    constexpr int comboRowHeight = 20;
+
+    void styleCaption (juce::Label& label, const juce::String& text,
+                       juce::Justification justification = juce::Justification::centred)
+    {
+        label.setText (text, juce::dontSendNotification);
+        label.setJustificationType (justification);
+        label.setColour (juce::Label::textColourId, juce::Colours::grey);
+        label.setFont (juce::FontOptions (11.0f));
+    }
 }
 
 MixerComponent::MixerComponent (AudioEngine& engineToUse, Mixer& mixerToControl)
@@ -37,9 +51,12 @@ MixerComponent::MixerComponent (AudioEngine& engineToUse, Mixer& mixerToControl)
 
         for (int row = 0; row < 3; ++row)
         {
+            static const char* bandNames[] = { "High", "Mid", "Low" };
+
             auto& knob = strip.eq[(size_t) row];
             configureKnob (knob);
             knob.setValue (0.5, juce::dontSendNotification);
+            knob.setTooltip (juce::String (bandNames[row]) + " EQ: centre is flat, double-click to reset");
             knob.onValueChange = [this, channel, row, &knob]
             {
                 mixer.setChannelEq (channel, bandForRow (row), static_cast<float> (knob.getValue()));
@@ -160,10 +177,7 @@ MixerComponent::MixerComponent (AudioEngine& engineToUse, Mixer& mixerToControl)
         };
         addAndMakeVisible (knob);
 
-        label.setText (text, juce::dontSendNotification);
-        label.setJustificationType (juce::Justification::centred);
-        label.setColour (juce::Label::textColourId, juce::Colours::grey);
-        label.setFont (juce::FontOptions (11.0f));
+        styleCaption (label, text);
         addAndMakeVisible (label);
     };
 
@@ -174,11 +188,16 @@ MixerComponent::MixerComponent (AudioEngine& engineToUse, Mixer& mixerToControl)
     setUpMasterKnob (cueMixKnob, cueMixLabel, "Cue/Mix", 0.0,
                      [this] (float v) { mixer.setCueMix (v); });
 
-    crossfaderLabel.setText ("Crossfader", juce::dontSendNotification);
-    crossfaderLabel.setJustificationType (juce::Justification::centred);
-    crossfaderLabel.setColour (juce::Label::textColourId, juce::Colours::grey);
-    crossfaderLabel.setFont (juce::FontOptions (11.0f));
+    styleCaption (crossfaderLabel, "Crossfader");
     addAndMakeVisible (crossfaderLabel);
+
+    const char* rowNames[] = { "Hi", "Mid", "Low", "Filter", "Echo", "Beats", "Reverb", "X-fade" };
+
+    for (size_t row = 0; row < rowLabels.size(); ++row)
+    {
+        styleCaption (rowLabels[row], rowNames[row], juce::Justification::centredRight);
+        addAndMakeVisible (rowLabels[row]);
+    }
 }
 
 void MixerComponent::configureKnob (juce::Slider& knob)
@@ -269,20 +288,20 @@ void MixerComponent::paint (juce::Graphics& g)
 
 void MixerComponent::layOutStrip (Strip& strip, juce::Rectangle<int> area)
 {
-    strip.heading.setBounds (area.removeFromTop (18));
+    strip.heading.setBounds (area.removeFromTop (16));
     area.removeFromTop (4);
 
     for (auto& knob : strip.eq)
     {
-        knob.setBounds (area.removeFromTop (44).reduced (4, 2));
+        knob.setBounds (area.removeFromTop (knobRowHeight).reduced (4, 2));
     }
 
-    strip.filter.setBounds (area.removeFromTop (44).reduced (4, 2));
-    strip.echo.setBounds (area.removeFromTop (44).reduced (4, 2));
-    strip.echoBeats.setBounds (area.removeFromTop (20).reduced (4, 1));
-    strip.reverb.setBounds (area.removeFromTop (44).reduced (4, 2));
+    strip.filter.setBounds (area.removeFromTop (knobRowHeight).reduced (4, 2));
+    strip.echo.setBounds (area.removeFromTop (knobRowHeight).reduced (4, 2));
+    strip.echoBeats.setBounds (area.removeFromTop (comboRowHeight).reduced (4, 1));
+    strip.reverb.setBounds (area.removeFromTop (knobRowHeight).reduced (4, 2));
 
-    strip.assign.setBounds (area.removeFromTop (20).reduced (4, 1));
+    strip.assign.setBounds (area.removeFromTop (comboRowHeight).reduced (4, 1));
 
     strip.cue.setBounds (area.removeFromBottom (24).reduced (4, 2));
     strip.fader.setBounds (area.reduced (10, 6));
@@ -318,10 +337,21 @@ void MixerComponent::resized()
     meterBounds = area.removeFromRight (22).reduced (2, 18);
     area.removeFromRight (4);
 
+    const auto gutter = area.removeFromLeft (40);
     const auto stripWidth = area.getWidth() / static_cast<int> (strips.size());
 
     for (auto& strip : strips)
         layOutStrip (strip, area.removeFromLeft (stripWidth));
+
+    // Each name takes the height of its row from the first strip, so the
+    // column cannot drift out of line with the controls it names.
+    const auto& first = strips.front();
+    const juce::Component* rows[] = { &first.eq[0], &first.eq[1], &first.eq[2], &first.filter,
+                                       &first.echo, &first.echoBeats, &first.reverb, &first.assign };
+
+    for (size_t row = 0; row < rowLabels.size(); ++row)
+        rowLabels[row].setBounds (gutter.getX(), rows[row]->getY(),
+                                  gutter.getWidth(), rows[row]->getHeight());
 }
 
 } // namespace opendj

@@ -73,6 +73,7 @@ private:
     juce::Label heading;
     std::array<Pad, Sampler::numSlots> pads;
     juce::Slider level;
+    juce::Label levelLabel;
     juce::TextButton cueButton { "Cue" };
 
     std::unique_ptr<juce::FileChooser> chooser;

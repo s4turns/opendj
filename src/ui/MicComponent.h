@@ -54,6 +54,7 @@ private:
     juce::Label heading;
     juce::TextButton onButton { "On" };
     juce::Slider level;
+    juce::Label levelLabel;
     Meter meter;
     juce::TextButton talkoverButton { "Talkover" };
     juce::TextButton routingButton { "Everywhere" };

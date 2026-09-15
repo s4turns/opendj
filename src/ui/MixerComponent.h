@@ -56,6 +56,10 @@ private:
     juce::Slider cueMixKnob;
     juce::Label masterLabel, cueLabel, cueMixLabel, crossfaderLabel;
 
+    // One column of names beside the strips, a row per control, the way a
+    // hardware mixer prints them once between the channels.
+    std::array<juce::Label, 8> rowLabels;
+
     juce::Rectangle<int> meterBounds;
     std::array<float, 2> meterLevels { 0.0f, 0.0f };
 
