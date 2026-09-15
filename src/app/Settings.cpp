@@ -48,6 +48,17 @@ namespace
         return Mixer::CrossfaderAssign::thru;
     }
 
+    juce::String routingName (MicInput::Routing routing)
+    {
+        return routing == MicInput::Routing::recordingOnly ? "recording_only" : "everywhere";
+    }
+
+    MicInput::Routing routingFromName (const juce::String& name)
+    {
+        return name == "recording_only" ? MicInput::Routing::recordingOnly
+                                        : MicInput::Routing::everywhere;
+    }
+
     /** A property, or the default when the file predates it or was hand edited
         into nonsense. Every read goes through one of these, which is what makes
         a half written file harmless. */
@@ -140,6 +151,21 @@ void SessionState::applyTo (Mixer& mixer, Sampler& sampler) const
     }
 }
 
+void SessionState::captureFrom (const MicInput& mic)
+{
+    micGain = mic.getGain();
+    micTalkover = mic.isTalkoverEnabled();
+    micRouting = mic.getRouting();
+}
+
+void SessionState::applyTo (MicInput& mic) const
+{
+    mic.setGain (micGain);
+    mic.setTalkover (micTalkover);
+    mic.setRouting (micRouting);
+    mic.setEnabled (false);
+}
+
 //==============================================================================
 
 juce::var SessionState::toVar() const
@@ -204,6 +230,10 @@ juce::var SessionState::toVar() const
     root->setProperty ("sampler_files", files);
     root->setProperty ("sampler_looping", loops);
     root->setProperty ("sampler_gains", gains);
+
+    root->setProperty ("mic_gain", micGain);
+    root->setProperty ("mic_talkover", micTalkover);
+    root->setProperty ("mic_routing", routingName (micRouting));
 
     if (windowBounds.isNotEmpty())
         root->setProperty ("window", windowBounds);
@@ -301,6 +331,10 @@ SessionState SessionState::fromVar (const juce::var& source)
         if (const auto value = element (gains, slot); value.isDouble() || value.isInt())
             state.samplerGains[(size_t) slot] = (float) juce::jlimit (0.0, 2.0, (double) value);
     }
+
+    state.micGain = (float) number (source, "mic_gain", state.micGain, 0.0, 2.0);
+    state.micTalkover = flag (source, "mic_talkover", state.micTalkover);
+    state.micRouting = routingFromName (text (source, "mic_routing"));
 
     state.windowBounds = text (source, "window");
 

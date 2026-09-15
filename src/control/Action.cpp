@@ -17,7 +17,7 @@ namespace
 
     // One table, read in both directions, so a name can never disagree with
     // itself between the parser and the writer.
-    constexpr std::array<Entry, 46> actionNames
+    constexpr std::array<Entry, 51> actionNames
     {{
         { Action::deckPlayToggle,   "deck.play_toggle" },
         { Action::deckPlay,         "deck.play" },
@@ -38,6 +38,8 @@ namespace
         { Action::jogTurn,          "jog.turn" },
         { Action::hotCue,           "pad.hotcue" },
         { Action::hotCueClear,      "pad.hotcue_clear" },
+        { Action::padMode,          "pad.mode" },
+        { Action::padLoop,          "pad.loop" },
         { Action::loopIn,           "loop.in" },
         { Action::loopOut,          "loop.out" },
         { Action::loopToggle,       "loop.toggle" },
@@ -63,6 +65,9 @@ namespace
         { Action::samplerTrigger,   "sampler.trigger" },
         { Action::samplerStop,      "sampler.stop" },
         { Action::samplerGain,      "sampler.gain" },
+        { Action::micToggle,        "mic.toggle" },
+        { Action::micGain,          "mic.gain" },
+        { Action::micTalkover,      "mic.talkover" },
         { Action::browseScroll,     "browse.scroll" },
         { Action::shift,            "modifier.shift" }
     }};
@@ -116,6 +121,8 @@ bool isContinuous (Action action)
         case Action::cueGain:
         case Action::cueMix:
         case Action::samplerGain:
+        case Action::micGain:
+        case Action::padMode:       // a code carried in the velocity, not a press
         case Action::browseScroll:
             return true;
 

@@ -424,7 +424,15 @@ void MidiControlSurface::handleIncomingMidiMessage (juce::MidiInput*, const juce
         // being touched, so the deck stays in a scratch that never ends, and a
         // cue button never comes back up.
         if (control == nullptr && isNoteOff)
+        {
             control = mapping.findControl (status + 0x10, lookupNumber, dispatcher.isShiftHeld());
+
+            // Except a note that reports a state in its velocity rather than
+            // being pressed. A release of it would read as a state of zero,
+            // which on the DJ-202 is hot cue mode, chosen by nobody.
+            if (control != nullptr && control->action == Action::padMode)
+                control = nullptr;
+        }
     }
 
     {
@@ -636,6 +644,14 @@ bool MidiControlSurface::feedbackStateFor (const MidiControl& control) const
             // currently reaching, so a glance at the FX section says which one
             // a turn of the knob will move.
             return dispatcher.getFxDepthTarget (deckIndex) == control.slot;
+
+        case Action::micToggle:
+            // Lit while the mic is live, which is the one light that matters
+            // most not to miss.
+            return const_cast<AudioEngine&> (engine).getMic().isEnabled();
+
+        case Action::micTalkover:
+            return const_cast<AudioEngine&> (engine).getMic().isTalkoverEnabled();
 
         default:
             return false;

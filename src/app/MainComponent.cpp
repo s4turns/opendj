@@ -152,6 +152,13 @@ MainComponent::MainComponent()
     };
     addAndMakeVisible (*samplerView);
 
+    micView = std::make_unique<MicComponent> (engine);
+    micView->onMessage = [this] (const juce::String& message)
+    {
+        statusLabel.setText (message, juce::dontSendNotification);
+    };
+    addAndMakeVisible (*micView);
+
     restoreSettings();
 
     browser = std::make_unique<BrowserComponent> (library, scanner);
@@ -528,6 +535,7 @@ void MainComponent::filesDropped (const juce::StringArray& files, int x, int y)
 void MainComponent::restoreSettings()
 {
     settings.applyTo (engine.getMixer(), engine.getSampler());
+    settings.applyTo (engine.getMic());
 
     for (int deck = 0; deck < AudioEngine::numDecks; ++deck)
         dispatcher.setTempoRange (deck, settings.tempoRanges[(size_t) deck]);
@@ -551,6 +559,7 @@ void MainComponent::saveSettings()
 {
     auto state = settings;
     state.captureFrom (engine.getMixer(), engine.getSampler());
+    state.captureFrom (engine.getMic());
     state.outputMode = engine.getOutputMode();
 
     for (int deck = 0; deck < AudioEngine::numDecks; ++deck)
@@ -614,7 +623,7 @@ void MainComponent::showAudioSettings()
         {
             selector = std::make_unique<juce::AudioDeviceSelectorComponent> (
                 engine.getDeviceManager(),
-                0, 0,      // no inputs yet
+                0, 2,      // a mic, from one input or a pair
                 2, 8,      // enough outputs for a master pair plus a cue pair
                 false,     // MIDI has its own panel
                 false,
@@ -1073,7 +1082,10 @@ void MainComponent::resized()
     // A fixed row rather than a share of the window: eight pads need the same
     // height whatever else is on screen, and taking it from the browser is
     // cheaper than taking it from a waveform.
-    samplerView->setBounds (area.removeFromBottom (58));
+    auto samplerRow = area.removeFromBottom (58);
+    micView->setBounds (samplerRow.removeFromRight (300));
+    samplerRow.removeFromRight (8);
+    samplerView->setBounds (samplerRow);
     area.removeFromBottom (8);
 
     juce::Component* rows[] = { &deckRow, resizerBar.get(), browser.get() };

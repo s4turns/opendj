@@ -8,7 +8,120 @@
 #include "control/ActionDispatcher.h"
 #include "core/AudioEngine.h"
 
+#include <cmath>
+#include <memory>
+
 using namespace opendj;
+
+namespace
+{
+    /** Thirty seconds of kick on the beat and hat off it at 120 BPM, the same
+        click the loop tests use, so a deck has a beat grid for the pads to
+        lock loops to. */
+    struct ClickTrack
+    {
+        ClickTrack()
+        {
+            constexpr double rate = 44100.0;
+            const auto numSamples = static_cast<int> (30.0 * rate);
+            const auto samplesPerBeat = 0.5 * rate;
+
+            juce::AudioBuffer<float> content (2, numSamples);
+            content.clear();
+
+            const auto addHit = [&content, numSamples] (double at, double frequency, double decay, float amplitude)
+            {
+                const auto start = static_cast<int> (at);
+
+                for (int i = 0; i < static_cast<int> (decay * 4.0) && start + i < numSamples; ++i)
+                {
+                    const auto phase = juce::MathConstants<double>::twoPi * frequency * i / 44100.0;
+                    const auto value = static_cast<float> (std::sin (phase) * std::exp (-i / decay)) * amplitude;
+                    content.addSample (0, start + i, value);
+                    content.addSample (1, start + i, value);
+                }
+            };
+
+            for (double beat = 0.0; beat * samplesPerBeat < numSamples; beat += 1.0)
+            {
+                addHit (beat * samplesPerBeat, 55.0, rate * 0.06, 0.8f);
+                addHit ((beat + 0.5) * samplesPerBeat, 6000.0, rate * 0.01, 0.3f);
+            }
+
+            juce::WavAudioFormat wav;
+            auto stream = std::make_unique<juce::FileOutputStream> (file.getFile());
+            REQUIRE (stream->openedOk());
+
+            std::unique_ptr<juce::AudioFormatWriter> writer (
+                wav.createWriterFor (stream.release(), rate, 2, 16, {}, 0));
+            REQUIRE (writer != nullptr);
+            REQUIRE (writer->writeFromAudioSampleBuffer (content, 0, numSamples));
+        }
+
+        juce::TemporaryFile file { ".wav" };
+    };
+
+    /** An engine with a click on deck A and a dispatcher driving it. */
+    struct PadHarness
+    {
+        PadHarness()
+        {
+            engine.prepareToPlay (48000.0, 512);
+            REQUIRE (engine.getDeck (0).loadFile (click.file.getFile()));
+            REQUIRE (engine.getDeck (0).getAnalysis() != nullptr);
+        }
+
+        void setMode (int code) { dispatcher.dispatch ({ Action::padMode, 0, 0, (float) code / 127.0f }); }
+        void pad (int slot, bool down) { dispatcher.dispatch ({ Action::padLoop, 0, slot, down ? 1.0f : 0.0f }); }
+
+        ClickTrack click;
+        AudioEngine engine;
+        ActionDispatcher dispatcher { engine };
+    };
+}
+
+TEST_CASE ("a pad mode is kept per deck, as the code the controller sent", "[control][pads]")
+{
+    AudioEngine engine;
+    ActionDispatcher dispatcher (engine);
+
+    REQUIRE (dispatcher.getPadMode (1) == 0);
+
+    dispatcher.dispatch ({ Action::padMode, 1, 0, (float) 0x30 / 127.0f });
+
+    REQUIRE (dispatcher.getPadMode (1) == 0x30);
+    REQUIRE (dispatcher.getPadMode (0) == 0);
+}
+
+TEST_CASE ("in roll mode a loop pad rolls only while it is held", "[control][pads]")
+{
+    PadHarness h;
+    auto& deck = h.engine.getDeck (0);
+
+    h.setMode (0x11);
+
+    h.pad (0, true);
+    REQUIRE (deck.isLoopRolling());
+
+    h.pad (0, false);
+    REQUIRE (! deck.isLoopRolling());
+    REQUIRE (! deck.isLoopEnabled());
+}
+
+TEST_CASE ("in loop mode a loop pad sets a loop that stays on", "[control][pads]")
+{
+    PadHarness h;
+    auto& deck = h.engine.getDeck (0);
+
+    h.setMode (0x10);
+
+    h.pad (1, true);
+    REQUIRE (deck.isLoopEnabled());
+    REQUIRE (! deck.isLoopRolling());
+
+    h.pad (1, false);
+    REQUIRE (deck.isLoopEnabled());
+}
 
 TEST_CASE ("the FX depth knob starts armed to echo", "[control][fx]")
 {

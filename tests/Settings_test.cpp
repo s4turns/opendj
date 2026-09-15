@@ -8,6 +8,7 @@
 #include "app/Settings.h"
 
 using Catch::Matchers::WithinAbs;
+using opendj::MicInput;
 using opendj::Mixer;
 using opendj::Sampler;
 using opendj::SessionState;
@@ -37,6 +38,10 @@ namespace
         state.samplerCue = true;
         state.windowBounds = "100 120 1600 900";
 
+        state.micGain = 1.4f;
+        state.micTalkover = true;
+        state.micRouting = MicInput::Routing::recordingOnly;
+
         for (int slot = 0; slot < Sampler::numSlots; ++slot)
         {
             state.samplerFiles[(size_t) slot] = "/music/stab" + juce::String (slot) + ".wav";
@@ -61,6 +66,9 @@ namespace
         REQUIRE (a.samplerFiles == b.samplerFiles);
         REQUIRE (a.samplerLooping == b.samplerLooping);
         REQUIRE (a.windowBounds == b.windowBounds);
+        REQUIRE_THAT (a.micGain, WithinAbs (b.micGain, 1.0e-4f));
+        REQUIRE (a.micTalkover == b.micTalkover);
+        REQUIRE (a.micRouting == b.micRouting);
 
         for (size_t slot = 0; slot < Sampler::numSlots; ++slot)
             REQUIRE_THAT (a.samplerGains[slot], WithinAbs (b.samplerGains[slot], 1.0e-4f));
@@ -150,7 +158,8 @@ TEST_CASE ("out of range values are brought back in range", "[settings]")
         "master_gain": 40.0,
         "cue_mix": -3.0,
         "tempo_ranges": [1000.0, 0.0, 8.0, 8.0],
-        "sampler_gains": [99.0, -5.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+        "sampler_gains": [99.0, -5.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+        "mic_gain": 9.0
     })");
 
     const auto state = SessionState::fromVar (absurd);
@@ -161,6 +170,7 @@ TEST_CASE ("out of range values are brought back in range", "[settings]")
     REQUIRE (state.tempoRanges[1] >= 1.0);
     REQUIRE (state.samplerGains[0] <= 2.0f);
     REQUIRE (state.samplerGains[1] >= 0.0f);
+    REQUIRE (state.micGain <= 2.0f);
 }
 
 TEST_CASE ("a state reaches the mixer and the sampler it was saved from", "[settings]")
@@ -214,6 +224,28 @@ TEST_CASE ("what a mixer and sampler hold is what gets captured", "[settings]")
 
     // An empty pad names no file, rather than naming one that is not there.
     REQUIRE (state.samplerFiles[0].isEmpty());
+}
+
+TEST_CASE ("the mic's settings are kept, but never whether it was on", "[settings][mic]")
+{
+    MicInput mic;
+    mic.setGain (1.5f);
+    mic.setTalkover (true);
+    mic.setRouting (MicInput::Routing::recordingOnly);
+    mic.setEnabled (true);
+
+    SessionState state;
+    state.captureFrom (mic);
+
+    // A mic left on when the application closed must not come back on.
+    MicInput restored;
+    restored.setEnabled (true);
+    SessionState::fromVar (state.toVar()).applyTo (restored);
+
+    REQUIRE_THAT (restored.getGain(), WithinAbs (1.5f, 1.0e-3f));
+    REQUIRE (restored.isTalkoverEnabled());
+    REQUIRE (restored.getRouting() == MicInput::Routing::recordingOnly);
+    REQUIRE (! restored.isEnabled());
 }
 
 TEST_CASE ("saving over settings that already exist replaces them", "[settings]")

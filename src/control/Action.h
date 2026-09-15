@@ -58,6 +58,18 @@ enum class Action
     hotCue,             ///< press sets an empty slot, or jumps to a set one
     hotCueClear,
 
+    /** Which mode a controller's pads are in, as the controller reports it:
+        the value is the code it sent, over 127. Stored per deck and read by
+        padLoop, the way channelFxSelect is read by channelFxDepth; nothing in
+        the engine changes. */
+    padMode,
+
+    /** Pads 1 to 4 of a loop section whose meaning depends on padMode: a loop
+        of 1, 2, 4 or 8 beats in loop mode, or a roll of 1, 1/2, 1/4 or 1/8 of
+        a beat for as long as the pad is held in roll mode. slot picks the pad,
+        0 to 3. */
+    padLoop,
+
     // Loops. slot is an index into the beat lengths in loopBeatsForSlot().
     loopIn,
     loopOut,
@@ -102,6 +114,11 @@ enum class Action
     samplerTrigger,     ///< press starts that slot from the beginning
     samplerStop,
     samplerGain,        ///< the level of the whole sampler
+
+    // Mic. deck and slot are unused: like the sampler, it sits over the whole mix.
+    micToggle,          ///< press turns the mic on or off
+    micGain,            ///< the mic's level; 0.5 is unity, 1 about +6 dB
+    micTalkover,        ///< press turns talkover on or off
 
     // Track browser. deck and slot are unused.
     browseScroll,       ///< value is signed rows to move the selection, not normalised

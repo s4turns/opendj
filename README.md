@@ -9,7 +9,7 @@
 
 Free and open source DJ software, built in C++ with [JUCE](https://juce.com).
 
-![Decks A and B, each with its waveforms, loop lengths, stem knobs, turntable platter, tempo fader and a button to swap in deck C or D, a four channel mixer between them with EQ, filter, echo, reverb and a crossfader assignment per channel, the track library underneath showing tempo and key, a row of eight sampler pads, and a bottom bar with audio setup, recording, Icecast and RTMP streaming, controller setup, and the audio device running at 7 ms](images/screen4.jpg)
+![Decks A and B, each with its waveforms, loop lengths, stem knobs, turntable platter, tempo fader and a button to swap in deck C or D, a four channel mixer between them with EQ, filter, echo, reverb and a crossfader assignment per channel, the track library underneath showing tempo and key, a row of eight sampler pads with their own level and cue, a mic strip with talkover, and a bottom bar with audio setup, recording, Icecast and RTMP streaming, controller setup, and the audio device running at 10 ms](images/screen5.jpg)
 
 The goal is an application a VirtualDJ user can sit down at and already know how to use:
 the same deck layout, the same workflow, the same muscle memory. The artwork, the naming
@@ -118,6 +118,20 @@ that means **Windows Audio (Low Latency Mode)** by default, with ASIO ahead of i
 built with the SDK, then shared or exclusive Windows Audio, and DirectSound last because it
 cannot do low latency. On Linux it means JACK or PipeWire ahead of ALSA. It also asks a device sitting on a huge buffer for a smaller one. On a
 plain Windows desktop that is the difference between 87 ms of output latency and 7 ms.
+
+## The mic
+
+Plug a mic into your interface, choose that input in Audio setup, and use the strip at the end of
+the sampler row. On puts it on air. It is always off when OpenDJ opens, so a mic left in front of
+the speakers cannot howl the moment the application starts. The knob is its level, and the bar
+beside it shows what the mic hears even while it is off, so the level can be set before anybody
+hears you.
+
+Talkover drops the music by 10 dB while the mic is on, and brings it back over half a second when
+you switch the mic off. Everywhere sends your voice to the speakers, the recording and the
+stream. Stream only keeps it out of the speakers but still puts it in the recording and the
+stream, for talking to listeners from a room with the speakers in it. The mic is not sent to the
+headphones.
 
 ## Headphones on a stereo interface
 

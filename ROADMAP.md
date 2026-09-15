@@ -1,7 +1,7 @@
 # OpenDJ roadmap
 
 Where the project is and what to pick up next. Anything ticked has tests or a verified manual
-check behind it, not just code that compiles. The suite is **241 tests** on Linux and 240 on
+check behind it, not just code that compiles. The suite is **260 tests** on Linux and 259 on
 Windows, where the stderr test has no pipe to fill; anything touching
 audio is tested by measuring the output, not by checking that the code ran.
 
@@ -41,6 +41,7 @@ that was listed after it except video.
 | Key detection | ✅ | `src/analysis/KeyDetector.*`, in the browser's Key column |
 | Effects: filter, echo, reverb | ✅ | `src/core/Mixer.*`, one knob each per channel |
 | Sampler | ✅ | `src/core/Sampler.*`, eight pads |
+| Mic input | 🚧 | `src/core/MicInput.*`, `src/ui/MicComponent.*`, with talkover and a stream-only switch. Tested by measuring the output; not yet tried with a real mic |
 | Stem separation | ✅ | `src/analysis/StemSeparator.*`, `StemDsp.*`, a knob per stem |
 | Record the master output | ✅ | `src/core/SetRecorder.*`, with a tracklist |
 | Split output cue | ✅ | `src/core/OutputRouter.*`, headphones on a stereo interface |
@@ -53,7 +54,7 @@ that was listed after it except video.
 
 | Item | Notes |
 | --- | --- |
-| DJ-202 TR-S sequencer and pad modes beyond hot cue | Not in the action registry yet; effects, sampler pads and deck toggle are all mapped now |
+| DJ-202 pad modes on the hardware, then the rest | Loop, roll and sampler modes are mapped from Mixxx's DJ-202 script and need pressing on the controller. Cue loop, pitch play, slicer, the parameter buttons and the TR-S sequencer are not mapped |
 | Arch and macOS | `scripts/build.sh` knows the Arch packages but has never been run there. macOS has never been tried |
 | Video | Unstarted, and probably its own project |
 | RTMP against a real YouTube or Twitch account | Verified so far only against ffmpeg's own loopback RTMP listener; the handshake has never reached an actual platform |
@@ -245,6 +246,25 @@ empty pad, dropping a file on it, or the pad menu. The number row fires the eigh
 Sixteen tests, including a 44.1 kHz sound playing for its own length out of a 48 kHz device
 rather than eight per cent fast.
 
+## Mic input
+
+A mic from the device's inputs, laid over the mix after the sampler. Up to two inputs are enabled
+in Audio setup; the strip at the end of the sampler row turns the mic on, sets its level, meters
+it, and holds the talkover and routing switches. A controller reaches it through `mic.toggle`,
+`mic.gain` and `mic.talkover`.
+
+| Decision | Why |
+| --- | --- |
+| Never on at launch, and whether it was on is not saved | An open mic in front of speakers howls, and nobody should get that from opening the application |
+| It joins after the mixer and the sampler | No fader or crossfader should be able to take a voice away |
+| Stream only builds a second mix, rather than taking the voice back out of the speakers | The recorder and both broadcasters read that mix and the speakers get the ducked music alone. With the mic off and talkover let go, the second mix is not built at all |
+| Talkover is 10 dB, in 50 ms, back over half a second | Enough for a voice to sit on the music without stopping it, and slow enough coming back that a pause between sentences does not pump it |
+| Two inputs are summed, not averaged | A mic is mono and inputs are offered in pairs, so a mic in either half of a pair arrives at full level |
+| Its own soft clip above 0.9, only where a voice is added | The mixer rounds off above 0.7 before the mic arrives. Shaping the music a second time would cost it level, and a shout still has to be rounded off rather than torn |
+| Inputs are copied before the outputs are cleared | In case a backend hands over input and output channels that share memory. A test points the mic at the engine's own output to prove it is still heard |
+| The device search stays output-only | Opening inputs on every device it tries adds failure points and, on Windows, microphone permission prompts. The input is chosen once in Audio setup and kept with the device |
+| Not sent to the headphones | A voice heard back a few milliseconds late is distracting, and the room and the stream are where it matters |
+
 ## Output routing and the cue bus
 
 `src/core/OutputRouter.*` holds the rules, out of the device callback and testable on its own.
@@ -417,6 +437,7 @@ audio device in JUCE's own `audio-device.xml` next to it.
 | Crossfader curve and per-channel assignment | EQ, filter, echo and reverb settings |
 | Tempo fader ranges, which decks are on screen | |
 | The sampler pads, their files, loops and gains | |
+| The mic's level, talkover and routing | Whether the mic was on |
 | The window's size and position | |
 
 | Decision | Why |
@@ -443,6 +464,11 @@ would say so.
 | `sampler.trigger` | `slot` | Starts that pad; with shift, stops it |
 | `sampler.stop` | `slot` | |
 | `sampler.gain` | value | The level of the whole sampler |
+| `pad.mode` | value | The pad mode a controller reports, as the code in its velocity, stored per deck |
+| `pad.loop` | `deck`, `slot` | Pads 1 to 4: a loop of 1, 2, 4 or 8 beats, or in roll mode a roll of 1 to 1/8 of a beat while held |
+| `mic.toggle` | nothing | Turns the mic on or off |
+| `mic.gain` | value | The mic's level; 0.5 is unity |
+| `mic.talkover` | nothing | Turns talkover on or off |
 
 Plus the loop family: `loop.in`, `loop.out`, `loop.toggle`, `loop.beats`, `loop.roll`,
 `loop.halve`, `loop.double`, `loop.reloop`. `loop.beats` and `loop.roll` take a slot, which
@@ -507,6 +533,7 @@ Measured on the hardware rather than taken from the documentation.
 | Note off behaviour | ✅ | Both forms occur, depending on the sequencer's MIDI version: as a UMP client releases arrive as note off, as a legacy client as note on with velocity zero. A release is taken from the message rather than the mapping, and a note off falls back to the note on control of the same number |
 | Jog tick rate | ✅ | 800, not the 512 the Mixxx mapping states: two turns produced 1590 ticks |
 | Platter encoding | ✅ | Controller 6, relative, centred on 64. The wheel also streams 14-bit absolute position as pitch bend, but that flows whenever a hand merely rests on it, so it is deliberately unmapped |
+| Pad modes | 🚧 | The mode arrives as the velocity of note 0x00 on each pad channel, and pads 1 to 4 send the same notes in loop and roll mode, so `pad.mode` stores it and `pad.loop` reads it. Codes and notes taken from Mixxx's DJ-202 script (`github.com/mrtnGLSR/DJ-202`), not yet pressed on the hardware |
 | Tempo fader polarity | ✅ | Controller 9 coarse, 59 fine. The top of the travel reports 0x3FFF and the bottom 0, and Roland prints the + at the bottom, so `"inverted": true` is right: the fast end has to come out as 1. Pinned by a test on the shipped mapping |
 
 ## The one that cost the most: controller 6 and MIDI 2.0
