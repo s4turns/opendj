@@ -24,6 +24,8 @@ namespace
     constexpr int knobRowHeight  = 36;
     constexpr int comboRowHeight = 20;
 
+    const char* const rowNames[] { "Hi", "Mid", "Low", "Filter", "Echo", "Beats", "Reverb", "X-fade" };
+
     void styleCaption (juce::Label& label, const juce::String& text,
                        juce::Justification justification = juce::Justification::centred)
     {
@@ -48,6 +50,14 @@ MixerComponent::MixerComponent (AudioEngine& engineToUse, Mixer& mixerToControl)
         strip.heading.setJustificationType (juce::Justification::centred);
         strip.heading.setColour (juce::Label::textColourId, juce::Colours::white);
         addAndMakeVisible (strip.heading);
+
+        for (size_t row = 0; row < strip.captions.size(); ++row)
+        {
+            styleCaption (strip.captions[row], rowNames[row], juce::Justification::centredRight);
+            strip.captions[row].setMinimumHorizontalScale (0.6f);
+            strip.captions[row].setInterceptsMouseClicks (false, false);
+            addAndMakeVisible (strip.captions[row]);
+        }
 
         for (int row = 0; row < 3; ++row)
         {
@@ -190,14 +200,6 @@ MixerComponent::MixerComponent (AudioEngine& engineToUse, Mixer& mixerToControl)
 
     styleCaption (crossfaderLabel, "Crossfader");
     addAndMakeVisible (crossfaderLabel);
-
-    const char* rowNames[] = { "Hi", "Mid", "Low", "Filter", "Echo", "Beats", "Reverb", "X-fade" };
-
-    for (size_t row = 0; row < rowLabels.size(); ++row)
-    {
-        styleCaption (rowLabels[row], rowNames[row], juce::Justification::centredRight);
-        addAndMakeVisible (rowLabels[row]);
-    }
 }
 
 void MixerComponent::configureKnob (juce::Slider& knob)
@@ -291,17 +293,26 @@ void MixerComponent::layOutStrip (Strip& strip, juce::Rectangle<int> area)
     strip.heading.setBounds (area.removeFromTop (16));
     area.removeFromTop (4);
 
-    for (auto& knob : strip.eq)
+    // Every strip names its own controls, so a knob on channel D can be read
+    // without looking all the way across to channel A.
+    const auto captionWidth = area.getWidth() * 2 / 5;
+    auto row = strip.captions.begin();
+
+    const auto placeRow = [&] (juce::Component& control, int height)
     {
-        knob.setBounds (area.removeFromTop (knobRowHeight).reduced (4, 2));
-    }
+        auto bounds = area.removeFromTop (height);
+        (row++)->setBounds (bounds.removeFromLeft (captionWidth));
+        control.setBounds (bounds.reduced (2, height == comboRowHeight ? 1 : 2));
+    };
 
-    strip.filter.setBounds (area.removeFromTop (knobRowHeight).reduced (4, 2));
-    strip.echo.setBounds (area.removeFromTop (knobRowHeight).reduced (4, 2));
-    strip.echoBeats.setBounds (area.removeFromTop (comboRowHeight).reduced (4, 1));
-    strip.reverb.setBounds (area.removeFromTop (knobRowHeight).reduced (4, 2));
+    for (auto& knob : strip.eq)
+        placeRow (knob, knobRowHeight);
 
-    strip.assign.setBounds (area.removeFromTop (comboRowHeight).reduced (4, 1));
+    placeRow (strip.filter, knobRowHeight);
+    placeRow (strip.echo, knobRowHeight);
+    placeRow (strip.echoBeats, comboRowHeight);
+    placeRow (strip.reverb, knobRowHeight);
+    placeRow (strip.assign, comboRowHeight);
 
     strip.cue.setBounds (area.removeFromBottom (24).reduced (4, 2));
     strip.fader.setBounds (area.reduced (10, 6));
@@ -337,21 +348,10 @@ void MixerComponent::resized()
     meterBounds = area.removeFromRight (22).reduced (2, 18);
     area.removeFromRight (4);
 
-    const auto gutter = area.removeFromLeft (40);
     const auto stripWidth = area.getWidth() / static_cast<int> (strips.size());
 
     for (auto& strip : strips)
         layOutStrip (strip, area.removeFromLeft (stripWidth));
-
-    // Each name takes the height of its row from the first strip, so the
-    // column cannot drift out of line with the controls it names.
-    const auto& first = strips.front();
-    const juce::Component* rows[] = { &first.eq[0], &first.eq[1], &first.eq[2], &first.filter,
-                                       &first.echo, &first.echoBeats, &first.reverb, &first.assign };
-
-    for (size_t row = 0; row < rowLabels.size(); ++row)
-        rowLabels[row].setBounds (gutter.getX(), rows[row]->getY(),
-                                  gutter.getWidth(), rows[row]->getHeight());
 }
 
 } // namespace opendj
