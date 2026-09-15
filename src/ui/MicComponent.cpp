@@ -67,6 +67,13 @@ MicComponent::MicComponent (AudioEngine& engineToUse) : engine (engineToUse)
     level.onValueChange = [this] { engine.getMic().setGain ((float) level.getValue()); };
     addAndMakeVisible (level);
 
+    levelLabel.setText ("Level", juce::dontSendNotification);
+    levelLabel.setJustificationType (juce::Justification::centred);
+    levelLabel.setColour (juce::Label::textColourId, juce::Colours::grey);
+    levelLabel.setFont (juce::FontOptions (11.0f));
+    levelLabel.setInterceptsMouseClicks (false, false);
+    addAndMakeVisible (levelLabel);
+
     meter.setInterceptsMouseClicks (false, false);
     addAndMakeVisible (meter);
 
@@ -106,7 +113,9 @@ void MicComponent::resized()
 
     heading.setBounds (area.removeFromLeft (30));
     onButton.setBounds (area.removeFromLeft (48).reduced (2, 6));
-    level.setBounds (area.removeFromLeft (44).reduced (2));
+    auto knobCell = area.removeFromLeft (44).reduced (2);
+    levelLabel.setBounds (knobCell.removeFromBottom (12));
+    level.setBounds (knobCell);
     meter.setBounds (area.removeFromLeft (8).reduced (0, 6));
     area.removeFromLeft (6);
     talkoverButton.setBounds (area.removeFromLeft (72).reduced (2, 6));

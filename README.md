@@ -9,7 +9,7 @@
 
 Free and open source DJ software, built in C++ with [JUCE](https://juce.com).
 
-![Decks A and B, each with its waveforms, loop lengths, stem knobs, turntable platter, tempo fader and a button to swap in deck C or D, a four channel mixer between them with EQ, filter, echo, reverb and a crossfader assignment per channel, the track library underneath showing tempo and key, a row of eight sampler pads with their own level and cue, a mic strip with talkover, and a bottom bar with audio setup, recording, Icecast and RTMP streaming, controller setup, and the audio device running at 10 ms](images/screen5.jpg)
+![Decks A and B, each with its waveforms, loop lengths, stem knobs, turntable platter, tempo fader and a button to swap in deck C or D, a four channel mixer between them with every control named on every channel: high, mid and low EQ, filter, echo and its length in beats, reverb, crossfader assignment, a channel fader and cue, the track library underneath showing tempo and key, a row of eight sampler pads with their own level and cue, a mic strip with talkover, and a bottom bar with audio setup, recording, Icecast and RTMP streaming, controller setup, and the audio device running at 10 ms](images/screenshot.jpg)
 
 The goal is an application a VirtualDJ user can sit down at and already know how to use:
 the same deck layout, the same workflow, the same muscle memory. The artwork, the naming
@@ -36,6 +36,9 @@ version: everything in the first milestone now works, along with effects, loops,
 four decks.
 
 ## Using it
+
+The [wiki](https://git.interdo.me/interdome/opendj/wiki) is the full guide, covering every control
+on screen. What follows is the short version.
 
 Load a track from the library underneath, with the Load button on either deck, by dragging an
 audio file in from a file manager, or by naming files on the command line to start with them

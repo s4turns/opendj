@@ -40,6 +40,7 @@ private:
         juce::ComboBox assign;               // which side of the crossfader
         juce::Slider fader;
         juce::TextButton cue { "Cue" };
+        std::array<juce::Label, 8> captions; // a name beside each row, top to bottom
     };
 
     void configureKnob (juce::Slider& knob);

@@ -74,6 +74,13 @@ SamplerComponent::SamplerComponent (AudioEngine& engineToUse) : engine (engineTo
     level.onValueChange = [this] { engine.getSampler().setGain ((float) level.getValue()); };
     addAndMakeVisible (level);
 
+    levelLabel.setText ("Level", juce::dontSendNotification);
+    levelLabel.setJustificationType (juce::Justification::centred);
+    levelLabel.setColour (juce::Label::textColourId, juce::Colours::grey);
+    levelLabel.setFont (juce::FontOptions (11.0f));
+    levelLabel.setInterceptsMouseClicks (false, false);
+    addAndMakeVisible (levelLabel);
+
     cueButton.setClickingTogglesState (true);
     cueButton.setTooltip ("Send the sampler to the headphones as well as the room");
     cueButton.setColour (juce::TextButton::buttonOnColourId, accentColour);
@@ -102,7 +109,9 @@ void SamplerComponent::resized()
 
     auto right = area.removeFromRight (96);
     cueButton.setBounds (right.removeFromRight (44).reduced (2, 6));
-    level.setBounds (right.reduced (2));
+    auto knobCell = right.reduced (2);
+    levelLabel.setBounds (knobCell.removeFromBottom (12));
+    level.setBounds (knobCell);
 
     // The pads share whatever is left, so the row narrows with the window
     // rather than the last pad falling off the end of it.
