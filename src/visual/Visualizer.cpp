@@ -525,6 +525,16 @@ private:
     juce::String startupError;
 };
 
+#else
+
+// Without the visuals there is no renderer, but the unique_ptr member still has
+// to know how to destroy one: a pimpl's deleter needs a complete type, even in
+// a build where nothing ever makes one. An empty class costs nothing and keeps
+// the header honest on every platform.
+class Visualizer::Renderer final
+{
+};
+
 #endif // OPENDJ_HAVE_VISUALIZER
 
 //==============================================================================
