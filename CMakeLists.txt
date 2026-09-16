@@ -90,6 +90,56 @@ else()
     message(STATUS "OpenVINO not found: OpenDJ will build without stem separation")
 endif()
 
+# projectM draws the MilkDrop visuals, both in the window and into the
+# broadcast. Optional in the same spirit as OpenVINO above: a build without it
+# is a complete DJ application that simply has no visualiser.
+#
+# It needs an OpenGL context that does not belong to a window, so that the
+# visuals keep being drawn with the panel closed and so a test can measure real
+# pixels on a machine with no display at all. On Linux that context comes from
+# EGL, which is what is looked for here; the visualiser is built only if it is
+# there.
+option(OPENDJ_ENABLE_VISUALIZER "Build the projectM visualiser" ON)
+
+set(OPENDJ_VISUALIZER_AVAILABLE OFF)
+
+if(OPENDJ_ENABLE_VISUALIZER)
+    if(UNIX AND NOT APPLE)
+        find_package(OpenGL QUIET COMPONENTS OpenGL EGL)
+
+        if(TARGET OpenGL::EGL AND TARGET OpenGL::GL)
+            set(OPENDJ_VISUALIZER_AVAILABLE ON)
+        else()
+            message(STATUS "EGL not found: OpenDJ will build without the visualiser")
+        endif()
+    else()
+        # The offscreen context is written against EGL, and nothing has been
+        # written against WGL or CGL yet. Said plainly rather than failing to
+        # configure, in the same spirit as the platform table in ROADMAP.md.
+        message(STATUS "The visualiser is Linux only for now: building without it")
+    endif()
+endif()
+
+if(OPENDJ_VISUALIZER_AVAILABLE)
+    # v4, not the 3.x most distributions package: the C API used here only
+    # exists in v4, and the two are not source compatible. Built here rather
+    # than found so every platform gets the same version. LGPL 2.1 or later,
+    # so licence compatible.
+    FetchContent_Declare(projectm
+        GIT_REPOSITORY https://github.com/projectM-visualizer/projectm.git
+        GIT_TAG        v4.1.4
+        GIT_SHALLOW    TRUE)
+
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+    set(ENABLE_PLAYLIST ON CACHE BOOL "" FORCE)
+    set(ENABLE_SYSTEM_PROJECTM_EVAL OFF CACHE BOOL "" FORCE)
+    set(ENABLE_SDL_UI OFF CACHE BOOL "" FORCE)
+    set(ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(projectm)
+
+    message(STATUS "projectM found: the visualiser will be built in")
+endif()
+
 # Sources shared by the application and the test binary, so the two cannot
 # drift apart. Nothing in here includes a UI header.
 set(OPENDJ_ENGINE_SOURCES
@@ -118,7 +168,8 @@ set(OPENDJ_ENGINE_SOURCES
     ${CMAKE_SOURCE_DIR}/src/control/AlsaMidiCompat.cpp
     ${CMAKE_SOURCE_DIR}/src/library/Library.cpp
     ${CMAKE_SOURCE_DIR}/src/library/LibraryScanner.cpp
-    ${CMAKE_SOURCE_DIR}/src/library/TagReader.cpp)
+    ${CMAKE_SOURCE_DIR}/src/library/TagReader.cpp
+    ${CMAKE_SOURCE_DIR}/src/visual/Visualizer.cpp)
 
 # ---------------------------------------------------------------------------
 # Application target
@@ -183,6 +234,11 @@ endif()
 if(OpenVINO_FOUND)
     target_compile_definitions(OpenDJ PRIVATE OPENDJ_HAVE_OPENVINO=1)
     target_link_libraries(OpenDJ PRIVATE openvino::runtime)
+endif()
+
+if(OPENDJ_VISUALIZER_AVAILABLE)
+    target_compile_definitions(OpenDJ PRIVATE OPENDJ_HAVE_VISUALIZER=1)
+    target_link_libraries(OpenDJ PRIVATE libprojectM::projectM libprojectM::playlist OpenGL::EGL OpenGL::GL)
 endif()
 
 target_link_libraries(OpenDJ PRIVATE

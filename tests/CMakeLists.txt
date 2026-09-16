@@ -17,6 +17,7 @@ target_sources(opendj-tests PRIVATE
     AudioEngine_test.cpp
     Broadcast_test.cpp
     RtmpBroadcast_test.cpp
+    Visualizer_test.cpp
     Mixer_test.cpp
     OutputRouter_test.cpp
     Deck_test.cpp
@@ -47,6 +48,11 @@ target_compile_definitions(opendj-tests PRIVATE
 if(OpenVINO_FOUND)
     target_compile_definitions(opendj-tests PRIVATE OPENDJ_HAVE_OPENVINO=1)
     target_link_libraries(opendj-tests PRIVATE openvino::runtime)
+endif()
+
+if(OPENDJ_VISUALIZER_AVAILABLE)
+    target_compile_definitions(opendj-tests PRIVATE OPENDJ_HAVE_VISUALIZER=1)
+    target_link_libraries(opendj-tests PRIVATE libprojectM::projectM libprojectM::playlist OpenGL::EGL OpenGL::GL)
 endif()
 
 target_link_libraries(opendj-tests PRIVATE
