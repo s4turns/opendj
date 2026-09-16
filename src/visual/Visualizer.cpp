@@ -11,16 +11,36 @@
 
 #if OPENDJ_HAVE_VISUALIZER
 
+#if JUCE_WINDOWS
+
+// opengl32.dll exports OpenGL 1.1 and nothing after it, so every framebuffer
+// call below has to be looked up at run time. GLEW does that, and it is here
+// rather than by choice: projectM's own projectM-opengl.h includes these two
+// headers on Windows, so projectM's calls and this file's calls go through one
+// table of pointers, filled in by the single glewInit below.
+//
+// glew.h refuses to be included after gl.h, and wglew.h wants windows.h first,
+// so the order here is the whole reason this block exists.
+#define NOMINMAX 1
+#define WIN32_LEAN_AND_MEAN 1
+#include <windows.h>
+#include <GL/glew.h>
+#include <GL/wglew.h>
+
+#else
+
 // Mesa declares every core entry point past 1.1 in glext.h and libGL exports
 // them, so the framebuffer calls below need no loader of their own. That is a
-// Linux convenience rather than a portable one, and it is part of why this
-// file is built only there; see the note in CMakeLists.txt.
+// Linux convenience rather than a portable one, which is what the Windows half
+// above needs GLEW for.
 #define GL_GLEXT_PROTOTYPES 1
 #include <GL/gl.h>
 #include <GL/glext.h>
 
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
+
+#endif
 
 #include <projectM-4/projectM.h>
 #include <projectM-4/playlist.h>
@@ -41,6 +61,318 @@ namespace
         Samples that do not fit are counted and dropped, which is the right
         trade for something whose whole job is to look roughly right. */
     constexpr int fifoCapacitySamples = 16384;
+}
+
+namespace
+{
+   #if JUCE_WINDOWS
+
+    /** The offscreen OpenGL context, Windows half.
+
+        Windows has no surfaceless context the way Mesa's EGL does, so a
+        context has to hang off a window. That window is never shown and
+        nothing is ever drawn into it: every pixel still goes into a
+        framebuffer object, and the window is here because WGL will not hand
+        out a context without one.
+    */
+    class OffscreenGlContext
+    {
+    public:
+        bool create (juce::String& error)
+        {
+            WNDCLASSEXW windowClass {};
+            windowClass.cbSize = sizeof (windowClass);
+            // CS_OWNDC: the device context is kept for as long as the OpenGL
+            // context is, and a shared one could be reissued underneath it.
+            windowClass.style = CS_OWNDC;
+            windowClass.lpfnWndProc = DefWindowProcW;
+            windowClass.hInstance = GetModuleHandleW (nullptr);
+            windowClass.lpszClassName = windowClassName;
+
+            // Registered once per process, and the visualiser can be started
+            // more than once in one -- the tests do exactly that -- so the
+            // second time round is a success, not a failure.
+            if (RegisterClassExW (&windowClass) == 0
+                 && GetLastError() != ERROR_CLASS_ALREADY_EXISTS)
+            {
+                error = "The hidden window the visuals draw through could not be registered.";
+                return false;
+            }
+
+            window = CreateWindowExW (0, windowClassName, L"OpenDJ visuals",
+                                      WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
+                                      1, 1, nullptr, nullptr,
+                                      GetModuleHandleW (nullptr), nullptr);
+
+            if (window == nullptr)
+            {
+                error = "Windows has no offscreen OpenGL, so the visuals need a hidden "
+                        "window, and one could not be made.";
+                return false;
+            }
+
+            deviceContext = GetDC (window);
+
+            if (deviceContext == nullptr)
+            {
+                error = "The hidden window the visuals draw through has no device context.";
+                return false;
+            }
+
+            // Any format that can hold a context will do, because the window's
+            // own framebuffer is never drawn into. That is also why there is
+            // one window here and not the two every WGL tutorial has: the
+            // second exists to ask wglChoosePixelFormatARB for a better format
+            // than this call gives, since a window's format can only be set
+            // once -- and nothing here cares what the format is.
+            PIXELFORMATDESCRIPTOR descriptor {};
+            descriptor.nSize = sizeof (descriptor);
+            descriptor.nVersion = 1;
+            descriptor.dwFlags = PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER;
+            descriptor.iPixelType = PFD_TYPE_RGBA;
+            descriptor.cColorBits = 32;
+            descriptor.cDepthBits = 24;
+            descriptor.cStencilBits = 8;
+            descriptor.iLayerType = PFD_MAIN_PLANE;
+
+            const auto format = ChoosePixelFormat (deviceContext, &descriptor);
+
+            if (format == 0 || ! SetPixelFormat (deviceContext, format, &descriptor))
+            {
+                error = "No OpenGL pixel format on this machine. A machine with no GPU "
+                        "driver cannot draw visuals.";
+                return false;
+            }
+
+            // The bootstrap context is here for one reason: wglGetProcAddress
+            // answers nothing without a current context, and the call that
+            // asks for a 3.3 core context is itself an extension that has to
+            // be found that way.
+            auto* bootstrap = wglCreateContext (deviceContext);
+
+            if (bootstrap == nullptr || ! wglMakeCurrent (deviceContext, bootstrap))
+            {
+                if (bootstrap != nullptr)
+                    wglDeleteContext (bootstrap);
+
+                error = "This machine would not give out an OpenGL context at all.";
+                return false;
+            }
+
+            // Deliberately not called wglCreateContextAttribsARB: wglew.h
+            // defines that name onto a function pointer of its own, which
+            // glewInit has not filled in yet and cannot until there is a
+            // context -- which is the thing this call is for.
+            const auto createContextAttribs
+                = (PFNWGLCREATECONTEXTATTRIBSARBPROC) wglGetProcAddress ("wglCreateContextAttribsARB");
+
+            // 3.3 core, which is what projectM's shaders are written against.
+            const int contextAttributes[] = { WGL_CONTEXT_MAJOR_VERSION_ARB, 3,
+                                              WGL_CONTEXT_MINOR_VERSION_ARB, 3,
+                                              WGL_CONTEXT_PROFILE_MASK_ARB,
+                                              WGL_CONTEXT_CORE_PROFILE_BIT_ARB,
+                                              0 };
+
+            context = createContextAttribs != nullptr
+                        ? createContextAttribs (deviceContext, nullptr, contextAttributes)
+                        : nullptr;
+
+            wglMakeCurrent (nullptr, nullptr);
+            wglDeleteContext (bootstrap);
+
+            if (context == nullptr)
+            {
+                error = "This machine's OpenGL is older than the 3.3 the visuals need.";
+                return false;
+            }
+
+            if (! wglMakeCurrent (deviceContext, context))
+            {
+                error = "The offscreen OpenGL context could not be made current.";
+                return false;
+            }
+
+            // projectM reaches OpenGL through GLEW here and never initialises
+            // it -- not in the library, not even in its own test application
+            // -- so this is the only place those pointers get filled in. Miss
+            // it and projectM dies on its first draw, through a null pointer
+            // with nothing to say for itself.
+            //
+            // glewExperimental because a core profile refuses the old
+            // glGetString (GL_EXTENSIONS), which is how GLEW decides what is
+            // there unless told to take what the driver exports instead.
+            glewExperimental = GL_TRUE;
+            const auto status = glewInit();
+
+            if (status != GLEW_OK)
+            {
+                error = "OpenGL's function pointers would not load: "
+                      + juce::String (reinterpret_cast<const char*> (glewGetErrorString (status)));
+                return false;
+            }
+
+            // glewInit asks the old way once on its way in whatever it is
+            // told, and a core profile answers that with an error nobody wants
+            // to meet later as the first thing some other check sees.
+            glGetError();
+
+            return true;
+        }
+
+        void destroy()
+        {
+            if (context != nullptr)
+            {
+                wglMakeCurrent (nullptr, nullptr);
+                wglDeleteContext (context);
+                context = nullptr;
+            }
+
+            if (deviceContext != nullptr)
+            {
+                ReleaseDC (window, deviceContext);
+                deviceContext = nullptr;
+            }
+
+            if (window != nullptr)
+            {
+                // The thread that made the window has to be the one that ends
+                // it; DestroyWindow refuses from anywhere else. run() creates
+                // and destroys on the render thread, which is what makes this
+                // hold.
+                DestroyWindow (window);
+                window = nullptr;
+            }
+        }
+
+        bool isValid() const noexcept   { return context != nullptr; }
+
+        /** A top level window that never reads its queue hangs anyone
+            broadcasting to every top level window: a settings change sent with
+            SendMessage waits out the whole timeout on us. Draining it once a
+            frame costs nothing and takes that away. */
+        void pumpMessages()
+        {
+            if (window == nullptr)
+                return;
+
+            MSG message;
+
+            while (PeekMessageW (&message, window, 0, 0, PM_REMOVE))
+            {
+                TranslateMessage (&message);
+                DispatchMessageW (&message);
+            }
+        }
+
+    private:
+        static constexpr const wchar_t* windowClassName = L"OpenDJOffscreenVisuals";
+
+        HWND window = nullptr;
+        HDC deviceContext = nullptr;
+        HGLRC context = nullptr;
+    };
+
+   #else
+
+    /** The offscreen OpenGL context, Linux half.
+
+        Mesa's surfaceless platform hands back a context that belongs to no
+        window and no display server at all, which is what lets the visuals
+        keep being drawn with the panel closed, and lets a test measure real
+        pixels on a machine with no screen.
+    */
+    class OffscreenGlContext
+    {
+    public:
+        bool create (juce::String& error)
+        {
+            display = eglGetPlatformDisplay (EGL_PLATFORM_SURFACELESS_MESA, EGL_DEFAULT_DISPLAY, nullptr);
+
+            if (display == EGL_NO_DISPLAY)
+            {
+                error = "No offscreen EGL display. A machine with no GPU driver cannot draw visuals.";
+                return false;
+            }
+
+            if (! eglInitialize (display, nullptr, nullptr))
+            {
+                error = "EGL would not initialise.";
+                display = EGL_NO_DISPLAY;
+                return false;
+            }
+
+            const EGLint configAttributes[] = { EGL_SURFACE_TYPE, EGL_PBUFFER_BIT,
+                                                EGL_RENDERABLE_TYPE, EGL_OPENGL_BIT,
+                                                EGL_NONE };
+            EGLConfig config {};
+            EGLint numConfigs = 0;
+
+            if (! eglChooseConfig (display, configAttributes, &config, 1, &numConfigs) || numConfigs == 0)
+            {
+                error = "No EGL configuration this machine can render OpenGL into.";
+                return false;
+            }
+
+            if (! eglBindAPI (EGL_OPENGL_API))
+            {
+                error = "This machine's EGL has no desktop OpenGL, only OpenGL ES.";
+                return false;
+            }
+
+            // 3.3 core, which is what projectM's shaders are written against.
+            const EGLint contextAttributes[] = { EGL_CONTEXT_MAJOR_VERSION, 3,
+                                                 EGL_CONTEXT_MINOR_VERSION, 3,
+                                                 EGL_CONTEXT_OPENGL_PROFILE_MASK,
+                                                 EGL_CONTEXT_OPENGL_CORE_PROFILE_BIT,
+                                                 EGL_NONE };
+
+            context = eglCreateContext (display, config, EGL_NO_CONTEXT, contextAttributes);
+
+            if (context == EGL_NO_CONTEXT)
+            {
+                error = "This machine's OpenGL is older than the 3.3 the visuals need.";
+                return false;
+            }
+
+            // No surface at all: everything is drawn into a framebuffer
+            // object, so there is nothing a window would be for.
+            if (! eglMakeCurrent (display, EGL_NO_SURFACE, EGL_NO_SURFACE, context))
+            {
+                error = "The offscreen OpenGL context could not be made current.";
+                return false;
+            }
+
+            return true;
+        }
+
+        void destroy()
+        {
+            if (display == EGL_NO_DISPLAY)
+                return;
+
+            eglMakeCurrent (display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+
+            if (context != EGL_NO_CONTEXT)
+                eglDestroyContext (display, context);
+
+            eglTerminate (display);
+
+            context = EGL_NO_CONTEXT;
+            display = EGL_NO_DISPLAY;
+        }
+
+        bool isValid() const noexcept   { return context != EGL_NO_CONTEXT; }
+
+        /** Nothing to pump: there is no window, which is the whole point. */
+        void pumpMessages() {}
+
+    private:
+        EGLDisplay display = EGL_NO_DISPLAY;
+        EGLContext context = EGL_NO_CONTEXT;
+    };
+
+   #endif
 }
 
 //==============================================================================
@@ -171,6 +503,7 @@ private:
 
         while (! threadShouldExit())
         {
+            glContext.pumpMessages();
             feedAudioToProjectM();
 
             if (nextPresetWanted.exchange (false, std::memory_order_relaxed))
@@ -291,61 +624,8 @@ private:
     //==========================================================================
     bool createContext (juce::String& error)
     {
-        display = eglGetPlatformDisplay (EGL_PLATFORM_SURFACELESS_MESA, EGL_DEFAULT_DISPLAY, nullptr);
-
-        if (display == EGL_NO_DISPLAY)
-        {
-            error = "No offscreen EGL display. A machine with no GPU driver cannot draw visuals.";
+        if (! glContext.create (error))
             return false;
-        }
-
-        if (! eglInitialize (display, nullptr, nullptr))
-        {
-            error = "EGL would not initialise.";
-            display = EGL_NO_DISPLAY;
-            return false;
-        }
-
-        const EGLint configAttributes[] = { EGL_SURFACE_TYPE, EGL_PBUFFER_BIT,
-                                            EGL_RENDERABLE_TYPE, EGL_OPENGL_BIT,
-                                            EGL_NONE };
-        EGLConfig config {};
-        EGLint numConfigs = 0;
-
-        if (! eglChooseConfig (display, configAttributes, &config, 1, &numConfigs) || numConfigs == 0)
-        {
-            error = "No EGL configuration this machine can render OpenGL into.";
-            return false;
-        }
-
-        if (! eglBindAPI (EGL_OPENGL_API))
-        {
-            error = "This machine's EGL has no desktop OpenGL, only OpenGL ES.";
-            return false;
-        }
-
-        // 3.3 core, which is what projectM's shaders are written against.
-        const EGLint contextAttributes[] = { EGL_CONTEXT_MAJOR_VERSION, 3,
-                                             EGL_CONTEXT_MINOR_VERSION, 3,
-                                             EGL_CONTEXT_OPENGL_PROFILE_MASK,
-                                             EGL_CONTEXT_OPENGL_CORE_PROFILE_BIT,
-                                             EGL_NONE };
-
-        context = eglCreateContext (display, config, EGL_NO_CONTEXT, contextAttributes);
-
-        if (context == EGL_NO_CONTEXT)
-        {
-            error = "This machine's OpenGL is older than the 3.3 the visuals need.";
-            return false;
-        }
-
-        // No surface at all: everything is drawn into a framebuffer object,
-        // so there is nothing a window would be for.
-        if (! eglMakeCurrent (display, EGL_NO_SURFACE, EGL_NO_SURFACE, context))
-        {
-            error = "The offscreen OpenGL context could not be made current.";
-            return false;
-        }
 
         // Rows come back tightly packed. OpenGL's default is to pad every row
         // of a read to a multiple of four bytes, and three bytes a pixel means
@@ -395,23 +675,20 @@ private:
 
     void destroyContext()
     {
-        if (display == EGL_NO_DISPLAY)
-            return;
+        // The objects go while the context is still current and can still be
+        // asked to let them go; whatever the platform half holds goes after.
+        // create() can fail at any step, so this runs on that path too, and
+        // everything it touches is guarded.
+        if (glContext.isValid())
+        {
+            if (framebuffer != 0)    glDeleteFramebuffers (1, &framebuffer);
+            if (depthBuffer != 0)    glDeleteRenderbuffers (1, &depthBuffer);
+            if (colourTexture != 0)  glDeleteTextures (1, &colourTexture);
+        }
 
-        if (framebuffer != 0)    glDeleteFramebuffers (1, &framebuffer);
-        if (depthBuffer != 0)    glDeleteRenderbuffers (1, &depthBuffer);
-        if (colourTexture != 0)  glDeleteTextures (1, &colourTexture);
-
-        eglMakeCurrent (display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
-
-        if (context != EGL_NO_CONTEXT)
-            eglDestroyContext (display, context);
-
-        eglTerminate (display);
+        glContext.destroy();
 
         framebuffer = depthBuffer = colourTexture = 0;
-        context = EGL_NO_CONTEXT;
-        display = EGL_NO_DISPLAY;
     }
 
     //==========================================================================
@@ -525,8 +802,7 @@ private:
     mutable juce::CriticalSection presetLock;
     std::atomic<bool> nextPresetWanted { false };
 
-    EGLDisplay display = EGL_NO_DISPLAY;
-    EGLContext context = EGL_NO_CONTEXT;
+    OffscreenGlContext glContext;
     GLuint framebuffer = 0, colourTexture = 0, depthBuffer = 0;
 
     projectm_handle projectM = nullptr;

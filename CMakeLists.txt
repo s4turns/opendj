@@ -112,11 +112,26 @@ if(OPENDJ_ENABLE_VISUALIZER)
         else()
             message(STATUS "EGL not found: OpenDJ will build without the visualiser")
         endif()
+    elseif(WIN32)
+        # Windows has no surfaceless anything, so the context comes from WGL
+        # and hangs off a window that is never shown; see Visualizer.cpp. This
+        # asks for nothing but opengl32, which is part of the OS, so it is
+        # effectively always on. Whether the machine can actually give out a
+        # 3.3 core context is a question only the driver can answer, and it is
+        # asked at run time, where a no becomes a sentence in the status bar
+        # rather than a build without visuals.
+        find_package(OpenGL QUIET COMPONENTS OpenGL)
+
+        if(TARGET OpenGL::GL)
+            set(OPENDJ_VISUALIZER_AVAILABLE ON)
+        else()
+            message(STATUS "No OpenGL found: OpenDJ will build without the visualiser")
+        endif()
     else()
-        # The offscreen context is written against EGL, and nothing has been
-        # written against WGL or CGL yet. Said plainly rather than failing to
+        # The offscreen context is written against EGL and WGL, and nothing has
+        # been written against CGL yet. Said plainly rather than failing to
         # configure, in the same spirit as the platform table in ROADMAP.md.
-        message(STATUS "The visualiser is Linux only for now: building without it")
+        message(STATUS "The visualiser is not written for macOS yet: building without it")
     endif()
 endif()
 
@@ -135,6 +150,43 @@ if(OPENDJ_VISUALIZER_AVAILABLE)
     set(ENABLE_SYSTEM_PROJECTM_EVAL OFF CACHE BOOL "" FORCE)
     set(ENABLE_SDL_UI OFF CACHE BOOL "" FORCE)
     set(ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+
+    if(WIN32)
+        # projectM reaches OpenGL through GLEW on Windows -- its own
+        # projectM-opengl.h includes <GL/glew.h> and <GL/wglew.h> there, where
+        # on Linux it takes the entry points Mesa exports -- and it asks for it
+        # with find_package(GLEW REQUIRED). Everyone else answers that with
+        # vcpkg; this repository builds its dependencies, so GLEW is built here
+        # too, like JUCE and Rubber Band and projectM itself.
+        #
+        # Perlmint's fork rather than the original because it ships the
+        # generated glew.c. The original generates it from the OpenGL registry
+        # as part of its release tarball, so its git tree alone will not build.
+        # Modified BSD, so licence compatible.
+        FetchContent_Declare(glew
+            GIT_REPOSITORY https://github.com/Perlmint/glew-cmake.git
+            GIT_TAG        glew-cmake-2.2.0-1
+            GIT_SHALLOW    TRUE)
+
+        set(glew-cmake_BUILD_SHARED OFF CACHE BOOL "" FORCE)
+        set(glew-cmake_BUILD_STATIC ON CACHE BOOL "" FORCE)
+        set(ONLY_LIBS ON CACHE BOOL "" FORCE)
+        FetchContent_MakeAvailable(glew)
+
+        # projectM looks for a target called GLEW::glew, and no GLEW build
+        # defines that name in its own tree: this one calls it libglew_static,
+        # and the original only puts the GLEW:: namespace on an installed
+        # export set. So the name it looks for is made here. Without this the
+        # configure succeeds, GLEW quietly drops out of projectM's link line,
+        # and the build ends in hundreds of unresolved __glew symbols.
+        add_library(GLEW::glew ALIAS libglew_static)
+
+        # ...and cmake/FindGLEW.cmake, which only reports that target, goes
+        # where projectM's find_package(GLEW REQUIRED) will find it. Windows
+        # only, so nothing about the Linux configure changes.
+        list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
+    endif()
+
     FetchContent_MakeAvailable(projectm)
 
     message(STATUS "projectM found: the visualiser will be built in")
@@ -239,7 +291,18 @@ endif()
 
 if(OPENDJ_VISUALIZER_AVAILABLE)
     target_compile_definitions(OpenDJ PRIVATE OPENDJ_HAVE_VISUALIZER=1)
-    target_link_libraries(OpenDJ PRIVATE libprojectM::projectM libprojectM::playlist OpenGL::EGL OpenGL::GL)
+    target_link_libraries(OpenDJ PRIVATE libprojectM::projectM libprojectM::playlist)
+
+    if(WIN32)
+        # opengl32 for wgl* and the 1.1 entry points, GLEW for everything
+        # after them, gdi32 for the pixel format and user32 for the hidden
+        # window. JUCE asks for user32 with a pragma of its own, but the test
+        # binary has no graphics module in it, so both are named here rather
+        # than arriving by luck.
+        target_link_libraries(OpenDJ PRIVATE GLEW::glew OpenGL::GL gdi32 user32)
+    else()
+        target_link_libraries(OpenDJ PRIVATE OpenGL::EGL OpenGL::GL)
+    endif()
 endif()
 
 target_link_libraries(OpenDJ PRIVATE

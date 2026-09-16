@@ -52,7 +52,18 @@ endif()
 
 if(OPENDJ_VISUALIZER_AVAILABLE)
     target_compile_definitions(opendj-tests PRIVATE OPENDJ_HAVE_VISUALIZER=1)
-    target_link_libraries(opendj-tests PRIVATE libprojectM::projectM libprojectM::playlist OpenGL::EGL OpenGL::GL)
+    target_link_libraries(opendj-tests PRIVATE libprojectM::projectM libprojectM::playlist)
+
+    if(WIN32)
+        # opengl32 for wgl* and the 1.1 entry points, GLEW for everything
+        # after them, gdi32 for the pixel format and user32 for the hidden
+        # window. JUCE asks for user32 with a pragma of its own, but the test
+        # binary has no graphics module in it, so both are named here rather
+        # than arriving by luck.
+        target_link_libraries(opendj-tests PRIVATE GLEW::glew OpenGL::GL gdi32 user32)
+    else()
+        target_link_libraries(opendj-tests PRIVATE OpenGL::EGL OpenGL::GL)
+    endif()
 endif()
 
 target_link_libraries(opendj-tests PRIVATE
