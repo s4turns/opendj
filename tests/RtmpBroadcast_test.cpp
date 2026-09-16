@@ -69,7 +69,10 @@ namespace
     This makes the flood certain rather than likely: a shell script that
     answers the capability checks like ffmpeg, confirms the connection, prints
     megabytes of warnings, and only then reads its stdin. POSIX only, because
-    only the POSIX side gives ffmpeg a stderr pipe to fill. */
+    the stand-in is a shell script and Windows has nothing to run it with. The
+    pipe itself is no longer the reason: Windows has one too now. It drains it
+    from a thread of its own rather than from whoever happens to be writing,
+    so the deadlock reproduced here cannot form there in the same way. */
 TEST_CASE ("a broadcast keeps flowing while ffmpeg floods its stderr", "[rtmp]")
 {
     const auto script = juce::File::createTempFile (".sh");

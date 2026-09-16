@@ -239,6 +239,10 @@ For low latency, run OpenDJ through JACK or PipeWire rather than plain ALSA, and
 device in Audio setup. PipeWire presents itself as a JACK server, so nothing extra is needed
 on a stock Fedora desktop.
 
+The MilkDrop visuals behind the Visuals button come with an idle preset and nothing else until
+you fetch a library for them; `scripts/get-presets.sh` installs 14,575 of them. They are fetched
+rather than shipped: see [ROADMAP.md](ROADMAP.md) for why.
+
 ### Windows
 
 Visual Studio 2022 Build Tools with the C++ workload provides everything. Its bundled CMake
@@ -249,6 +253,10 @@ pwsh scripts/build.ps1         # configure and build
 pwsh scripts/build.ps1 -Test   # and run the tests
 pwsh scripts/build.ps1 -Run    # and launch it
 ```
+
+The MilkDrop visuals behind the Visuals button come with an idle preset and nothing else until
+you fetch a library for them; `scripts/get-presets.ps1` installs 14,575 of them into
+`%APPDATA%\OpenDJ`. They are fetched rather than shipped: see [ROADMAP.md](ROADMAP.md) for why.
 
 ### Any platform, by hand
 

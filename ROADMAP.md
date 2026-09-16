@@ -1,9 +1,9 @@
 # OpenDJ roadmap
 
 Where the project is and what to pick up next. Anything ticked has tests or a verified manual
-check behind it, not just code that compiles. The suite is **267 tests** on Linux and 259 on
-Windows, which has neither a pipe for the stderr test to fill nor the visualiser; anything touching
-audio is tested by measuring the output, not by checking that the code ran.
+check behind it, not just code that compiles. The suite is **268 tests** on Linux and 267 on
+Windows, the one difference being a stderr test whose stand-in for ffmpeg is a shell script;
+anything touching audio is tested by measuring the output, not by checking that the code ran.
 
 | Symbol | Meaning |
 | :---: | --- |
@@ -48,7 +48,7 @@ that was listed after it except video.
 | Settings that survive a restart | ✅ | `src/app/Settings.*` |
 | Broadcasting to Icecast | ✅ | `src/stream/`, verified against a real Icecast 2.4.4 |
 | Broadcasting to YouTube and Twitch | 🚧 | `src/stream/RtmpBroadcaster.*`, `RtmpConnection.*`. The loopback test against ffmpeg's own listener passes 20 runs in 20 on Linux and 5 in 5 on Windows; never tried against a real platform |
-| MilkDrop visuals | 🚧 | `src/visual/Visualizer.*`, `src/ui/VisualizerComponent.*`. projectM v4 on an offscreen EGL context, in a window of its own and in the RTMP broadcast. Linux only |
+| MilkDrop visuals | ✅ | `src/visual/Visualizer.*`, `src/ui/VisualizerComponent.*`. projectM v4 on an offscreen context, in a window of its own and in the RTMP broadcast. EGL on Linux, WGL on Windows |
 | Video | ⬜ | Playing video files, as opposed to drawing visuals. Very large. Probably a separate project |
 
 ## What to pick up next
@@ -58,7 +58,7 @@ that was listed after it except video.
 | DJ-202 pad modes on the hardware, then the rest | Loop, roll and sampler modes are mapped from Mixxx's DJ-202 script and need pressing on the controller. Cue loop, pitch play, slicer, the parameter buttons and the TR-S sequencer are not mapped |
 | Arch and macOS | `scripts/build.sh` knows the Arch packages but has never been run there. macOS has never been tried |
 | Video | Playing video files is unstarted, and probably its own project. The visualiser is separate and built |
-| The visualiser on Windows and macOS | The offscreen context is EGL, so Linux only. Windows needs the WGL equivalent and a second inheritable pipe for `CreateProcess`, which is also what live video in the broadcast waits on there |
+| The visualiser on macOS | Linux and Windows have an offscreen context, from EGL and WGL. macOS needs the CGL equivalent, and nothing there has been tried at all |
 | RTMP against a real YouTube or Twitch account | Verified so far only against ffmpeg's own loopback RTMP listener; the handshake has never reached an actual platform |
 
 ## Compared with VirtualDJ
@@ -115,7 +115,7 @@ set but nothing on screen shows or triggers.
 
 | Platform | Builds | Runs | Notes |
 | --- | :---: | :---: | --- |
-| Windows | ✅ | ✅ | MSVC 19.44. Windows Audio low latency mode by default, ASIO opt-in. No CI job, see below |
+| Windows | ✅ | ✅ | MSVC 19.44. Windows Audio low latency mode by default, ASIO opt-in. Visuals on a WGL context, and in a broadcast through a named pipe. No CI job, see below |
 | Fedora | ✅ | ✅ | Fedora 44, GCC 16, on a DJ-202's own four channel interface through PipeWire's JACK |
 | Debian and Ubuntu | ✅ | ⬜ | Builds and tests in CI; never run on a desktop |
 | Arch | ⬜ | ⬜ | Packages known, untested |
@@ -441,12 +441,12 @@ presets that projectM already runs natively. LGPL 2.1 or later, so licence compa
 
 | Decision | Why |
 | --- | --- |
-| The OpenGL context comes from surfaceless EGL and belongs to no window | The obvious alternative, a `juce::OpenGLContext` on the panel, ties the visuals to the panel being open: close it and the broadcast's video track stops mid-set. A context of its own also lets the tests render real frames and measure real pixels on a machine with no display |
+| The OpenGL context belongs to no window anyone sees | The obvious alternative, a `juce::OpenGLContext` on the panel, ties the visuals to the panel being open: close it and the broadcast's video track stops mid-set. A context of its own also lets the tests render real frames and measure real pixels on a machine with no display. Surfaceless EGL on Linux; on Windows, where there is no such thing, a window that is created and never shown |
 | The panel is a picture of the newest frame, not a second GL context | The frame is read back off the GPU for the broadcast anyway, so drawing it as an image costs nothing extra and there is one renderer rather than two |
 | The audio thread only copies into a lock free FIFO | Same rule as everything else that taps the master. `projectm_pcm_add_float` is a library call with no realtime promises, so the render thread makes it, not the audio thread |
 | Frames are turned right way up in the visualiser | OpenGL hands rows back bottom first and both consumers want the opposite. Doing it once here beats doing it in the panel and again in an ffmpeg `vflip` nobody would think to look at |
 | Presets are found the way mappings are, plus `/usr/share/projectM/presets` | A distribution's own preset package is then used without copying anything. None found anywhere is not an error: projectM has an idle preset built in |
-| Presets are fetched by a script, not shipped in this repository | They were released over two decades by many authors, almost none under any stated licence, and they run to a hundred megabytes. `scripts/get-presets.sh` installs them on request |
+| Presets are fetched by a script, not shipped in this repository | They were released over two decades by many authors, almost none under any stated licence, and they run to a hundred megabytes. `scripts/get-presets.sh` installs them on request, or `scripts/get-presets.ps1` on Windows |
 
 **Frames read back sheared at 854 wide.** OpenGL pads every row of a `glReadPixels` to four bytes
 unless told otherwise, and three bytes a pixel means that only matches a tightly packed frame when
@@ -472,7 +472,8 @@ JavaScript (`a.fps_=`, `Math.min`, `div()`) and the shaders into GLSL carrying t
 markers of an HLSL translator. projectM reads the original MilkDrop expression language and HLSL,
 so using them would mean reverse-translating two languages, one of them a shading language.
 
-The originals are a better answer anyway. `scripts/get-presets.sh` installs the four packs those
+The originals are a better answer anyway. `scripts/get-presets.sh`, or `get-presets.ps1` on
+Windows, installs the four packs those
 conversions came from, 14,575 presets, against Butterchurn's 1,737. Matching the two sets by name:
 about 80 per cent of Butterchurn's list is in those packs, and the roughly 350 that are not are
 mash-ups that appear to exist only in its own collection. So it is a far larger library rather
@@ -483,9 +484,18 @@ folders it lands in. This matters more than it looks: 8,027 of Cream of the Crop
 reference a sampler, and a preset that cannot find its image does not fail, it draws wrongly,
 usually as a flat colour where the picture should be.
 
-**Linux only.** The offscreen context is EGL. Windows needs the WGL equivalent, and separately
-needs a second inheritable pipe for `CreateProcess` before live video can reach a broadcast there;
-it refuses the broadcast outright rather than failing somewhere inside ffmpeg.
+**Linux and Windows.** The offscreen context is EGL on Linux and WGL on Windows, behind one small
+class with two implementations; everything above it, from the framebuffer to the readback to
+projectM itself, is shared. Windows also needs GLEW, because projectM reaches OpenGL through it
+there and never initialises it, so OpenDJ does, once, before projectM is created.
+
+Live video reaches a broadcast on both. POSIX hands ffmpeg a second pipe on descriptor three;
+Windows has no way to give a child a descriptor of its choosing, so it makes a named pipe and tells
+ffmpeg the name. Bringing that up also turned up the reason Windows had been reporting a broadcast
+to an unreachable server as live: it had no stderr pipe, so "still running" was all it could check.
+It has one now, read by a thread of its own, and waits for the same `Output #0` the POSIX side does.
+
+macOS is what is left: it needs the CGL equivalent of that context class.
 
 ## Picking a device worth playing on
 
