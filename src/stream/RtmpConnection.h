@@ -77,7 +77,8 @@ struct RtmpSettings
     deliberately static one; see the design note in ROADMAP.md before
     reaching for a waveform or the album art.
 */
-juce::StringArray buildFfmpegArguments (const RtmpSettings& settings, double sampleRate);
+juce::StringArray buildFfmpegArguments (const RtmpSettings& settings, double sampleRate,
+                                        const juce::String& videoSource = "pipe:3");
 
 /** One ffmpeg subprocess carrying one broadcast.
 
@@ -160,9 +161,11 @@ public:
     juce::int64 getBytesSent() const noexcept { return bytesSent.load (std::memory_order_relaxed); }
 
 private:
-    /** Platform-specific: a spawned process and the pipe into its stdin.
+    /** Platform-specific: a spawned process and the pipes into it.
         Implemented with posix_spawn on Linux and macOS, and CreateProcess on
-        Windows. The Windows half is written and compiles but has not been run
+        Windows. Live video reaches it on descriptor three there and through a
+        named pipe here, which is why it is asked where to read frames from
+        before the arguments naming that are built. The Windows half is written and compiles but has not been run
         anywhere, in the same spirit the platform table in ROADMAP.md is
         honest about Arch and macOS. */
     class Process;

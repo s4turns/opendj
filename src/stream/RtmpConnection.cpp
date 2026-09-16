@@ -8,6 +8,7 @@
 #include <atomic>
 #include <cstring>
 #include <mutex>
+#include <thread>
 #include <vector>
 
 #if JUCE_WINDOWS
@@ -151,7 +152,8 @@ juce::String RtmpSettings::validate() const
 
 //==============================================================================
 
-juce::StringArray buildFfmpegArguments (const RtmpSettings& settings, double sampleRate)
+juce::StringArray buildFfmpegArguments (const RtmpSettings& settings, double sampleRate,
+                                        const juce::String& videoSource)
 {
     juce::StringArray args;
 
@@ -183,7 +185,12 @@ juce::StringArray buildFfmpegArguments (const RtmpSettings& settings, double sam
         //
         // Descriptor 3 rather than a second use of stdin, which is taken,
         // and rather than a named pipe on disk, which would need a path,
-        // cleanup, and a race against a stale one from a crash.
+        // cleanup, and a race against a stale one from a crash. That is about
+        // a FIFO in the filesystem and does not reach Windows, where a named
+        // pipe is a kernel object with no presence in any directory and no
+        // life after its last handle. Which is what the Windows half uses,
+        // having no way to hand a child a descriptor of its choosing; it says
+        // so where it makes one, and the name arrives here as videoSource.
         //
         // The same generous queue as the audio input, for the same reason
         // given below it: two pipe inputs each block their reader thread,
@@ -194,7 +201,7 @@ juce::StringArray buildFfmpegArguments (const RtmpSettings& settings, double sam
         args.add ("-video_size");
         args.add (juce::String (settings.videoWidth) + "x" + juce::String (settings.videoHeight));
         args.add ("-framerate"); args.add (juce::String (settings.fps));
-        args.add ("-i"); args.add ("pipe:3");
+        args.add ("-i"); args.add (videoSource);
     }
     else
     {
@@ -356,16 +363,10 @@ public:
     bool start (const juce::String& executable, const juce::StringArray& arguments,
                 bool withVideoPipe, juce::String& error)
     {
-        // A second inheritable pipe on a fixed descriptor is not something
-        // CreateProcess offers the way posix_spawn does, and nobody has
-        // written the Windows way of it yet. The static card still works;
-        // this is said outright rather than left to fail somewhere inside
-        // ffmpeg.
-        if (withVideoPipe)
-        {
-            error = "Live visuals in the broadcast are not written for Windows yet.";
-            return false;
-        }
+        // The video pipe, where there is one, was made by createVideoPipe
+        // before these arguments were built, since ffmpeg is told its name in
+        // them. Nothing about it is inherited: ffmpeg opens it by name.
+        juce::ignoreUnused (withVideoPipe);
 
         SECURITY_ATTRIBUTES sa {};
         sa.nLength = sizeof (SECURITY_ATTRIBUTES);
@@ -384,6 +385,19 @@ public:
         // finishes.
         SetHandleInformation (stdinWrite, HANDLE_FLAG_INHERIT, 0);
 
+        HANDLE stderrRead = nullptr, stderrWrite = nullptr;
+
+        if (! CreatePipe (&stderrRead, &stderrWrite, &sa, 0))
+        {
+            CloseHandle (stdinRead);
+            CloseHandle (stdinWrite);
+            error = "Could not create a pipe for ffmpeg.";
+            return false;
+        }
+
+        // Ours to read, the same way round as the stdin pipe above.
+        SetHandleInformation (stderrRead, HANDLE_FLAG_INHERIT, 0);
+
         juce::String commandLine = "\"" + executable + "\"";
 
         for (const auto& arg : arguments)
@@ -393,8 +407,16 @@ public:
         startInfo.cb = sizeof (STARTUPINFOW);
         startInfo.dwFlags = STARTF_USESTDHANDLES;
         startInfo.hStdInput = stdinRead;
-        startInfo.hStdOutput = GetStdHandle (STD_ERROR_HANDLE);   // ffmpeg's own noise, not read back
-        startInfo.hStdError = GetStdHandle (STD_ERROR_HANDLE);
+
+        // ffmpeg says everything on stderr, and what it says is how a
+        // broadcast is known to have connected, so that goes into a pipe of
+        // its own. Its stdout carries nothing here and goes to NUL, which is
+        // what the POSIX half does with /dev/null.
+        auto* nul = CreateFileW (L"NUL", GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                 &sa, OPEN_EXISTING, 0, nullptr);
+
+        startInfo.hStdOutput = nul != INVALID_HANDLE_VALUE ? nul : stderrWrite;
+        startInfo.hStdError = stderrWrite;
 
         PROCESS_INFORMATION processInfo {};
         auto commandLineBuffer = commandLine.toUTF16();
@@ -404,10 +426,15 @@ public:
                                               nullptr, nullptr, &startInfo, &processInfo);
 
         CloseHandle (stdinRead);
+        CloseHandle (stderrWrite);
+
+        if (nul != INVALID_HANDLE_VALUE)
+            CloseHandle (nul);
 
         if (! launched)
         {
             CloseHandle (stdinWrite);
+            CloseHandle (stderrRead);
             error = "Could not start ffmpeg. Is it installed and on PATH?";
             return false;
         }
@@ -415,6 +442,17 @@ public:
         processHandle = processInfo.hProcess;
         CloseHandle (processInfo.hThread);
         stdinHandle = stdinWrite;
+        stderrHandle = stderrRead;
+
+        // A thread of its own rather than the POSIX half's draining from
+        // whoever happens to be writing. Windows has no poll over a pipe and
+        // an anonymous one cannot be read without blocking, so the read that
+        // would have been interleaved gets a thread instead. It matters for
+        // the same reason: ffmpeg prints for as long as it runs, and once
+        // nobody empties its stderr it blocks on that write and stops reading
+        // the audio we are sending it -- two processes each waiting on the
+        // other.
+        stderrReader = std::thread ([this] { readStderr(); });
 
         return true;
     }
@@ -453,26 +491,122 @@ public:
         return true;
     }
 
-    /** No stderr capture on this side: without a second inheritable pipe and
-        a reader thread for it there is nothing to search for the connect
-        signal, so this side falls back to "still running after the timeout
-        means connected", a weaker check than the POSIX one. Worth tightening
-        alongside whoever first runs this on Windows. */
-    bool stderrSawConnectSignal() const { return isRunning(); }
+    /** The same test the POSIX half makes, and no longer "still running, so
+        presumably connected": `Output #0` is what ffmpeg prints once it has
+        opened its output URL, and until it appears a broadcast is not live
+        however healthy the process looks. A target that refuses the
+        connection used to be reported as live on Windows for exactly that
+        reason. */
+    bool stderrSawConnectSignal() const { return sawConnectSignal.load (std::memory_order_relaxed); }
 
-    /** Nothing to report for the same reason: ffmpeg's output goes to this
-        process's own stderr rather than a pipe it could be read back from. */
-    juce::String lastDiagnostic() const { return {}; }
+    juce::String lastDiagnostic() const
+    {
+        const std::lock_guard<std::mutex> lock (stderrMutex);
+        const auto lines = juce::StringArray::fromLines (recent);
 
-    bool writeVideo (const void*, size_t) { return false; }
-    bool hasVideoPipe() const noexcept { return false; }
+        for (int i = lines.size() - 1; i >= 0; --i)
+            if (lines[i].trim().isNotEmpty())
+                return lines[i].trim();
+
+        return {};
+    }
+
+    /** Makes the pipe ffmpeg reads raw frames from, and says how ffmpeg is to
+        be told to open it. Called before the arguments are built, because the
+        answer goes into them, and before the process starts, because the pipe
+        has to be there by the time ffmpeg opens it.
+
+        A named pipe, where POSIX hands the child a second descriptor.
+        CreateProcess has no equivalent of posix_spawn's file actions, and the
+        one alternative -- smuggling descriptors to the C runtime through the
+        reserved block in STARTUPINFO -- has a layout that is undocumented and
+        a runtime's own business. The name carries the process id and a counter
+        so two broadcasts in one process cannot land on the same one.
+    */
+    bool createVideoPipe (juce::String& url, juce::String& error)
+    {
+        static std::atomic<int> nextPipe { 0 };
+
+        const auto name = "\\\\.\\pipe\\opendj-video-"
+                            + juce::String ((int) GetCurrentProcessId()) + "-"
+                            + juce::String (nextPipe.fetch_add (1));
+
+        SECURITY_ATTRIBUTES attributes {};
+        attributes.nLength = sizeof (SECURITY_ATTRIBUTES);
+        attributes.bInheritHandle = FALSE;
+
+        videoHandle = CreateNamedPipeW (name.toWideCharPointer(),
+                                        PIPE_ACCESS_OUTBOUND | FILE_FLAG_OVERLAPPED,
+                                        PIPE_TYPE_BYTE | PIPE_WAIT,
+                                        1, videoPipeBytes, videoPipeBytes, 0, &attributes);
+
+        if (videoHandle == INVALID_HANDLE_VALUE)
+        {
+            videoHandle = nullptr;
+            error = "Could not create a pipe for ffmpeg's video.";
+            return false;
+        }
+
+        url = name;
+        return true;
+    }
+
+    bool writeVideo (const void* data, size_t numBytes)
+    {
+        if (videoHandle == nullptr)
+            return false;
+
+        // ffmpeg opens the pipe when it reaches that input, which is after it
+        // has started and read its arguments, so waiting for it belongs at the
+        // first frame rather than at startup.
+        if (! videoConnected && ! connectVideo())
+            return false;
+
+        return writeHandle (videoHandle, data, numBytes);
+    }
+
+    bool hasVideoPipe() const noexcept { return videoHandle != nullptr; }
 
     void stop()
     {
+        if (videoHandle != nullptr)
+        {
+            // Disconnected before it is closed, so ffmpeg reaches the end of
+            // its input rather than a handle that stopped answering.
+            if (videoConnected)
+                DisconnectNamedPipe (videoHandle);
+
+            CloseHandle (videoHandle);
+            videoHandle = nullptr;
+            videoConnected = false;
+        }
+
+        if (videoEvent != nullptr)
+        {
+            CloseHandle (videoEvent);
+            videoEvent = nullptr;
+        }
+
         if (stdinHandle != nullptr)
         {
             CloseHandle (stdinHandle);
             stdinHandle = nullptr;
+        }
+
+        // The reader is sitting in ReadFile; cancelling it is what lets it
+        // reach the end of readStderr so it can be joined. The handle is
+        // closed after that, not before, because closing a handle another
+        // thread is reading is its own kind of trouble.
+        if (stderrHandle != nullptr)
+            CancelIoEx (stderrHandle, nullptr);
+
+        if (stderrReader.joinable())
+            stderrReader.join();
+
+        if (stderrHandle != nullptr)
+        {
+            CloseHandle (stderrHandle);
+            stderrHandle = nullptr;
         }
 
         if (processHandle != nullptr)
@@ -490,8 +624,161 @@ public:
     }
 
 private:
+    /** Waits for ffmpeg to open its end. Overlapped, because a broadcast whose
+        ffmpeg never arrives has to give up rather than hold the feeder thread
+        for good. */
+    bool connectVideo()
+    {
+        if (videoEvent == nullptr)
+        {
+            videoEvent = CreateEventW (nullptr, TRUE, FALSE, nullptr);
+
+            if (videoEvent == nullptr)
+                return false;
+        }
+
+        OVERLAPPED overlapped {};
+        overlapped.hEvent = videoEvent;
+        ResetEvent (videoEvent);
+
+        if (ConnectNamedPipe (videoHandle, &overlapped) != 0)
+        {
+            videoConnected = true;
+            return true;
+        }
+
+        const auto reason = GetLastError();
+
+        // Already there: it opened the pipe between the call above and this
+        // line, which is the ordinary case rather than a rare one.
+        if (reason == ERROR_PIPE_CONNECTED)
+        {
+            videoConnected = true;
+            return true;
+        }
+
+        if (reason != ERROR_IO_PENDING)
+            return false;
+
+        if (WaitForSingleObject (videoEvent, (DWORD) sendTimeoutMs) != WAIT_OBJECT_0)
+        {
+            CancelIo (videoHandle);
+            return false;
+        }
+
+        DWORD ignored = 0;
+
+        if (GetOverlappedResult (videoHandle, &overlapped, &ignored, FALSE) == 0)
+            return false;
+
+        videoConnected = true;
+        return true;
+    }
+
+    /** An overlapped write under one deadline for the whole thing, which is
+        the discipline the POSIX side follows and for the same reason: a
+        blocking write of more than a pipe's worth returns only once all of it
+        has been read, so a plain WriteFile would leave the send deadline
+        governing nothing, and a stalled ffmpeg would hold the feeder thread
+        for as long as it liked. */
+    bool writeHandle (HANDLE handle, const void* data, size_t numBytes)
+    {
+        auto* bytes = static_cast<const char*> (data);
+        size_t remaining = numBytes;
+
+        const auto deadline = juce::Time::getMillisecondCounter() + (juce::uint32) sendTimeoutMs;
+
+        while (remaining > 0)
+        {
+            const auto now = juce::Time::getMillisecondCounter();
+
+            if (now >= deadline)
+            {
+                stop();
+                return false;
+            }
+
+            OVERLAPPED overlapped {};
+            overlapped.hEvent = videoEvent;
+            ResetEvent (videoEvent);
+
+            DWORD written = 0;
+
+            if (WriteFile (handle, bytes, (DWORD) remaining, &written, &overlapped) == 0)
+            {
+                if (GetLastError() != ERROR_IO_PENDING)
+                {
+                    stop();
+                    return false;
+                }
+
+                if (WaitForSingleObject (videoEvent, deadline - now) != WAIT_OBJECT_0)
+                {
+                    CancelIo (handle);
+                    stop();
+                    return false;
+                }
+
+                if (GetOverlappedResult (handle, &overlapped, &written, FALSE) == 0)
+                {
+                    stop();
+                    return false;
+                }
+            }
+
+            if (written == 0)
+            {
+                stop();
+                return false;
+            }
+
+            bytes += written;
+            remaining -= written;
+        }
+
+        return true;
+    }
+
+    /** Reads ffmpeg's stderr until it ends, which is when ffmpeg exits or
+        stop() cancels the read. Everything is kept, because the last line of
+        it is what a failed broadcast is explained with. */
+    void readStderr()
+    {
+        char buffer[1024];
+
+        for (;;)
+        {
+            DWORD read = 0;
+
+            if (ReadFile (stderrHandle, buffer, sizeof (buffer), &read, nullptr) == 0 || read == 0)
+                return;
+
+            const std::lock_guard<std::mutex> lock (stderrMutex);
+            recent += juce::String::fromUTF8 (buffer, (int) read);
+
+            // Latched rather than tested against the tail later, because what
+            // ffmpeg prints after it would otherwise push it out of anything
+            // bounded that was kept.
+            if (recent.contains ("Output #0"))
+                sawConnectSignal.store (true, std::memory_order_relaxed);
+        }
+    }
+
+    /** Several frames' worth at 1080p, so a feeder that runs briefly early
+        does not end up waiting on ffmpeg for want of somewhere to put them. */
+    static constexpr DWORD videoPipeBytes = 8 * 1024 * 1024;
+
     HANDLE processHandle = nullptr;
     HANDLE stdinHandle = nullptr;
+    HANDLE stderrHandle = nullptr;
+    HANDLE videoHandle = nullptr;
+    HANDLE videoEvent = nullptr;
+    bool videoConnected = false;
+
+    std::thread stderrReader;
+    mutable std::mutex stderrMutex;
+    juce::String recent;
+    std::atomic<bool> sawConnectSignal { false };
 };
 
 #else
@@ -646,6 +933,16 @@ public:
     }
 
     bool write (const void* data, size_t numBytes)      { return writeTo (stdinFd, data, numBytes); }
+    /** Nothing to make here, unlike the Windows half: the descriptor ffmpeg
+        reads video from is fixed and known before anything is opened, so the
+        pipe itself is made in start() along with the other two. This only
+        says what to call it in the arguments. */
+    bool createVideoPipe (juce::String& url, juce::String&)
+    {
+        url = "pipe:3";
+        return true;
+    }
+
     bool writeVideo (const void* data, size_t numBytes) { return writeTo (videoFd, data, numBytes); }
 
     bool hasVideoPipe() const noexcept { return videoFd >= 0; }
@@ -936,7 +1233,19 @@ bool RtmpConnection::launch (const RtmpSettings& settings, double sampleRate, ju
         return false;
 
     process = std::make_unique<Process>();
-    const auto args = buildFfmpegArguments (settings, sampleRate);
+
+    // Where ffmpeg is told to read frames from has to be settled before the
+    // arguments are built, because it goes into them, and only the platform
+    // half knows: a descriptor on POSIX, the name of a pipe on Windows.
+    juce::String videoSource ("pipe:3");
+
+    if (settings.liveVideo && ! process->createVideoPipe (videoSource, error))
+    {
+        process.reset();
+        return false;
+    }
+
+    const auto args = buildFfmpegArguments (settings, sampleRate, videoSource);
 
     if (! process->start (ffmpegPath, args, settings.liveVideo, error))
     {
