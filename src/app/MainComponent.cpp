@@ -296,6 +296,16 @@ juce::Array<juce::File> MainComponent::findDataFolders (const juce::String& name
                               .getChildFile (".local/share")));
    #endif
 
+   #if JUCE_WINDOWS
+    // The same idea as the XDG block above, in the one place a Windows user
+    // can write to without being an administrator, and where the settings and
+    // the library already are. "OpenDJ" rather than "opendj" so these sit
+    // beside settings.json instead of in a second folder differing from it
+    // only in case; scripts/get-presets.ps1 installs here.
+    add (juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+            .getChildFile ("OpenDJ").getChildFile (name));
+   #endif
+
     // Beside the executable while developing, so a freshly built binary finds
     // the mappings in the source tree, and under the prefix once installed,
     // where /usr/local/bin/opendj must reach /usr/local/share/opendj/mappings.
