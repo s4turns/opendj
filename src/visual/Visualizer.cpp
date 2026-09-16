@@ -248,14 +248,24 @@ private:
                               rows + (size_t) (top + 1) * rowBytes,
                               rows + (size_t) bottom * rowBytes);
 
-        publishFrame();
+        const auto published = publishFrame();
         owner.framesRendered.fetch_add (1, std::memory_order_relaxed);
 
+        // The frame that was just drawn is in frames[published], not in
+        // scratch: publishing swaps the two, so scratch comes back holding
+        // whatever that slot gave up, which is the frame from two renders ago.
+        // Reading the slot here without the lock is safe for the same reason a
+        // reader's copy is -- this thread does not write it again until two
+        // frames from now, by which time any reader has let go.
         if (owner.frameSink != nullptr)
-            owner.frameSink (scratch.data(), (int) scratch.size());
+            owner.frameSink (frames[(size_t) published].data(),
+                             (int) frames[(size_t) published].size());
     }
 
-    void publishFrame()
+    /** Hands the finished frame to the readers, and says which of the two
+        buffers it landed in, since the caller has one more thing to do with
+        it and scratch is no longer where it is. */
+    int publishFrame()
     {
         // Two buffers and an index rather than one buffer and a longer lock:
         // the swap is what a reader waits on, and it is a pointer's worth of
@@ -274,6 +284,8 @@ private:
 
         writeFrame = 1 - target;
         scratch.resize ((size_t) settings.width * settings.height * 3);
+
+        return target;
     }
 
     //==========================================================================

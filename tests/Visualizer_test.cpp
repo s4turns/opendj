@@ -186,6 +186,53 @@ TEST_CASE ("every finished frame reaches the sink whole", "[visual][gpu]")
     REQUIRE (framesSeen.load() == visualizer.getFramesRendered());
 }
 
+TEST_CASE ("the sink is given the frame that was just drawn", "[visual][gpu]")
+{
+    Visualizer visualizer;
+    const auto settings = smallSettings();
+
+    // The sink and copyLatestFrame are two ways out of the same pair of
+    // buffers, and they have to agree: what was pushed is what a reader asking
+    // straight afterwards gets. They came apart once, because the push read
+    // the scratch buffer after publishing had already swapped it away, so a
+    // broadcast ran two frames behind the panel and opened on two black ones.
+    // Nothing else here would have caught it: the buffer it pushed instead is
+    // a real frame of the right size, so the count, the sizes and the
+    // brightness all still looked exactly right.
+    std::atomic<int> compared { 0 };
+    std::atomic<int> mismatched { 0 };
+
+    visualizer.setFrameSink ([&] (const unsigned char* rgb, int numBytes)
+    {
+        const std::vector<unsigned char> pushed (rgb, rgb + numBytes);
+        std::vector<unsigned char> latest;
+
+        if (visualizer.copyLatestFrame (latest) && latest != pushed)
+            ++mismatched;
+
+        ++compared;
+    });
+
+    if (! startOrSkip (visualizer, settings))
+        return;
+
+    juce::AudioBuffer<float> block (2, 512);
+    double phase = 0.0;
+
+    for (int i = 0; i < 40; ++i)
+    {
+        fillWithTone (block, phase);
+        visualizer.write (block, block.getNumSamples());
+        juce::Thread::sleep (10);
+    }
+
+    REQUIRE (waitFor ([&] { return compared.load() >= 10; }));
+    visualizer.stop();
+
+    REQUIRE (compared.load() > 0);
+    REQUIRE (mismatched.load() == 0);
+}
+
 TEST_CASE ("a width that does not divide by four still comes back whole", "[visual][gpu]")
 {
     Visualizer visualizer;
