@@ -8,6 +8,7 @@
 
 #include <atomic>
 #include <cmath>
+#include <cstdlib>
 #include <functional>
 #include <numeric>
 
@@ -183,6 +184,77 @@ TEST_CASE ("every finished frame reaches the sink whole", "[visual][gpu]")
     // pushed, or pushed twice, is exactly the bug a broadcast would show as
     // a stutter.
     REQUIRE (framesSeen.load() == visualizer.getFramesRendered());
+}
+
+TEST_CASE ("a width that does not divide by four still comes back whole", "[visual][gpu]")
+{
+    Visualizer visualizer;
+
+    // 854x480, the 480p size both YouTube and Twitch list, and the one that
+    // exposed this: 854 pixels is 2562 bytes a row, and OpenGL pads every row
+    // of a read to four bytes unless told otherwise, so each row landed two
+    // bytes further along than the last. The picture sheared progressively
+    // and the colour channels slid out of order down it. Sizes that divide by
+    // four, 1280 and 1920 and the 320 every other test here uses, hide it
+    // completely.
+    VisualizerSettings settings;
+    settings.width = 854;
+    settings.height = 480;
+    settings.fps = 30;
+
+    if (! startOrSkip (visualizer, settings))
+        return;
+
+    juce::AudioBuffer<float> block (2, 512);
+    double phase = 0.0;
+
+    for (int i = 0; i < 40; ++i)
+    {
+        fillWithTone (block, phase);
+        visualizer.write (block, block.getNumSamples());
+        juce::Thread::sleep (10);
+    }
+
+    REQUIRE (waitFor ([&] { return visualizer.getFramesRendered() >= 5; }));
+
+    std::vector<unsigned char> frame;
+    REQUIRE (visualizer.copyLatestFrame (frame));
+    REQUIRE (frame.size() == (size_t) settings.width * settings.height * 3);
+
+    // Shearing shows up as rows that do not resemble the row above them.
+    // Real visuals are smooth over a couple of pixels vertically, whatever
+    // the preset; a row offset by two bytes against its neighbour puts a
+    // different colour channel in every position and the difference jumps.
+    // Measured against the middle of the frame, where there is always
+    // something drawn, and skipping frames that are simply dark.
+    const auto rowBytes = (size_t) settings.width * 3;
+    long long neighbourDifference = 0;
+    long long total = 0;
+
+    for (int y = settings.height / 4; y < settings.height * 3 / 4; ++y)
+    {
+        const auto* row = frame.data() + (size_t) y * rowBytes;
+        const auto* previous = row - rowBytes;
+
+        for (size_t i = 0; i < rowBytes; ++i)
+        {
+            neighbourDifference += std::abs ((int) row[i] - (int) previous[i]);
+            total += row[i];
+        }
+    }
+
+    INFO ("row-to-row difference " << neighbourDifference << " over total " << total);
+
+    if (total == 0)
+    {
+        WARN ("The frame was black, so nothing could be told from it.");
+        return;
+    }
+
+    // Vertically adjacent rows of a real picture differ by a small fraction
+    // of their own brightness. Sheared rows differ by about as much as they
+    // are bright. Half is far above the one and far below the other.
+    REQUIRE (neighbourDifference < total / 2);
 }
 
 TEST_CASE ("audio the render thread could not take is counted, not lost quietly", "[visual][gpu]")

@@ -42,6 +42,15 @@ namespace
         state.micTalkover = true;
         state.micRouting = MicInput::Routing::recordingOnly;
 
+        state.rtmp.server = "rtmp://live.twitch.tv/app";
+        state.rtmp.streamKey = "live_123_abc";
+        state.rtmp.streamTitle = "Friday set";
+        state.rtmp.videoWidth = 1920;
+        state.rtmp.videoHeight = 1080;
+        state.rtmp.videoBitrateKbps = 4500;
+        state.rtmp.audioBitrateKbps = 128;
+        state.rtmp.fps = 25;
+
         for (int slot = 0; slot < Sampler::numSlots; ++slot)
         {
             state.samplerFiles[(size_t) slot] = "/music/stab" + juce::String (slot) + ".wav";
@@ -69,6 +78,20 @@ namespace
         REQUIRE_THAT (a.micGain, WithinAbs (b.micGain, 1.0e-4f));
         REQUIRE (a.micTalkover == b.micTalkover);
         REQUIRE (a.micRouting == b.micRouting);
+
+        REQUIRE (a.rtmp.server == b.rtmp.server);
+        REQUIRE (a.rtmp.streamKey == b.rtmp.streamKey);
+        REQUIRE (a.rtmp.streamTitle == b.rtmp.streamTitle);
+        REQUIRE (a.rtmp.videoWidth == b.rtmp.videoWidth);
+        REQUIRE (a.rtmp.videoHeight == b.rtmp.videoHeight);
+        REQUIRE (a.rtmp.videoBitrateKbps == b.rtmp.videoBitrateKbps);
+        REQUIRE (a.rtmp.audioBitrateKbps == b.rtmp.audioBitrateKbps);
+        REQUIRE (a.rtmp.fps == b.rtmp.fps);
+
+        // Never saved: it is decided at the moment of going live from
+        // whether the visuals are running, and a stale yes would put a
+        // black picture on a stream started with them off.
+        REQUIRE_FALSE (a.rtmp.liveVideo);
 
         for (size_t slot = 0; slot < Sampler::numSlots; ++slot)
             REQUIRE_THAT (a.samplerGains[slot], WithinAbs (b.samplerGains[slot], 1.0e-4f));

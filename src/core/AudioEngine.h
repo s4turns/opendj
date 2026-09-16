@@ -18,6 +18,7 @@
 #include "core/SetRecorder.h"
 #include "stream/Broadcaster.h"
 #include "stream/RtmpBroadcaster.h"
+#include "visual/Visualizer.h"
 
 #include <array>
 #include <atomic>
@@ -232,6 +233,12 @@ public:
         Twitch, through an ffmpeg subprocess. */
     RtmpBroadcaster& getRtmpBroadcaster() noexcept { return rtmpBroadcaster; }
 
+    /** Draws MilkDrop visuals from that same master output. Its frames go
+        to the RTMP broadcast by themselves, wired up here once, so a
+        broadcast started with live video gets them without the interface
+        having to know either end. */
+    Visualizer& getVisualizer() noexcept { return visualizer; }
+
     /** Starts recording at the open device's sample rate. Returns the file, or
         an invalid file with `error` filled in. */
     juce::File startRecording (juce::String& error);
@@ -282,6 +289,7 @@ private:
     SetRecorder recorder;
     Broadcaster broadcaster;
     RtmpBroadcaster rtmpBroadcaster;
+    Visualizer visualizer;
 
     std::array<std::atomic<double>, numDecks> echoBeats {};
 

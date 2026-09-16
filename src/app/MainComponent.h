@@ -24,6 +24,7 @@
 #include "app/Settings.h"
 #include "ui/SamplerComponent.h"
 #include "ui/MicComponent.h"
+#include "ui/VisualizerComponent.h"
 
 #include <array>
 #include <memory>
@@ -94,9 +95,23 @@ private:
     void toggleRtmpBroadcast();
     void showRtmpBroadcastSettings();
 
+    /** Starts the visuals and opens their window, or stops them. Closing
+        the window on its own leaves them running, since a broadcast may be
+        carrying them. */
+    void toggleVisuals();
+    void showVisualsWindow();
+
+    /** Restarts running visuals at the broadcast's size if that changed. */
+    void applyVisualSettings();
+    VisualizerSettings visualSettingsForBroadcast() const;
+    juce::Array<juce::File> findPresetFolders() const;
+
     void loadOntoDeck (const juce::File& file, int deckIndex);
-    /** Every folder that may hold controller mappings, in precedence order. */
-    juce::Array<juce::File> findMappingsFolders() const;
+    /** Every folder that may hold a kind of data file -- "mappings", or
+        "presets" for the visualiser -- in precedence order: the user's own
+        under their data home, then beside the executable while developing,
+        then under the prefix once installed. */
+    juce::Array<juce::File> findDataFolders (const juce::String& name) const;
 
     // Declared before the engine so they outlive it: its loader threads use
     // the library as their analysis cache right up until they are joined.
@@ -135,6 +150,13 @@ private:
     juce::TextButton recordButton { "Record" };
     juce::TextButton streamButton { "Stream" };
     juce::TextButton rtmpButton { "RTMP" };
+    juce::TextButton visualsButton { "Visuals" };
+
+    /** A window of its own rather than a panel in this one, because a
+        projector on a second screen is where the visuals belong, and the
+        main window's layout is spoken for. */
+    class VisualsWindow;
+    std::unique_ptr<VisualsWindow> visualsWindow;
     juce::Label statusLabel;
     juce::String startupError;
 

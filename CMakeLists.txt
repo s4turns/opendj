@@ -200,7 +200,8 @@ target_sources(OpenDJ PRIVATE
     src/ui/WaveformComponent.cpp
     src/ui/MixerComponent.cpp
     src/ui/SamplerComponent.cpp
-    src/ui/MicComponent.cpp)
+    src/ui/MicComponent.cpp
+    src/ui/VisualizerComponent.cpp)
 
 target_include_directories(OpenDJ PRIVATE src)
 

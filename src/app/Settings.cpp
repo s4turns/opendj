@@ -223,6 +223,7 @@ juce::var SessionState::toVar() const
     rtmpServer->setProperty ("video_height", rtmp.videoHeight);
     rtmpServer->setProperty ("video_bitrate_kbps", rtmp.videoBitrateKbps);
     rtmpServer->setProperty ("audio_bitrate_kbps", rtmp.audioBitrateKbps);
+    rtmpServer->setProperty ("fps", rtmp.fps);
     root->setProperty ("rtmp", juce::var (rtmpServer));
 
     root->setProperty ("sampler_gain", samplerGain);
@@ -311,6 +312,7 @@ SessionState SessionState::fromVar (const juce::var& source)
         r.videoHeight = (int) number (rtmpServer, "video_height", r.videoHeight, 90.0, 2160.0);
         r.videoBitrateKbps = (int) number (rtmpServer, "video_bitrate_kbps", r.videoBitrateKbps, 200.0, 20000.0);
         r.audioBitrateKbps = (int) number (rtmpServer, "audio_bitrate_kbps", r.audioBitrateKbps, 64.0, 320.0);
+        r.fps = (int) number (rtmpServer, "fps", r.fps, 1.0, 60.0);
     }
 
     state.samplerGain = (float) number (source, "sampler_gain", state.samplerGain, 0.0, 1.0);

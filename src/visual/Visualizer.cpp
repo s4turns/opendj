@@ -334,6 +334,16 @@ private:
             return false;
         }
 
+        // Rows come back tightly packed. OpenGL's default is to pad every row
+        // of a read to a multiple of four bytes, and three bytes a pixel means
+        // that only matches a tightly packed frame when the width happens to
+        // divide by four. 1280 and 1920 do, and so does the 320 the tests use,
+        // which is exactly why this was invisible until a broadcast was set to
+        // 854 wide: every row after the first landed two bytes further along
+        // than it should, shearing the picture and speckling it with the
+        // colour channels sliding out of order.
+        glPixelStorei (GL_PACK_ALIGNMENT, 1);
+
         return createFramebuffer (error);
     }
 
@@ -418,14 +428,12 @@ private:
         projectm_playlist_set_preset_switched_event_callback (playlist, presetSwitched, this);
         projectm_playlist_set_shuffle (playlist, true);
 
-        // An empty or missing folder is deliberately not an error: projectM
-        // has an idle preset built in, and drawing that is far better than
-        // refusing to show anything because nobody has downloaded a preset
-        // pack yet.
-        if (settings.presetFolder.isDirectory())
-            projectm_playlist_add_path (playlist,
-                                        settings.presetFolder.getFullPathName().toRawUTF8(),
-                                        true, false);
+        // No presets anywhere is deliberately not an error: projectM has an
+        // idle preset built in, and drawing that is far better than refusing
+        // to show anything because nobody has downloaded a pack yet.
+        for (const auto& folder : settings.presetFolders)
+            if (folder.isDirectory())
+                projectm_playlist_add_path (playlist, folder.getFullPathName().toRawUTF8(), true, false);
 
         if (projectm_playlist_size (playlist) > 0)
             projectm_playlist_play_next (playlist, true);

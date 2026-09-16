@@ -51,6 +51,14 @@ AudioEngine::AudioEngine()
         decks[(size_t) i] = std::make_unique<Deck> (i, formatManager);
         echoBeats[(size_t) i].store (1.0, std::memory_order_relaxed);
     }
+
+    // Every frame the visualiser finishes is offered to the broadcast, which
+    // ignores it unless it is running with live video. This is the one place
+    // the two meet, so neither has to know the other exists.
+    visualizer.setFrameSink ([this] (const unsigned char* rgb, int numBytes)
+    {
+        rtmpBroadcaster.pushVideoFrame (rgb, numBytes);
+    });
 }
 
 int AudioEngine::preferenceForDeviceType (const juce::String& typeName)
@@ -105,6 +113,7 @@ void AudioEngine::stop()
 
     broadcaster.stop();
     rtmpBroadcaster.stop();
+    visualizer.stop();
 }
 
 juce::String AudioEngine::initialise (const juce::StringArray& preferredDeviceNames,
@@ -686,6 +695,10 @@ void AudioEngine::renderNextBlock (float* const* outputs, int numOutputChannels,
     // case, and exactly as cheap as the other two: an atomic load and a
     // comparison against nullptr.
     rtmpBroadcaster.write (tap, numSamples);
+
+    // And once more for the visuals, which want to see what the room hears
+    // for the same reason a listener does. Same bargain, same cost when off.
+    visualizer.write (tap, numSamples);
 
     routeOutputs (masterView, cueView, outputs, numOutputChannels, numSamples,
                   outputMode.load (std::memory_order_relaxed));

@@ -33,10 +33,10 @@ struct VisualizerSettings
     /** How readily projectM decides a beat happened. Its own default is 1. */
     float beatSensitivity = 1.0f;
 
-    /** Where the `.milk` presets are. An empty or absent folder is not an
-        error: projectM has an idle preset built in, and drawing that beats
-        refusing to start. */
-    juce::File presetFolder;
+    /** Where the `.milk` presets are, searched recursively. Nothing found
+        anywhere is not an error: projectM has an idle preset built in, and
+        drawing that beats refusing to start. */
+    juce::Array<juce::File> presetFolders;
 };
 
 /** Draws MilkDrop visuals from what the master output is doing, for the panel

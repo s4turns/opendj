@@ -1,8 +1,8 @@
 # OpenDJ roadmap
 
 Where the project is and what to pick up next. Anything ticked has tests or a verified manual
-check behind it, not just code that compiles. The suite is **260 tests** on Linux and 259 on
-Windows, where the stderr test has no pipe to fill; anything touching
+check behind it, not just code that compiles. The suite is **267 tests** on Linux and 259 on
+Windows, which has neither a pipe for the stderr test to fill nor the visualiser; anything touching
 audio is tested by measuring the output, not by checking that the code ran.
 
 | Symbol | Meaning |
@@ -48,7 +48,8 @@ that was listed after it except video.
 | Settings that survive a restart | ✅ | `src/app/Settings.*` |
 | Broadcasting to Icecast | ✅ | `src/stream/`, verified against a real Icecast 2.4.4 |
 | Broadcasting to YouTube and Twitch | 🚧 | `src/stream/RtmpBroadcaster.*`, `RtmpConnection.*`. The loopback test against ffmpeg's own listener passes 20 runs in 20 on Linux and 5 in 5 on Windows; never tried against a real platform |
-| Video | ⬜ | Very large. Probably a separate project |
+| MilkDrop visuals | 🚧 | `src/visual/Visualizer.*`, `src/ui/VisualizerComponent.*`. projectM v4 on an offscreen EGL context, in a window of its own and in the RTMP broadcast. Linux only |
+| Video | ⬜ | Playing video files, as opposed to drawing visuals. Very large. Probably a separate project |
 
 ## What to pick up next
 
@@ -56,7 +57,8 @@ that was listed after it except video.
 | --- | --- |
 | DJ-202 pad modes on the hardware, then the rest | Loop, roll and sampler modes are mapped from Mixxx's DJ-202 script and need pressing on the controller. Cue loop, pitch play, slicer, the parameter buttons and the TR-S sequencer are not mapped |
 | Arch and macOS | `scripts/build.sh` knows the Arch packages but has never been run there. macOS has never been tried |
-| Video | Unstarted, and probably its own project |
+| Video | Playing video files is unstarted, and probably its own project. The visualiser is separate and built |
+| The visualiser on Windows and macOS | The offscreen context is EGL, so Linux only. Windows needs the WGL equivalent and a second inheritable pipe for `CreateProcess`, which is also what live video in the broadcast waits on there |
 | RTMP against a real YouTube or Twitch account | Verified so far only against ffmpeg's own loopback RTMP listener; the handshake has never reached an actual platform |
 
 ## Compared with VirtualDJ
@@ -428,6 +430,43 @@ itself live.
 Also unverified: no real YouTube or Twitch account was available while writing this, so the
 handshake has only been checked against ffmpeg's own RTMP listener on loopback, never against an
 actual platform. The protocol is the same either way, but that is a claim, not a measurement.
+
+## MilkDrop visuals
+
+projectM v4 draws the MilkDrop presets from what the master output is doing, into the window and
+into the broadcast's video track. **Not Butterchurn**, which is the obvious name to reach for and
+the wrong one here: Butterchurn is JavaScript and WebGL, so putting it in a C++ application means
+embedding a browser engine, offscreen rendering and a frame-capture path, to run the same `.milk`
+presets that projectM already runs natively. LGPL 2.1 or later, so licence compatible.
+
+| Decision | Why |
+| --- | --- |
+| The OpenGL context comes from surfaceless EGL and belongs to no window | The obvious alternative, a `juce::OpenGLContext` on the panel, ties the visuals to the panel being open: close it and the broadcast's video track stops mid-set. A context of its own also lets the tests render real frames and measure real pixels on a machine with no display |
+| The panel is a picture of the newest frame, not a second GL context | The frame is read back off the GPU for the broadcast anyway, so drawing it as an image costs nothing extra and there is one renderer rather than two |
+| The audio thread only copies into a lock free FIFO | Same rule as everything else that taps the master. `projectm_pcm_add_float` is a library call with no realtime promises, so the render thread makes it, not the audio thread |
+| Frames are turned right way up in the visualiser | OpenGL hands rows back bottom first and both consumers want the opposite. Doing it once here beats doing it in the panel and again in an ffmpeg `vflip` nobody would think to look at |
+| Presets are found the way mappings are, plus `/usr/share/projectM/presets` | A distribution's own preset package is then used without copying anything. None found anywhere is not an error: projectM has an idle preset built in |
+
+**Frames read back sheared at 854 wide.** OpenGL pads every row of a `glReadPixels` to four bytes
+unless told otherwise, and three bytes a pixel means that only matches a tightly packed frame when
+the width divides by four. 1280, 1920 and the 320 the tests used all do, so this was invisible
+until a broadcast was set to 480p: every row landed two bytes further along than the one above,
+shearing the picture and sliding the colour channels out of order down it. One `glPixelStorei`
+call, and a test at 854 wide that measures how much each row differs from the row above it, which
+fails without the fix and passes with it.
+
+Six tests, one of which is the shear check above and one of which measures that a frame is not
+simply black, plus a loopback test in `RtmpBroadcast_test.cpp` that pushes moving frames at the
+broadcast and checks what ffmpeg's receiver wrote: H.264 at the right size, the expected frame
+count, and two frames from different points in the file that actually differ.
+
+Verified end to end through the application itself at 854x480 and 25 fps: the receiver recorded
+500 frames in 20 seconds, exactly 25 a second, and the frames carry real moving content rather
+than the black the feeder starts with.
+
+**Linux only.** The offscreen context is EGL. Windows needs the WGL equivalent, and separately
+needs a second inheritable pipe for `CreateProcess` before live video can reach a broadcast there;
+it refuses the broadcast outright rather than failing somewhere inside ffmpeg.
 
 ## Picking a device worth playing on
 

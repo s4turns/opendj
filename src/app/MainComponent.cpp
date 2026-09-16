@@ -63,7 +63,7 @@ MainComponent::MainComponent()
         });
     };
 
-    for (const auto& folder : findMappingsFolders())
+    for (const auto& folder : findDataFolders ("mappings"))
     {
         const auto loaded = midi.loadMappingsFromFolder (folder);
 
@@ -198,6 +198,10 @@ MainComponent::MainComponent()
     rtmpButton.onClick = [this] { toggleRtmpBroadcast(); };
     addAndMakeVisible (rtmpButton);
 
+    visualsButton.setTooltip ("MilkDrop visuals, in a window of their own and in the RTMP broadcast");
+    visualsButton.onClick = [this] { toggleVisuals(); };
+    addAndMakeVisible (visualsButton);
+
     midiSettingsButton.onClick = [this] { showMidiSettings(); };
     addAndMakeVisible (midiSettingsButton);
 
@@ -224,6 +228,10 @@ MainComponent::~MainComponent()
     // Everything read here is an atomic or message thread state, so a running
     // audio thread does not make it unsafe.
     saveSettings();
+
+    // Before the engine stops: the window's panel reads the visualiser on a
+    // timer, and the visualiser is the engine's.
+    visualsWindow.reset();
 
     engine.stop();
 
@@ -265,7 +273,7 @@ void MainComponent::loadOntoDeck (const juce::File& file, int deckIndex)
         deckViews[(size_t) deckIndex]->load (file);
 }
 
-juce::Array<juce::File> MainComponent::findMappingsFolders() const
+juce::Array<juce::File> MainComponent::findDataFolders (const juce::String& name) const
 {
     juce::Array<juce::File> folders;
 
@@ -275,7 +283,7 @@ juce::Array<juce::File> MainComponent::findMappingsFolders() const
             folders.add (folder);
     };
 
-    const auto dataFolder = [] (const juce::File& root) { return root.getChildFile ("opendj/mappings"); };
+    const auto dataFolder = [&name] (const juce::File& root) { return root.getChildFile ("opendj/" + name); };
 
    #if JUCE_LINUX || JUCE_BSD
     // The user's own mappings come first, so one written here replaces a
@@ -297,7 +305,7 @@ juce::Array<juce::File> MainComponent::findMappingsFolders() const
          directory.exists() && directory != directory.getParentDirectory();
          directory = directory.getParentDirectory())
     {
-        add (directory.getChildFile ("mappings"));
+        add (directory.getChildFile (name));
         add (dataFolder (directory.getChildFile ("share")));
     }
 
@@ -439,6 +447,13 @@ void MainComponent::timerCallback()
 
     if (const auto rtmpStatus = rtmpBroadcaster.getStatusMessage(); rtmpStatus.isNotEmpty())
         status << "  |  " << rtmpStatus;
+
+    auto& visualizer = engine.getVisualizer();
+    visualsButton.setColour (juce::TextButton::buttonColourId,
+                             visualizer.isRunning() ? juce::Colour (0xff8e44ad) : juce::Colour (0xff2c2c34));
+
+    if (const auto visualsStatus = visualizer.getStatusMessage(); visualsStatus.isNotEmpty())
+        status << "  |  " << visualsStatus;
 
     statusLabel.setText (status, juce::dontSendNotification);
 }
@@ -932,9 +947,29 @@ void MainComponent::showRtmpBroadcastSettings()
             streamKey.setPasswordCharacter ((juce::juce_wchar) 0x2022);
             addField (streamTitle, "Title", settings.streamTitle);
 
+            // The sizes and rates YouTube's and Twitch's own guidelines list,
+            // and nothing in between: a person picking from a menu wants the
+            // handful that platforms actually recommend, not a number to
+            // type and get wrong.
+            addChoice (resolution, "Resolution",
+                       { "640 x 360", "854 x 480", "1280 x 720", "1920 x 1080" },
+                       juce::String (settings.videoWidth) + " x " + juce::String (settings.videoHeight));
+            addChoice (bitrate, "Video bitrate",
+                       { "1000 kbps", "1500 kbps", "2500 kbps", "4500 kbps", "6000 kbps" },
+                       juce::String (settings.videoBitrateKbps) + " kbps");
+
+            // 24 for anyone matching video footage, 25 for PAL, 30 and 60 as
+            // the two both platforms list. 60 costs the visualiser twice the
+            // GPU work and the encoder twice the frames, which is worth
+            // saying here rather than in a manual nobody opens.
+            addChoice (fps, "Frame rate",
+                       { "24 fps", "25 fps", "30 fps", "60 fps" },
+                       juce::String (settings.fps) + " fps");
+            fps.setTooltip ("60 asks about twice as much of the GPU and the encoder as 30 does.");
+
             note.setText ("The stream key is kept in clear text in your settings file, the same way "
-                          "the Icecast password is. The video is a static frame with this title on "
-                          "it, not a live picture: see ROADMAP.md if that needs to grow into more.",
+                          "the Icecast password is. With the visuals running, the picture is what "
+                          "they draw; otherwise it is a still frame with this title on it.",
                           juce::dontSendNotification);
             note.setColour (juce::Label::textColourId, juce::Colours::grey);
             note.setFont (juce::FontOptions (12.0f));
@@ -950,17 +985,45 @@ void MainComponent::showRtmpBroadcastSettings()
             addAndMakeVisible (goLive);
         }
 
-        void addField (juce::TextEditor& editor, const juce::String& labelText, const juce::String& value)
+        juce::Label* addLabel (const juce::String& text)
         {
             auto* label = labels.add (new juce::Label());
-            label->setText (labelText, juce::dontSendNotification);
+            label->setText (text, juce::dontSendNotification);
             label->setColour (juce::Label::textColourId, juce::Colours::white);
             label->setFont (juce::FontOptions (12.0f));
             addAndMakeVisible (*label);
+            return label;
+        }
 
+        void addField (juce::TextEditor& editor, const juce::String& labelText, const juce::String& value)
+        {
+            addLabel (labelText);
             editor.setText (value, juce::dontSendNotification);
             editor.setColour (juce::TextEditor::backgroundColourId, juce::Colour (0xff101014));
             addAndMakeVisible (editor);
+            rows.add (&editor);
+        }
+
+        void addChoice (juce::ComboBox& box, const juce::String& labelText,
+                        const juce::StringArray& choices, const juce::String& current)
+        {
+            addLabel (labelText);
+            box.addItemList (choices, 1);
+
+            // A saved value that is not on the list, from a hand-edited
+            // settings file or an older build, is kept rather than snapped
+            // to the nearest: it is shown as its own entry so what is saved
+            // and what is on screen agree.
+            if (const auto index = choices.indexOf (current); index >= 0)
+                box.setSelectedItemIndex (index, juce::dontSendNotification);
+            else
+            {
+                box.addItem (current, choices.size() + 1);
+                box.setSelectedItemIndex (choices.size(), juce::dontSendNotification);
+            }
+
+            addAndMakeVisible (box);
+            rows.add (&box);
         }
 
         RtmpSettings collect() const
@@ -969,6 +1032,20 @@ void MainComponent::showRtmpBroadcastSettings()
             result.server = server.getText().trim();
             result.streamKey = streamKey.getText().trim();
             result.streamTitle = streamTitle.getText();
+
+            // "1280 x 720" and "2500 kbps" read back as their numbers. The
+            // text is the source of truth so a kept-as-is custom entry
+            // (see addChoice) round-trips exactly.
+            const auto size = juce::StringArray::fromTokens (resolution.getText(), "x", "");
+
+            if (size.size() == 2)
+            {
+                result.videoWidth = juce::jmax (160, size[0].trim().getIntValue());
+                result.videoHeight = juce::jmax (90, size[1].trim().getIntValue());
+            }
+
+            result.videoBitrateKbps = juce::jmax (200, bitrate.getText().getIntValue());
+            result.fps = juce::jlimit (1, 60, fps.getText().getIntValue());
             return result;
         }
 
@@ -979,6 +1056,12 @@ void MainComponent::showRtmpBroadcastSettings()
 
             auto* device = engine.getDeviceManager().getCurrentAudioDevice();
             const auto rate = device != nullptr ? device->getCurrentSampleRate() : 48000.0;
+
+            // The picture is the visuals if they are on, and the still card
+            // if not. Decided here, at the moment of going live, from what
+            // is actually running rather than from a saved preference that
+            // could be stale.
+            settings.liveVideo = engine.getVisualizer().isRunning();
 
             juce::String error;
 
@@ -997,13 +1080,11 @@ void MainComponent::showRtmpBroadcastSettings()
         {
             auto area = getLocalBounds().reduced (10);
 
-            juce::TextEditor* editors[] = { &server, &streamKey, &streamTitle };
-
-            for (int i = 0; i < (int) std::size (editors); ++i)
+            for (int i = 0; i < rows.size(); ++i)
             {
                 auto row = area.removeFromTop (26);
                 labels[i]->setBounds (row.removeFromLeft (96));
-                editors[i]->setBounds (row);
+                rows[i]->setBounds (row);
                 area.removeFromTop (4);
             }
 
@@ -1021,7 +1102,9 @@ void MainComponent::showRtmpBroadcastSettings()
         std::function<void (RtmpSettings)> changed;
 
         juce::OwnedArray<juce::Label> labels;
+        juce::Array<juce::Component*> rows;
         juce::TextEditor server, streamKey, streamTitle;
+        juce::ComboBox resolution, bitrate, fps;
         juce::Label note, status;
         juce::TextButton goLive;
     };
@@ -1030,8 +1113,9 @@ void MainComponent::showRtmpBroadcastSettings()
                                                 [this] (RtmpSettings updated)
                                                 {
                                                     settings.rtmp = std::move (updated);
+                                                    applyVisualSettings();
                                                 });
-    content->setSize (460, 260);
+    content->setSize (460, 300);
 
     juce::DialogWindow::LaunchOptions options;
     options.content.setOwned (content.release());
@@ -1041,6 +1125,115 @@ void MainComponent::showRtmpBroadcastSettings()
     options.useNativeTitleBar = true;
     options.resizable = false;
     options.launchAsync();
+}
+
+/** Holds the visuals panel. Closing it hides it rather than destroying it:
+    the visuals may be on their way to a broadcast, and a window someone
+    closed to get it out of the way is not a request to take the stream's
+    picture down. The Visuals button is what stops them. */
+class MainComponent::VisualsWindow final : public juce::DocumentWindow
+{
+public:
+    explicit VisualsWindow (Visualizer& visualizer)
+        : juce::DocumentWindow ("OpenDJ visuals", juce::Colours::black,
+                                juce::DocumentWindow::allButtons)
+    {
+        setUsingNativeTitleBar (true);
+        setContentOwned (new VisualizerComponent (visualizer), false);
+        setResizable (true, false);
+        setResizeLimits (320, 180, 7680, 4320);
+        centreWithSize (960, 540);
+    }
+
+    void closeButtonPressed() override { setVisible (false); }
+};
+
+juce::Array<juce::File> MainComponent::findPresetFolders() const
+{
+    auto folders = findDataFolders ("presets");
+
+   #if JUCE_LINUX || JUCE_BSD
+    // Where a distribution's own projectM preset pack goes, so one installed
+    // from the package manager is found without being copied anywhere.
+    auto dataDirs = juce::SystemStats::getEnvironmentVariable ("XDG_DATA_DIRS", {});
+
+    if (dataDirs.isEmpty())
+        dataDirs = "/usr/local/share:/usr/share";
+
+    for (const auto& directory : juce::StringArray::fromTokens (dataDirs, ":", {}))
+        if (const auto folder = juce::File (directory).getChildFile ("projectM/presets");
+            directory.isNotEmpty() && folder.isDirectory() && ! folders.contains (folder))
+            folders.add (folder);
+   #endif
+
+    return folders;
+}
+
+void MainComponent::toggleVisuals()
+{
+    auto& visualizer = engine.getVisualizer();
+
+    if (visualizer.isRunning())
+    {
+        visualizer.stop();
+        visualsWindow.reset();
+        statusLabel.setText ("Visuals off.", juce::dontSendNotification);
+        return;
+    }
+
+    juce::String error;
+
+    if (! visualizer.start (visualSettingsForBroadcast(), error))
+    {
+        statusLabel.setText (error, juce::dontSendNotification);
+        return;
+    }
+
+    showVisualsWindow();
+}
+
+VisualizerSettings MainComponent::visualSettingsForBroadcast() const
+{
+    // Drawn at the broadcast's size and rate, whether or not one is running,
+    // so that starting one later finds frames already the right shape and
+    // the window shows what a viewer would get.
+    VisualizerSettings visualSettings;
+    visualSettings.width = settings.rtmp.videoWidth;
+    visualSettings.height = settings.rtmp.videoHeight;
+    visualSettings.fps = settings.rtmp.fps;
+    visualSettings.presetFolders = findPresetFolders();
+    return visualSettings;
+}
+
+void MainComponent::applyVisualSettings()
+{
+    auto& visualizer = engine.getVisualizer();
+
+    if (! visualizer.isRunning())
+        return;
+
+    if (visualizer.getFrameWidth() == settings.rtmp.videoWidth
+        && visualizer.getFrameHeight() == settings.rtmp.videoHeight)
+        return;
+
+    // The broadcast's size changed under running visuals. Frames of the old
+    // size would be refused by the feeder, and the stream would show the
+    // black it started with for as long as they kept coming, so the visuals
+    // are restarted at the new size, which costs a moment's black in the
+    // window and nothing else.
+    juce::String error;
+
+    if (! visualizer.start (visualSettingsForBroadcast(), error))
+        statusLabel.setText (error, juce::dontSendNotification);
+}
+
+void MainComponent::showVisualsWindow()
+{
+    if (visualsWindow == nullptr)
+        visualsWindow = std::make_unique<VisualsWindow> (engine.getVisualizer());
+
+    visualsWindow->setVisible (true);
+    visualsWindow->toFront (true);
 }
 
 void MainComponent::showMidiSettings()
@@ -1072,6 +1265,8 @@ void MainComponent::resized()
     streamButton.setBounds (footer.removeFromLeft (110));
     footer.removeFromLeft (6);
     rtmpButton.setBounds (footer.removeFromLeft (110));
+    footer.removeFromLeft (6);
+    visualsButton.setBounds (footer.removeFromLeft (80));
     footer.removeFromLeft (6);
     midiSettingsButton.setBounds (footer.removeFromLeft (94));
     footer.removeFromLeft (12);
