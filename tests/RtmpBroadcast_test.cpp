@@ -456,6 +456,191 @@ TEST_CASE ("a broadcast reaches ffmpeg's own receiver with a video track and an 
 
 //==============================================================================
 
+/** Hidden with the same tag and for the same reasons as the test above; this
+    is its sibling with the video track coming from frames this process
+    pushes in, the way the visualiser's do, rather than from ffmpeg's own
+    colour source. Synthetic frames rather than a real `Visualizer`, on
+    purpose: the pipe, the feeder and the encoder are what this exercises,
+    and none of them should need a GPU to be proven. The visualiser's own
+    tests measure its pixels; `AudioEngine` is what joins the two.
+
+        opendj-tests "[rtmp-loopback]" */
+TEST_CASE ("live frames pushed in reach the receiver as a moving video track",
+          "[rtmp-loopback][rtmp][network][video]")
+{
+    juce::String diagnostic;
+
+    if (findCapableFfmpeg (diagnostic).isEmpty())
+    {
+        WARN (diagnostic);
+        return;
+    }
+
+    const auto port = 19000 + (int) juce::Random::getSystemRandom().nextInt (10000);
+    const auto url = "rtmp://127.0.0.1:" + juce::String (port) + "/live/test";
+
+    const auto outFile = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                             .getChildFile ("opendj-rtmp-video-test-"
+                                           + juce::String (juce::Random::getSystemRandom().nextInt())
+                                           + ".flv");
+    outFile.deleteFile();
+
+    juce::ChildProcess receiver;
+    const juce::StringArray receiverArgs { "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+                                           "-listen", "1", "-f", "flv", "-i", url,
+                                           "-c", "copy", outFile.getFullPathName() };
+    REQUIRE (receiver.start (receiverArgs));
+
+    struct StopOnExit
+    {
+        juce::ChildProcess& process;
+        ~StopOnExit() { if (process.isRunning()) process.kill(); }
+    } stopReceiver { receiver };
+
+    juce::Thread::sleep (700);
+
+    RtmpSettings settings;
+    settings.server = "rtmp://127.0.0.1:" + juce::String (port) + "/live";
+    settings.streamKey = "test";
+    settings.videoWidth = 320;
+    settings.videoHeight = 180;
+    settings.fps = 30;
+    settings.videoBitrateKbps = 400;
+    settings.audioBitrateKbps = 96;
+    settings.liveVideo = true;
+
+    RtmpBroadcaster broadcaster;
+    juce::String error;
+    const auto started = broadcaster.start (settings, 48000.0, error);
+
+    INFO (error);
+    REQUIRE (started);
+    REQUIRE (broadcaster.getState() == RtmpBroadcaster::State::live);
+
+    // Four seconds of tone and, alongside it, four seconds of frames at the
+    // broadcast's own rate: a bar that sweeps across the picture, so that a
+    // receiver getting the same frame over and over would be told apart from
+    // one getting real motion. Frames are pushed at about the right rate
+    // rather than dumped at once, since the feeder only keeps the newest and
+    // dumping them would test nothing but that.
+    const auto frameBytes = settings.videoWidth * settings.videoHeight * 3;
+    std::vector<unsigned char> frame ((size_t) frameBytes);
+    juce::AudioBuffer<float> block (2, 1600);   // one thirtieth of a second at 48 kHz
+    double phase = 0.0;
+    const int totalFrames = 4 * settings.fps;
+
+    for (int f = 0; f < totalFrames; ++f)
+    {
+        const auto barX = (f * settings.videoWidth) / totalFrames;
+
+        for (int y = 0; y < settings.videoHeight; ++y)
+            for (int x = 0; x < settings.videoWidth; ++x)
+            {
+                auto* px = frame.data() + ((size_t) y * settings.videoWidth + x) * 3;
+                const auto onBar = std::abs (x - barX) < 8;
+                px[0] = onBar ? 255 : 20;
+                px[1] = onBar ? 255 : 20;
+                px[2] = onBar ? 255 : (unsigned char) (y * 255 / settings.videoHeight);
+            }
+
+        broadcaster.pushVideoFrame (frame.data(), frameBytes);
+
+        for (int sample = 0; sample < block.getNumSamples(); ++sample)
+        {
+            const auto value = (float) std::sin (phase) * 0.5f;
+            phase += juce::MathConstants<double>::twoPi * 440.0 / 48000.0;
+            block.setSample (0, sample, value);
+            block.setSample (1, sample, value);
+        }
+
+        broadcaster.write (block, block.getNumSamples());
+        juce::Thread::sleep (1000 / settings.fps);
+    }
+
+    // Every frame is a full picture down the pipe, so bytes sent is a direct
+    // measure of frames delivered; audio is a small fraction on top.
+    const auto videoBytesExpected = (juce::int64) totalFrames * frameBytes;
+    REQUIRE (waitFor ([&]
+    {
+        return broadcaster.getBytesSent() >= videoBytesExpected * 8 / 10;
+    }, 30000));
+
+    INFO (broadcaster.getStatusMessage());
+    REQUIRE (broadcaster.getState() == RtmpBroadcaster::State::live);
+
+    // The feeder repeats a frame only when nothing new arrived in time. A
+    // loop pushing at the same rate it sends is bound to miss a few slots,
+    // and that is fine; most of them being repeats would mean it was not
+    // seeing the frames at all.
+    INFO ("repeated frames: " << broadcaster.getRepeatedFrames());
+    REQUIRE (broadcaster.getRepeatedFrames() < totalFrames / 2);
+
+    broadcaster.stop();
+    REQUIRE (receiver.waitForProcessToFinish (8000));
+    REQUIRE (outFile.existsAsFile());
+
+    // Size and rate straight from the file, and a frame count: at thirty a
+    // second for about four seconds, anything under half of that means the
+    // video clock was starving, which is the one thing the feeder exists to
+    // prevent.
+    juce::ChildProcess probe;
+    const juce::StringArray probeArgs { "ffprobe", "-v", "error", "-select_streams", "v:0",
+                                        "-count_frames", "-show_entries",
+                                        "stream=codec_name,width,height,nb_read_frames",
+                                        "-of", "csv=p=0", outFile.getFullPathName() };
+    REQUIRE (probe.start (probeArgs));
+    const auto probeOutput = probe.readAllProcessOutput().trim();
+
+    INFO (probeOutput);
+    const auto fields = juce::StringArray::fromTokens (probeOutput, ",", "");
+    REQUIRE (fields.size() >= 4);
+    REQUIRE (fields[0] == "h264");
+    REQUIRE (fields[1].getIntValue() == settings.videoWidth);
+    REQUIRE (fields[2].getIntValue() == settings.videoHeight);
+    REQUIRE (fields[3].getIntValue() >= totalFrames / 2);
+
+    // And that the picture moved: two frames from different points in the
+    // file must differ. Decoded by ffmpeg to raw RGB and read back as bytes,
+    // since `readAllProcessOutput` is text-shaped and a frame is not.
+    juce::ChildProcess decodeEarly, decodeLate;
+    const auto decode = [&] (double atSeconds, juce::ChildProcess& process)
+    {
+        const juce::StringArray args { "ffmpeg", "-v", "error", "-ss", juce::String (atSeconds),
+                                       "-i", outFile.getFullPathName(), "-frames:v", "1",
+                                       "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1" };
+        REQUIRE (process.start (args, juce::ChildProcess::wantStdOut));
+        juce::MemoryBlock bytes;
+        char buffer[65536];
+
+        for (;;)
+        {
+            const auto got = process.readProcessOutput (buffer, (int) sizeof (buffer));
+            if (got <= 0 && ! process.isRunning()) break;
+            if (got > 0) bytes.append (buffer, (size_t) got);
+        }
+
+        return bytes;
+    };
+
+    const auto first = decode (0.5, decodeEarly);
+    const auto second = decode (3.0, decodeLate);
+    REQUIRE (first.getSize() == (size_t) frameBytes);
+    REQUIRE (second.getSize() == (size_t) frameBytes);
+
+    size_t differing = 0;
+    for (size_t i = 0; i < first.getSize(); ++i)
+        if (std::abs ((int) ((const unsigned char*) first.getData())[i]
+                    - (int) ((const unsigned char*) second.getData())[i]) > 32)
+            ++differing;
+
+    INFO ("bytes differing between the two frames: " << differing);
+    REQUIRE (differing > (size_t) frameBytes / 100);
+
+    outFile.deleteFile();
+}
+
+//==============================================================================
+
 /** Against a real target, which no automated run can assume exists, let
     alone one this project has any way to reach: neither YouTube nor Twitch
     can be tested against in this repository's CI, or by the author, because

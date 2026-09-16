@@ -5,6 +5,7 @@
 
 #include "visual/Visualizer.h"
 
+#include <algorithm>
 #include <array>
 
 #if OPENDJ_HAVE_VISUALIZER
@@ -232,6 +233,19 @@ private:
                       GL_RGB, GL_UNSIGNED_BYTE, scratch.data());
 
         glBindFramebuffer (GL_FRAMEBUFFER, 0);
+
+        // OpenGL hands rows back bottom first, and everything downstream --
+        // the panel's image, ffmpeg's raw video -- wants them top first.
+        // Turned over once here rather than in each of those, which would be
+        // two places to get it wrong and one of them a `vflip` filter in a
+        // command line nobody would think to look at.
+        const auto rowBytes = (size_t) settings.width * 3;
+        auto* rows = scratch.data();
+
+        for (int top = 0, bottom = settings.height - 1; top < bottom; ++top, --bottom)
+            std::swap_ranges (rows + (size_t) top * rowBytes,
+                              rows + (size_t) (top + 1) * rowBytes,
+                              rows + (size_t) bottom * rowBytes);
 
         publishFrame();
         owner.framesRendered.fetch_add (1, std::memory_order_relaxed);

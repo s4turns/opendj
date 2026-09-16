@@ -81,6 +81,31 @@ public:
         return droppedSamples.load (std::memory_order_relaxed);
     }
 
+    /** Frames the video track had to show twice because no new one had
+        arrived in time. A few a minute is the visualiser hiccupping and is
+        invisible; a steady stream of them means it is not keeping up with
+        the rate the broadcast was asked for. */
+    juce::int64 getRepeatedFrames() const noexcept
+    {
+        return repeatedFrames.load (std::memory_order_relaxed);
+    }
+
+    //==========================================================================
+    // Any thread
+    //==========================================================================
+
+    /** Hands in the newest frame for the video track, tightly packed RGB at
+        the settings' `videoWidth` by `videoHeight`; a frame of any other
+        size is ignored, since it cannot be what ffmpeg was told to expect.
+        Copied and returned from at once, so the visualiser's render thread
+        is never held up by the network. Only the newest frame is kept: if
+        two arrive before the feeder sends one, the first is simply never
+        seen, which for a picture is the right thing.
+
+        Does nothing when the broadcast is not running with live video, so
+        the visualiser can push unconditionally. */
+    void pushVideoFrame (const unsigned char* rgb, int numBytes);
+
     //==========================================================================
     // Audio thread
     //==========================================================================
@@ -97,6 +122,15 @@ private:
         not this file's to reinvent. */
     class PcmWriter;
 
+    /** Sends the newest pushed frame down the video pipe `fps` times a
+        second of wall time, whether or not a new one has arrived, so the
+        video track's clock advances in step with the audio track's however
+        the visualiser is doing. Starts by sending black, which is also what
+        gets the connection confirmed: ffmpeg will not open its output until
+        every input has produced a packet, and this is the video input's
+        first one. */
+    class VideoFeeder;
+
     /** Reconnects with a backoff, so a dropped connection comes back on its
         own without anybody watching the screen. Same shape as
         `Broadcaster::Reconnector`, and the same reasoning: a reconnect
@@ -107,6 +141,13 @@ private:
 
     void openWriter (double sampleRate);
     void closeWriter();
+
+    void openVideoFeeder();
+    void closeVideoFeeder();
+
+    /** True once either pipe's writer has given up on ffmpeg, which is the
+        reconnector's cue. */
+    bool anyPipeHasFailed();
 
     /** Pushes a short burst of silence through the FIFO right after the
         writer opens, on whichever thread is doing the connecting rather than
@@ -135,9 +176,13 @@ private:
     std::atomic<juce::AudioFormatWriter::ThreadedWriter*> activeWriter { nullptr };
     std::mutex writerMutex;
 
+    std::unique_ptr<VideoFeeder> videoFeeder;
+    std::mutex videoFeederMutex;
+
     RtmpSettings settings;
     std::atomic<State> state { State::offline };
     std::atomic<juce::int64> droppedSamples { 0 };
+    std::atomic<juce::int64> repeatedFrames { 0 };
     std::atomic<juce::int64> startedAtMs { 0 };
 
     juce::String failureReason;

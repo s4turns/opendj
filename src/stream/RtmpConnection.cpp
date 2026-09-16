@@ -171,36 +171,66 @@ juce::StringArray buildFfmpegArguments (const RtmpSettings& settings, double sam
     // a failure out of the short tail kept for error messages.
     args.add ("-nostats");
 
-    // The video track: a plain colour with the stream title drawn on it by
-    // ffmpeg's own filters, looped forever from a single generated frame.
-    // `-re` paces it to real time; nothing else here would, since a colour
-    // source has no natural rate of its own the way the audio pipe does.
-    //
-    // Two frames a second, not one: measured directly, one frame a second
-    // combined with libx264's default lookahead meant the encoder would not
-    // emit anything at all until around ten real seconds had passed, since
-    // it waits for several frames of lookahead before the first one comes
-    // out and each frame here takes a full second to arrive. A picture that
-    // never changes does not need many frames a second, but it needs enough
-    // that the encoder is not sitting there waiting on real time for frames
-    // that carry no new information anyway.
-    juce::String videoFilter;
-    videoFilter << "color=c=0x1a1a2e:s=" << settings.videoWidth << "x" << settings.videoHeight << ":r=2";
-
-    if (const auto fontFile = titleFontFile(); canDrawTitle (fontFile))
+    if (settings.liveVideo)
     {
-        videoFilter << ",drawtext=";
-
-        if (fontFile.isNotEmpty())
-            videoFilter << "fontfile='" << fontFile << "':";
-
-        videoFilter << "text='" << sanitiseForDrawtext (settings.streamTitle) << "'"
-                    << ":fontcolor=white:fontsize=36:x=(w-text_w)/2:y=(h-text_h)/2";
+        // The video track: frames this process pushes down a second pipe, as
+        // raw RGB with no header, so the size and rate have to be declared
+        // here since there is nothing in the stream to read them from.
+        // Nothing paces this input either: `RtmpBroadcaster`'s video feeder
+        // sends exactly `fps` frames a second of wall time, repeating the
+        // last one when nothing new has been drawn, which is what keeps this
+        // track's clock and the audio track's clock from drifting apart.
+        //
+        // Descriptor 3 rather than a second use of stdin, which is taken,
+        // and rather than a named pipe on disk, which would need a path,
+        // cleanup, and a race against a stale one from a crash.
+        //
+        // The same generous queue as the audio input, for the same reason
+        // given below it: two pipe inputs each block their reader thread,
+        // and a queue that fills makes one input stall the other.
+        args.add ("-thread_queue_size"); args.add ("64");
+        args.add ("-f"); args.add ("rawvideo");
+        args.add ("-pixel_format"); args.add ("rgb24");
+        args.add ("-video_size");
+        args.add (juce::String (settings.videoWidth) + "x" + juce::String (settings.videoHeight));
+        args.add ("-framerate"); args.add (juce::String (settings.fps));
+        args.add ("-i"); args.add ("pipe:3");
     }
+    else
+    {
+        // The video track: a plain colour with the stream title drawn on it
+        // by ffmpeg's own filters, looped forever from a single generated
+        // frame. `-re` paces it to real time; nothing else here would, since
+        // a colour source has no natural rate of its own the way the audio
+        // pipe does.
+        //
+        // Two frames a second, not one: measured directly, one frame a
+        // second combined with libx264's default lookahead meant the encoder
+        // would not emit anything at all until around ten real seconds had
+        // passed, since it waits for several frames of lookahead before the
+        // first one comes out and each frame here takes a full second to
+        // arrive. A picture that never changes does not need many frames a
+        // second, but it needs enough that the encoder is not sitting there
+        // waiting on real time for frames that carry no new information
+        // anyway.
+        juce::String videoFilter;
+        videoFilter << "color=c=0x1a1a2e:s=" << settings.videoWidth << "x" << settings.videoHeight << ":r=2";
 
-    args.add ("-f"); args.add ("lavfi");
-    args.add ("-re");
-    args.add ("-i"); args.add (videoFilter);
+        if (const auto fontFile = titleFontFile(); canDrawTitle (fontFile))
+        {
+            videoFilter << ",drawtext=";
+
+            if (fontFile.isNotEmpty())
+                videoFilter << "fontfile='" << fontFile << "':";
+
+            videoFilter << "text='" << sanitiseForDrawtext (settings.streamTitle) << "'"
+                        << ":fontcolor=white:fontsize=36:x=(w-text_w)/2:y=(h-text_h)/2";
+        }
+
+        args.add ("-f"); args.add ("lavfi");
+        args.add ("-re");
+        args.add ("-i"); args.add (videoFilter);
+    }
 
     // The audio track: raw interleaved 16-bit PCM on stdin, at whatever rate
     // the audio device is actually running. Nothing paces this input; the
@@ -251,23 +281,42 @@ juce::StringArray buildFfmpegArguments (const RtmpSettings& settings, double sam
 
     args.add ("-c:v"); args.add ("libx264");
     args.add ("-preset"); args.add ("veryfast");
-
-    // A still frame has nothing for motion estimation to do, and this tuning
-    // says so rather than spending encoder time discovering it every frame.
-    args.add ("-tune"); args.add ("stillimage");
     args.add ("-pix_fmt"); args.add ("yuv420p");
 
-    // No B-frames: they buy nothing against a picture that never changes,
-    // and every one is a frame libx264 holds back before it can emit
-    // anything, which is exactly the multi-second startup delay this whole
-    // corner of the design is written to avoid.
+    // No B-frames either way. Against the still card they buy nothing; against
+    // live visuals they would buy a little compression, but every one is a
+    // frame libx264 holds back before it can emit anything, and this whole
+    // corner of the design is written to keep startup and glass-to-glass
+    // delay short rather than to save a few kilobits.
     args.add ("-bf"); args.add ("0");
 
-    // A key frame every 50 frames of a 2 fps source is one every 25 seconds,
-    // comfortably under what a player waits before it gives up looking for
-    // one, without paying the cost of a key frame for a picture that never
-    // changes.
-    args.add ("-g"); args.add ("50");
+    if (settings.liveVideo)
+    {
+        // Real motion, so the encoder gets to do its job; `zerolatency`
+        // turns off the frame lookahead that would otherwise add most of a
+        // second before the first packet came out.
+        args.add ("-tune"); args.add ("zerolatency");
+
+        // A key frame every two seconds, which is what both YouTube and
+        // Twitch ask for in their ingest guidelines and what lets a viewer
+        // who joins mid-set see a picture within a couple of seconds.
+        args.add ("-g"); args.add (juce::String (settings.fps * 2));
+        args.add ("-keyint_min"); args.add (juce::String (settings.fps * 2));
+    }
+    else
+    {
+        // A still frame has nothing for motion estimation to do, and this
+        // tuning says so rather than spending encoder time discovering it
+        // every frame.
+        args.add ("-tune"); args.add ("stillimage");
+
+        // A key frame every 50 frames of a 2 fps source is one every 25
+        // seconds, comfortably under what a player waits before it gives up
+        // looking for one, without paying the cost of a key frame for a
+        // picture that never changes.
+        args.add ("-g"); args.add ("50");
+    }
+
     args.add ("-b:v"); args.add (juce::String (settings.videoBitrateKbps) + "k");
 
     args.add ("-c:a"); args.add ("aac");
@@ -304,8 +353,20 @@ class RtmpConnection::Process
 public:
     ~Process() { stop(); }
 
-    bool start (const juce::String& executable, const juce::StringArray& arguments, juce::String& error)
+    bool start (const juce::String& executable, const juce::StringArray& arguments,
+                bool withVideoPipe, juce::String& error)
     {
+        // A second inheritable pipe on a fixed descriptor is not something
+        // CreateProcess offers the way posix_spawn does, and nobody has
+        // written the Windows way of it yet. The static card still works;
+        // this is said outright rather than left to fail somewhere inside
+        // ffmpeg.
+        if (withVideoPipe)
+        {
+            error = "Live visuals in the broadcast are not written for Windows yet.";
+            return false;
+        }
+
         SECURITY_ATTRIBUTES sa {};
         sa.nLength = sizeof (SECURITY_ATTRIBUTES);
         sa.bInheritHandle = TRUE;
@@ -403,6 +464,9 @@ public:
         process's own stderr rather than a pipe it could be read back from. */
     juce::String lastDiagnostic() const { return {}; }
 
+    bool writeVideo (const void*, size_t) { return false; }
+    bool hasVideoPipe() const noexcept { return false; }
+
     void stop()
     {
         if (stdinHandle != nullptr)
@@ -442,7 +506,8 @@ class RtmpConnection::Process
 public:
     ~Process() { stop(); }
 
-    bool start (const juce::String& executable, const juce::StringArray& arguments, juce::String& error)
+    bool start (const juce::String& executable, const juce::StringArray& arguments,
+                bool withVideoPipe, juce::String& error)
     {
         // Writing to a pipe nobody is reading from raises SIGPIPE, which
         // kills the whole application by default. Every process using pipes
@@ -452,6 +517,7 @@ public:
 
         int stdinPipe[2];
         int stderrPipe[2];
+        int videoPipe[2] { -1, -1 };
 
         if (::pipe (stdinPipe) != 0)
         {
@@ -462,6 +528,14 @@ public:
         if (::pipe (stderrPipe) != 0)
         {
             ::close (stdinPipe[0]); ::close (stdinPipe[1]);
+            error = "Could not create a pipe for ffmpeg.";
+            return false;
+        }
+
+        if (withVideoPipe && ::pipe (videoPipe) != 0)
+        {
+            ::close (stdinPipe[0]); ::close (stdinPipe[1]);
+            ::close (stderrPipe[0]); ::close (stderrPipe[1]);
             error = "Could not create a pipe for ffmpeg.";
             return false;
         }
@@ -489,6 +563,17 @@ public:
         posix_spawn_file_actions_addclose (&actions, stdinPipe[1]);
         posix_spawn_file_actions_addclose (&actions, stderrPipe[0]);
 
+        // And descriptor 3 is where it reads video, if there is any. Last,
+        // deliberately: the two pipes above were opened first and one of
+        // them is very likely to be sitting on 3 in this process, and these
+        // actions run in order in the child, so by the time 3 is overwritten
+        // here whatever was on it has already been copied where it belongs.
+        if (withVideoPipe)
+        {
+            posix_spawn_file_actions_adddup2 (&actions, videoPipe[0], 3);
+            posix_spawn_file_actions_addclose (&actions, videoPipe[1]);
+        }
+
         const auto devNull = ::open ("/dev/null", O_WRONLY);
 
         if (devNull >= 0)
@@ -501,6 +586,9 @@ public:
         ::close (stdinPipe[0]);
         ::close (stderrPipe[1]);
 
+        if (withVideoPipe)
+            ::close (videoPipe[0]);
+
         if (devNull >= 0)
             ::close (devNull);
 
@@ -508,6 +596,10 @@ public:
         {
             ::close (stdinPipe[1]);
             ::close (stderrPipe[0]);
+
+            if (withVideoPipe)
+                ::close (videoPipe[1]);
+
             error = "Could not start ffmpeg. Is it installed and on PATH? (" + juce::String (::strerror (rc)) + ")";
             return false;
         }
@@ -515,10 +607,23 @@ public:
         pid = spawnedPid;
         stdinFd = stdinPipe[1];
         stderrFd = stderrPipe[0];
+        videoFd = videoPipe[1];
 
-        // Non-blocking: the stderr pipe is drained a little at a time from
-        // whichever thread happens to poll it, never waited on.
+        // Non-blocking, all three. The stderr pipe is drained a little at a
+        // time from whichever thread happens to poll it, never waited on.
+        // The two we write to are non-blocking for a less obvious reason: a
+        // blocking write of more bytes than the pipe holds does not return
+        // until every one of them has been read, whatever `poll` said a
+        // moment earlier, and a video frame is many times the size of a
+        // pipe. Left blocking, `writeTo`'s deadline governed nothing for
+        // video, and a stalled ffmpeg held the feeder for as long as it
+        // liked. Non-blocking, a write returns what fitted and the poll loop
+        // does the rest, with the deadline actually checked in between.
         ::fcntl (stderrFd, F_SETFL, O_NONBLOCK);
+        ::fcntl (stdinFd, F_SETFL, O_NONBLOCK);
+
+        if (videoFd >= 0)
+            ::fcntl (videoFd, F_SETFL, O_NONBLOCK);
 
         return true;
     }
@@ -540,9 +645,21 @@ public:
         return false;
     }
 
-    bool write (const void* data, size_t numBytes)
+    bool write (const void* data, size_t numBytes)      { return writeTo (stdinFd, data, numBytes); }
+    bool writeVideo (const void* data, size_t numBytes) { return writeTo (videoFd, data, numBytes); }
+
+    bool hasVideoPipe() const noexcept { return videoFd >= 0; }
+
+private:
+    /** One routine for both pipes, because the discipline it follows -- a
+        single deadline, stderr drained on every wait -- is what keeps either
+        of them from deadlocking against ffmpeg, and it would be no less
+        necessary written out twice. Two threads write two different pipes
+        through here at once when video is live; they share nothing but the
+        stderr drain, which is guarded. */
+    bool writeTo (int fd, const void* data, size_t numBytes)
     {
-        if (stdinFd < 0)
+        if (fd < 0)
             return false;
 
         auto* bytes = static_cast<const char*> (data);
@@ -568,7 +685,7 @@ public:
             // on that write and stops reading stdin, while this waits for it to
             // read stdin: two idle processes, each waiting on the other. That
             // was the loopback test's intermittent stall.
-            pollfd fds[2] { { stdinFd, POLLOUT, 0 }, { stderrFd, POLLIN, 0 } };
+            pollfd fds[2] { { fd, POLLOUT, 0 }, { stderrFd, POLLIN, 0 } };
             const auto ready = ::poll (fds, 2, (int) (deadline - now));
 
             if (ready < 0)
@@ -588,11 +705,14 @@ public:
             if ((fds[0].revents & (POLLOUT | POLLERR | POLLHUP)) == 0)
                 continue;
 
-            const auto written = ::write (stdinFd, bytes, remaining);
+            const auto written = ::write (fd, bytes, remaining);
 
             if (written < 0)
             {
-                if (errno == EINTR)
+                // Full again between the poll and the write, which two
+                // threads writing two pipes can arrange. Not an error; back
+                // to the poll, whose deadline is still the one that counts.
+                if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)
                     continue;
 
                 stop();
@@ -612,6 +732,7 @@ public:
         return true;
     }
 
+public:
     /** Reads whatever ffmpeg has printed since the last call, without ever
         waiting for more of it, and keeps the tail of it for an error message.
         `Output #0` is what ffmpeg prints once it has opened its output URL,
@@ -643,6 +764,12 @@ public:
         {
             ::close (stdinFd);
             stdinFd = -1;
+        }
+
+        if (videoFd >= 0)
+        {
+            ::close (videoFd);
+            videoFd = -1;
         }
 
         if (pid > 0)
@@ -733,6 +860,7 @@ private:
     pid_t pid = -1;
     int stdinFd = -1;
     int stderrFd = -1;
+    int videoFd = -1;
     juce::String recent;
     std::atomic<bool> sawConnectSignal { false };
     std::mutex stderrMutex;
@@ -810,7 +938,7 @@ bool RtmpConnection::launch (const RtmpSettings& settings, double sampleRate, ju
     process = std::make_unique<Process>();
     const auto args = buildFfmpegArguments (settings, sampleRate);
 
-    if (! process->start (ffmpegPath, args, error))
+    if (! process->start (ffmpegPath, args, settings.liveVideo, error))
     {
         process.reset();
         return false;
@@ -868,6 +996,24 @@ bool RtmpConnection::send (const void* data, int numBytes)
         return false;
 
     if (! process->write (data, (size_t) numBytes))
+    {
+        connected.store (false, std::memory_order_relaxed);
+        return false;
+    }
+
+    bytesSent.fetch_add (numBytes, std::memory_order_relaxed);
+    return true;
+}
+
+bool RtmpConnection::sendVideoFrame (const void* rgb, int numBytes)
+{
+    if (process == nullptr || numBytes <= 0 || ! isConnected() || ! process->hasVideoPipe())
+        return false;
+
+    // Video counts towards `bytesSent` the same as audio: what that number
+    // is for is telling whether ffmpeg is taking anything at all, and a
+    // frame it took is as good an answer as a block of samples.
+    if (! process->writeVideo (rgb, (size_t) numBytes))
     {
         connected.store (false, std::memory_order_relaxed);
         return false;

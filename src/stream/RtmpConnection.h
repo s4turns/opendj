@@ -43,6 +43,17 @@ struct RtmpSettings
     int videoBitrateKbps = 2500;
     int audioBitrateKbps = 160;
 
+    /** Frames a second when the video is live (see `liveVideo`). Ignored for
+        the static card, which draws two a second for reasons of its own. */
+    int fps = 30;
+
+    /** True for a video track made of frames this process pushes in, one at
+        a time, through `RtmpConnection::sendVideoFrame`: the visualiser.
+        False for the static title card ffmpeg draws by itself. Set by the
+        broadcaster from whether a visualiser is actually running, not by
+        the dialog, since a viewer is owed a picture either way. */
+    bool liveVideo = false;
+
     /** `server` and `streamKey` joined with exactly one slash, which is what
         ffmpeg wants as its output URL. */
     juce::String fullUrl() const;
@@ -135,6 +146,16 @@ public:
         gone, which is `RtmpBroadcaster`'s cue to reconnect, the same role
         `IcecastConnection::send` plays for a socket that has dropped. */
     bool send (const void* data, int numBytes);
+
+    /** Sends one frame, tightly packed RGB at exactly `videoWidth` by
+        `videoHeight`, down the second pipe ffmpeg reads video from. Only
+        meaningful when the connection was launched with `liveVideo`; a
+        frame sent otherwise is refused. Same contract as `send` in every
+        other way, including that the very first frame has to be in before
+        `waitForConfirmation` can succeed: ffmpeg opens its output only once
+        every input has produced a packet, and a video pipe with nothing in
+        it is an input that has not. */
+    bool sendVideoFrame (const void* rgb, int numBytes);
 
     juce::int64 getBytesSent() const noexcept { return bytesSent.load (std::memory_order_relaxed); }
 

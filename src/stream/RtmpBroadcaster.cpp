@@ -5,6 +5,7 @@
 
 #include "stream/RtmpBroadcaster.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <vector>
 
@@ -80,6 +81,96 @@ private:
 
 //==============================================================================
 
+class RtmpBroadcaster::VideoFeeder final : public juce::Thread
+{
+public:
+    VideoFeeder (RtmpBroadcaster& ownerToUse, std::shared_ptr<RtmpConnection> connectionToUse,
+                 int width, int height, int fps)
+        : juce::Thread ("OpenDJ RTMP video"),
+          owner (ownerToUse),
+          connection (std::move (connectionToUse)),
+          frameBytes ((size_t) width * height * 3),
+          intervalMs (1000.0 / juce::jmax (1, fps))
+    {
+        // Black until the first real frame arrives. Sent as-is if the
+        // visualiser is slow to start, which is a moment of black on the
+        // stream rather than a broadcast that fails to connect.
+        current.assign (frameBytes, 0);
+        incoming.assign (frameBytes, 0);
+    }
+
+    ~VideoFeeder() override { stopThread (2000); }
+
+    void push (const unsigned char* rgb, int numBytes)
+    {
+        if ((size_t) numBytes != frameBytes)
+            return;
+
+        const juce::ScopedLock lock (mailbox);
+        std::copy_n (rgb, numBytes, incoming.begin());
+        incomingIsNew = true;
+    }
+
+    bool hasFailed() const noexcept { return failed.load (std::memory_order_relaxed); }
+
+    void run() override
+    {
+        auto nextFrameMs = juce::Time::getMillisecondCounterHiRes();
+
+        while (! threadShouldExit())
+        {
+            {
+                const juce::ScopedLock lock (mailbox);
+
+                if (incomingIsNew)
+                {
+                    current.swap (incoming);
+                    incomingIsNew = false;
+                }
+                else if (sentAny)
+                {
+                    owner.repeatedFrames.fetch_add (1, std::memory_order_relaxed);
+                }
+            }
+
+            if (! connection->sendVideoFrame (current.data(), (int) current.size()))
+            {
+                failed.store (true, std::memory_order_relaxed);
+                return;
+            }
+
+            sentAny = true;
+
+            // The same running deadline the visualiser paces itself with,
+            // and for the same reason: a send that took a while, which a
+            // frame bigger than the pipe buffer always does, must not push
+            // every frame after it late.
+            nextFrameMs += intervalMs;
+            const auto waitMs = nextFrameMs - juce::Time::getMillisecondCounterHiRes();
+
+            if (waitMs > 0.0)
+                wait ((int) waitMs);
+            else
+                nextFrameMs = juce::Time::getMillisecondCounterHiRes();
+        }
+    }
+
+private:
+    RtmpBroadcaster& owner;
+    std::shared_ptr<RtmpConnection> connection;
+    const size_t frameBytes;
+    const double intervalMs;
+
+    std::vector<unsigned char> current, incoming;
+    bool incomingIsNew = false;
+    bool sentAny = false;
+    juce::CriticalSection mailbox;
+
+    std::atomic<bool> failed { false };
+};
+
+//==============================================================================
+
 /** Watches the connection and puts it back when it drops. See
     `Broadcaster::Reconnector`: this is the same class with ffmpeg in place of
     a socket. */
@@ -95,22 +186,19 @@ public:
 
         while (! threadShouldExit())
         {
-            if (owner.state.load (std::memory_order_relaxed) == RtmpBroadcaster::State::live)
+            if (owner.state.load (std::memory_order_relaxed) == RtmpBroadcaster::State::live
+                && ! owner.anyPipeHasFailed())
             {
-                std::lock_guard<std::mutex> lock (owner.writerMutex);
-
-                if (owner.pcm == nullptr || ! owner.pcm->hasFailed())
-                {
-                    waitMs = firstRetryMs;
-                    lockFreeWait (200);
-                    continue;
-                }
+                waitMs = firstRetryMs;
+                lockFreeWait (200);
+                continue;
             }
 
             if (threadShouldExit())
                 return;
 
             owner.state.store (RtmpBroadcaster::State::reconnecting, std::memory_order_relaxed);
+            owner.closeVideoFeeder();
             owner.closeWriter();
             owner.connection->disconnect();
 
@@ -125,6 +213,7 @@ public:
             if (owner.connection->launch (owner.settings, sampleRate, error))
             {
                 owner.openWriter (sampleRate);
+                owner.openVideoFeeder();
                 owner.primeWithSilence (sampleRate);
                 confirmed = owner.connection->waitForConfirmation (error);
             }
@@ -137,6 +226,7 @@ public:
             else
             {
                 owner.failureReason = error;
+                owner.closeVideoFeeder();
                 owner.closeWriter();
                 owner.connection->disconnect();
                 waitMs = juce::jmin (longestRetryMs, waitMs * 2);
@@ -169,6 +259,7 @@ bool RtmpBroadcaster::start (const RtmpSettings& settingsToUse, double sampleRat
     settings = settingsToUse;
     failureReason.clear();
     droppedSamples.store (0, std::memory_order_relaxed);
+    repeatedFrames.store (0, std::memory_order_relaxed);
     state.store (State::connecting, std::memory_order_relaxed);
 
     connection = std::make_shared<RtmpConnection>();
@@ -183,6 +274,7 @@ bool RtmpBroadcaster::start (const RtmpSettings& settingsToUse, double sampleRat
 
     encoderThread.startThread (juce::Thread::Priority::normal);
     openWriter (sampleRate);
+    openVideoFeeder();
 
     if (activeWriter.load (std::memory_order_acquire) == nullptr)
     {
@@ -233,6 +325,7 @@ void RtmpBroadcaster::stop()
         reconnector.reset();
     }
 
+    closeVideoFeeder();
     closeWriter();
     encoderThread.stopThread (2000);
 
@@ -282,6 +375,59 @@ void RtmpBroadcaster::closeWriter()
     std::lock_guard<std::mutex> lock (writerMutex);
     writer.reset();
     pcm = nullptr;
+}
+
+bool RtmpBroadcaster::anyPipeHasFailed()
+{
+    // Looked at under the locks and let go of at once. This used to be
+    // checked inside the reconnector's own wait, with the writer lock held
+    // for the whole 200 ms between checks; that was survivable while the
+    // only other taker was `closeWriter`, and stopped being so the moment
+    // the video feeder's lock joined it, since `pushVideoFrame` takes that
+    // thirty times a second and was spending most of its life waiting.
+    {
+        std::lock_guard<std::mutex> lock (writerMutex);
+
+        if (pcm != nullptr && pcm->hasFailed())
+            return true;
+    }
+
+    std::lock_guard<std::mutex> lock (videoFeederMutex);
+    return videoFeeder != nullptr && videoFeeder->hasFailed();
+}
+
+void RtmpBroadcaster::openVideoFeeder()
+{
+    if (! settings.liveVideo || connection == nullptr)
+        return;
+
+    std::lock_guard<std::mutex> lock (videoFeederMutex);
+    videoFeeder = std::make_unique<VideoFeeder> (*this, connection,
+                                                 settings.videoWidth, settings.videoHeight, settings.fps);
+    videoFeeder->startThread (juce::Thread::Priority::normal);
+}
+
+void RtmpBroadcaster::closeVideoFeeder()
+{
+    std::unique_ptr<VideoFeeder> finished;
+
+    {
+        std::lock_guard<std::mutex> lock (videoFeederMutex);
+        finished = std::move (videoFeeder);
+    }
+
+    // Stopped outside the lock: a stop waits for a send in flight, which can
+    // take as long as ffmpeg takes to read a frame, and a push from the
+    // visualiser must not have to wait on that just to find nobody home.
+    finished.reset();
+}
+
+void RtmpBroadcaster::pushVideoFrame (const unsigned char* rgb, int numBytes)
+{
+    std::lock_guard<std::mutex> lock (videoFeederMutex);
+
+    if (videoFeeder != nullptr)
+        videoFeeder->push (rgb, numBytes);
 }
 
 //==============================================================================
