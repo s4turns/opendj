@@ -106,6 +106,9 @@ private:
     VisualizerSettings visualSettingsForBroadcast() const;
     juce::Array<juce::File> findPresetFolders() const;
 
+    /** Where the images the presets load live. */
+    juce::Array<juce::File> findTextureFolders() const;
+
     void loadOntoDeck (const juce::File& file, int deckIndex);
     /** Every folder that may hold a kind of data file -- "mappings", or
         "presets" for the visualiser -- in precedence order: the user's own

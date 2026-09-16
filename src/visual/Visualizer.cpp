@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <array>
+#include <string>
 
 #if OPENDJ_HAVE_VISUALIZER
 
@@ -428,6 +429,10 @@ private:
         projectm_playlist_set_preset_switched_event_callback (playlist, presetSwitched, this);
         projectm_playlist_set_shuffle (playlist, true);
 
+        // Before any preset is loaded: this reloads every texture, so doing
+        // it after would throw away the work of the first preset.
+        setTextureSearchPaths();
+
         // No presets anywhere is deliberately not an error: projectM has an
         // idle preset built in, and drawing that is far better than refusing
         // to show anything because nobody has downloaded a pack yet.
@@ -439,6 +444,26 @@ private:
             projectm_playlist_play_next (playlist, true);
 
         return true;
+    }
+
+    void setTextureSearchPaths()
+    {
+        std::vector<std::string> paths;
+
+        for (const auto& folder : settings.textureFolders)
+            if (folder.isDirectory())
+                paths.push_back (folder.getFullPathName().toStdString());
+
+        if (paths.empty())
+            return;
+
+        std::vector<const char*> raw;
+        raw.reserve (paths.size());
+
+        for (const auto& path : paths)
+            raw.push_back (path.c_str());
+
+        projectm_set_texture_search_paths (projectM, raw.data(), raw.size());
     }
 
     void destroyProjectM()

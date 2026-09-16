@@ -446,6 +446,7 @@ presets that projectM already runs natively. LGPL 2.1 or later, so licence compa
 | The audio thread only copies into a lock free FIFO | Same rule as everything else that taps the master. `projectm_pcm_add_float` is a library call with no realtime promises, so the render thread makes it, not the audio thread |
 | Frames are turned right way up in the visualiser | OpenGL hands rows back bottom first and both consumers want the opposite. Doing it once here beats doing it in the panel and again in an ffmpeg `vflip` nobody would think to look at |
 | Presets are found the way mappings are, plus `/usr/share/projectM/presets` | A distribution's own preset package is then used without copying anything. None found anywhere is not an error: projectM has an idle preset built in |
+| Presets are fetched by a script, not shipped in this repository | They were released over two decades by many authors, almost none under any stated licence, and they run to a hundred megabytes. `scripts/get-presets.sh` installs them on request |
 
 **Frames read back sheared at 854 wide.** OpenGL pads every row of a `glReadPixels` to four bytes
 unless told otherwise, and three bytes a pixel means that only matches a tightly packed frame when
@@ -463,6 +464,24 @@ count, and two frames from different points in the file that actually differ.
 Verified end to end through the application itself at 854x480 and 25 fps: the receiver recorded
 500 frames in 20 seconds, exactly 25 a second, and the frames carry real moving content rather
 than the black the feeder starts with.
+
+**Butterchurn's presets cannot be used, and do not need to be.** Butterchurn is the WebGL
+MilkDrop implementation, and asking for its presets is the obvious request; its packs ship 1,737
+of them. They are not `.milk` files. They are conversions, with the equations turned into
+JavaScript (`a.fps_=`, `Math.min`, `div()`) and the shaders into GLSL carrying the `xlat_mutable`
+markers of an HLSL translator. projectM reads the original MilkDrop expression language and HLSL,
+so using them would mean reverse-translating two languages, one of them a shading language.
+
+The originals are a better answer anyway. `scripts/get-presets.sh` installs the four packs those
+conversions came from, 14,575 presets, against Butterchurn's 1,737. Matching the two sets by name:
+about 80 per cent of Butterchurn's list is in those packs, and the roughly 350 that are not are
+mash-ups that appear to exist only in its own collection. So it is a far larger library rather
+than a strict superset, and that is worth saying plainly rather than claiming everything.
+
+The same script installs the texture pack, and `projectm_set_texture_search_paths` is given the
+folders it lands in. This matters more than it looks: 8,027 of Cream of the Crop's 9,795 presets
+reference a sampler, and a preset that cannot find its image does not fail, it draws wrongly,
+usually as a flat colour where the picture should be.
 
 **Linux only.** The offscreen context is EGL. Windows needs the WGL equivalent, and separately
 needs a second inheritable pipe for `CreateProcess` before live video can reach a broadcast there;

@@ -37,6 +37,13 @@ struct VisualizerSettings
         anywhere is not an error: projectM has an idle preset built in, and
         drawing that beats refusing to start. */
     juce::Array<juce::File> presetFolders;
+
+    /** Where the images presets load live. Most of the big preset packs lean
+        on a shared texture pack, and a preset that cannot find its image
+        does not fail: it draws, wrongly, usually as a flat colour where the
+        picture should be. Not searched recursively, because projectM takes
+        these as the directories to look in rather than trees to walk. */
+    juce::Array<juce::File> textureFolders;
 };
 
 /** Draws MilkDrop visuals from what the master output is doing, for the panel

@@ -1169,6 +1169,32 @@ juce::Array<juce::File> MainComponent::findPresetFolders() const
     return folders;
 }
 
+juce::Array<juce::File> MainComponent::findTextureFolders() const
+{
+    auto folders = findDataFolders ("textures");
+
+    // Every pack's own directory too, since the installer puts the images in
+    // one below "textures" rather than loose in it.
+    for (const auto& parent : findDataFolders ("textures"))
+        for (const auto& child : parent.findChildFiles (juce::File::findDirectories, false))
+            if (! folders.contains (child))
+                folders.add (child);
+
+   #if JUCE_LINUX || JUCE_BSD
+    auto dataDirs = juce::SystemStats::getEnvironmentVariable ("XDG_DATA_DIRS", {});
+
+    if (dataDirs.isEmpty())
+        dataDirs = "/usr/local/share:/usr/share";
+
+    for (const auto& directory : juce::StringArray::fromTokens (dataDirs, ":", {}))
+        if (const auto folder = juce::File (directory).getChildFile ("projectM/textures");
+            directory.isNotEmpty() && folder.isDirectory() && ! folders.contains (folder))
+            folders.add (folder);
+   #endif
+
+    return folders;
+}
+
 void MainComponent::toggleVisuals()
 {
     auto& visualizer = engine.getVisualizer();
@@ -1202,6 +1228,7 @@ VisualizerSettings MainComponent::visualSettingsForBroadcast() const
     visualSettings.height = settings.rtmp.videoHeight;
     visualSettings.fps = settings.rtmp.fps;
     visualSettings.presetFolders = findPresetFolders();
+    visualSettings.textureFolders = findTextureFolders();
     return visualSettings;
 }
 
