@@ -1,7 +1,7 @@
 # OpenDJ roadmap
 
 Where the project is and what to pick up next. Anything ticked has tests or a verified manual
-check behind it, not just code that compiles. The suite is **268 tests** on Linux and 267 on
+check behind it, not just code that compiles. The suite is **273 tests** on Linux and 272 on
 Windows, the one difference being a stderr test whose stand-in for ffmpeg is a shell script;
 anything touching audio is tested by measuring the output, not by checking that the code ran.
 
@@ -24,7 +24,7 @@ that was listed after it except video.
 | 4 | Tempo fader | ✅ | `src/core/Deck.*`, `src/ui/DeckComponent.*` |
 | 5 | Key lock, so tempo does not shift pitch | ✅ | `Deck::renderStretched`, via Rubber Band |
 | 6 | Mixer: fader, three-band EQ, crossfader, cue | ✅ | `src/core/Mixer.*` |
-| 7 | Scrolling and overview waveforms | ✅ | `src/ui/WaveformComponent.*` |
+| 7 | Scrolling and overview waveforms, coloured by frequency | ✅ | `src/ui/WaveformComponent.*` |
 | 8 | BPM detection and beat grid | ✅ | `src/analysis/TrackAnalyser.*` |
 | 9 | Sync: tempo and beat phase | ✅ | `AudioEngine::syncDeck` |
 | 10 | Turntable platters, mouse drivable | ✅ | `src/ui/PlatterComponent.*`, `src/ui/AngleMath.h` |
@@ -94,7 +94,7 @@ set but nothing on screen shows or triggers.
 | More from stems | Separating the library ahead of time, stem pads such as vocal off or drums only, effects on one stem |
 | Library import and metadata | iTunes and Music, rekordbox and Serato libraries; a tag editor; cover art; colours, ratings and comments |
 | Saved cue points | Hot cues kept with the track in the library |
-| Waveforms | Colour by frequency, zoom, and a strip showing both decks' beats lined up |
+| Waveforms | Zoom, and a strip showing both decks' beats lined up. Colour by frequency is done |
 | Sandbox | Previewing a later moment in the headphones while the master plays on |
 | Keyboard mapper | Shortcuts of your own; today there are only Q, W, O, P and the number row |
 | Master effects | Effects on the whole mix, and effect slots with parameters |
@@ -280,6 +280,28 @@ already turns an effect off at zero.
 | The selection lives in `ActionDispatcher`, one small integer per channel, alongside `shiftHeld` and `tempoRangePercent` | It is exactly that kind of state: not audio, not persisted, read by the next action rather than stored on a deck or the mixer |
 | Binding only CC 0x00 of the DEPTH knob | Measured on real hardware: the knob broadcasts the same value on 0x00, 0x01 and 0x02 at once, so binding all three would write the mapping three times for one hand movement |
 | FX3 and FX ON/TAP left unmapped | OpenDJ has two effects, not three, and a continuous knob already has an off position; inventing a use for either button would be design bolted onto a limitation the hardware does not actually have on this engine |
+
+## Waveforms
+
+Each deck draws the same analysis twice: a detail view that scrolls past a stationary playhead
+with the beat grid over it, and an overview of the whole track underneath. Both are coloured by
+frequency, so the shape of a record can be read before it is heard.
+
+The colour comes from three band energies stored on every waveform bucket alongside the minimum,
+maximum and RMS that were already there. They are measured once, on a single pass over the
+audio that serves both waveforms at once, by a Linkwitz-Riley crossover split at the same two
+frequencies the mixer's EQ uses.
+
+| Decision | Why |
+| --- | --- |
+| The bands are the mixer's own crossovers, 300 Hz and 3 kHz, shared from `Mixer` rather than chosen again | A waveform whose red does not mean what the Low knob reaches would be worse than no colour at all. Turning a band down and watching exactly that colour leave the waveform is the point |
+| A crossover filter, not the tempo pass's FFT | The FFT runs at a 1024 point frame every 256 samples and would have to be interpolated onto 2 ms buckets. A filter is sample accurate by construction, and the bucket boundaries stay where the minimum and maximum already put them |
+| One pass over the audio fills both waveforms | The filtering is the expensive part and the bucketing is nearly free, so running it once per resolution would have doubled the cost for nothing |
+| A running total per bucket rather than an array of them | The pass walks the track in order, so only the bucket it is inside needs a total. A sixty minute track has about 1.6 million detail buckets, and three sums each would have cost 40 MB to avoid arithmetic that is already free |
+| Nothing is cached, and `analysisVersion` is not bumped | Waveform peaks were never written to the library; only the tempo and key are. The extra pass is the one cost a track that has been analysed before now pays, and it is small beside the decode it already does |
+| Each column's three bands are read against the largest of the three | Bass alone is red, bass and midrange yellow, a broad mix orange, a hi-hat pattern blue. How loud the passage is already sits in the height of the bar and does not need saying twice |
+| Not against each band's own loudest moment in the track | Tried, and worse. A record's midrange sits near its own peak almost all the time while its bass and treble only touch theirs on a hit, so every track came out the same shade of green |
+| The played part keeps its colour, desaturated and dimmed | It is the same music. A flat second colour behind the playhead threw away everything the colouring had just said |
 
 ## Sampler
 

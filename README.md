@@ -9,7 +9,7 @@
 
 Free and open source DJ software, built in C++ with [JUCE](https://juce.com).
 
-![Decks A and B, each with its waveforms, loop lengths, stem knobs, turntable platter, tempo fader and a button to swap in deck C or D, a four channel mixer between them with every control named on every channel: high, mid and low EQ, filter, echo and its length in beats, reverb, crossfader assignment, a channel fader and cue, the track library underneath showing tempo and key, a row of eight sampler pads with their own level and cue, a mic strip with talkover, and a bottom bar with audio setup, recording, Icecast and RTMP streaming, controller setup, and the audio device running at 10 ms](images/screenshot.jpg)
+![Decks A and B, each with a track loaded and its waveforms coloured by frequency, loop lengths, stem knobs, turntable platter, tempo fader and a button to swap in deck C or D, a four channel mixer between them with every control named on every channel: high, mid and low EQ, filter, echo and its length in beats, reverb, crossfader assignment, a channel fader and cue, the track library underneath showing tempo and key, a row of eight sampler pads with their own level and cue, a mic strip with talkover, and a bottom bar with audio setup, recording, Icecast and RTMP streaming, controller setup, and the audio device running at 10 ms](images/screenshot.jpg)
 
 The goal is an application a VirtualDJ user can sit down at and already know how to use:
 the same deck layout, the same workflow, the same muscle memory. The artwork, the naming
@@ -49,6 +49,11 @@ overview waveform to move through the track.
 Each deck shows a scrolling waveform with the beat grid drawn over it, bar lines brighter than
 beats, and the detected tempo next to the title. Sync matches this deck's tempo and beat phase
 to the other one.
+
+Both waveforms are coloured by frequency: red is bass, green the midrange and blue the treble,
+so a drop reads orange, a breakdown loses its red and a hi-hat pattern on its own comes out
+blue. The three bands are split at the same frequencies the mixer's EQ uses, so turning the Low
+knob down takes exactly the red out of what you can hear.
 
 The platter turns at 33 1/3 rpm against the track position, so it is a readout and not
 decoration: if it is crawling, the deck is crawling. Drag the middle of it to scratch, exactly

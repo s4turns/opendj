@@ -90,6 +90,103 @@ TEST_CASE ("peaks cover the whole track even when it does not divide evenly", "[
     REQUIRE (peaks.buckets.size() == 3);
 }
 
+namespace
+{
+    /** A steady tone, loud enough that every band reading is well clear of the
+        crossover's own skirts. */
+    juce::AudioBuffer<float> makeTone (double frequency, double seconds)
+    {
+        const auto numSamples = static_cast<int> (seconds * sampleRate);
+        juce::AudioBuffer<float> buffer (2, numSamples);
+
+        for (int i = 0; i < numSamples; ++i)
+        {
+            const auto phase = juce::MathConstants<double>::twoPi * frequency * i / sampleRate;
+            const auto value = static_cast<float> (std::sin (phase)) * 0.8f;
+
+            buffer.setSample (0, i, value);
+            buffer.setSample (1, i, value);
+        }
+
+        return buffer;
+    }
+
+    opendj::WaveformPeaks peaksWithBands (const juce::AudioBuffer<float>& audio, int samplesPerBucket)
+    {
+        auto peaks = opendj::TrackAnalyser::buildPeaks (audio, samplesPerBucket);
+        opendj::TrackAnalyser::addBandEnergies (audio, sampleRate, { &peaks });
+        return peaks;
+    }
+
+    /** The middle bucket, so the filters' settling at the very start of the
+        track is not what is being measured. */
+    const opendj::WaveformPeaks::Bucket& middleOf (const opendj::WaveformPeaks& peaks)
+    {
+        return peaks.buckets[peaks.buckets.size() / 2];
+    }
+}
+
+TEST_CASE ("a bass tone colours the low band", "[analysis][waveform]")
+{
+    const auto peaks = peaksWithBands (makeTone (60.0, 2.0), 4410);
+    const auto& bucket = middleOf (peaks);
+
+    REQUIRE (bucket.low > bucket.mid);
+    REQUIRE (bucket.low > bucket.high);
+    REQUIRE (bucket.mid < bucket.low * 0.1f);
+    REQUIRE (bucket.high < bucket.low * 0.1f);
+}
+
+TEST_CASE ("a midrange tone colours the mid band", "[analysis][waveform]")
+{
+    const auto peaks = peaksWithBands (makeTone (1000.0, 2.0), 4410);
+    const auto& bucket = middleOf (peaks);
+
+    REQUIRE (bucket.mid > bucket.low);
+    REQUIRE (bucket.mid > bucket.high);
+}
+
+TEST_CASE ("a treble tone colours the high band", "[analysis][waveform]")
+{
+    const auto peaks = peaksWithBands (makeTone (10000.0, 2.0), 4410);
+    const auto& bucket = middleOf (peaks);
+
+    REQUIRE (bucket.high > bucket.low);
+    REQUIRE (bucket.high > bucket.mid);
+}
+
+TEST_CASE ("dominance passes from low to mid to high across the crossovers", "[analysis][waveform]")
+{
+    // The behaviour worth pinning down, rather than any exact figure: a
+    // Linkwitz-Riley crossover's halves add in amplitude, not in power, so the
+    // three bands of a bucket have no reason to sum to its energy.
+    const auto dominantBand = [] (double frequency)
+    {
+        const auto& bucket = middleOf (peaksWithBands (makeTone (frequency, 2.0), 4410));
+
+        if (bucket.low >= bucket.mid && bucket.low >= bucket.high)
+            return 0;
+
+        return bucket.mid >= bucket.high ? 1 : 2;
+    };
+
+    REQUIRE (dominantBand (80.0) == 0);
+    REQUIRE (dominantBand (800.0) == 1);
+    REQUIRE (dominantBand (8000.0) == 2);
+}
+
+TEST_CASE ("silence leaves every band at zero", "[analysis][waveform]")
+{
+    juce::AudioBuffer<float> buffer (2, 44100);
+    buffer.clear();
+
+    const auto peaks = peaksWithBands (buffer, 4410);
+
+    REQUIRE_THAT (middleOf (peaks).low, WithinAbs (0.0f, 0.0001f));
+    REQUIRE_THAT (middleOf (peaks).mid, WithinAbs (0.0f, 0.0001f));
+    REQUIRE_THAT (middleOf (peaks).high, WithinAbs (0.0f, 0.0001f));
+}
+
 TEST_CASE ("tempo detection recovers a known BPM", "[analysis][tempo]")
 {
     // House, drum and bass, and the slow end of hip hop, so the whole search

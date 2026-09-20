@@ -13,12 +13,46 @@ namespace opendj
 namespace
 {
     const juce::Colour backgroundColour { 0xff0e0e12 };
-    const juce::Colour waveColour       { 0xff35c2f0 };
-    const juce::Colour playedColour     { 0xff1d6a86 };
     const juce::Colour cueColour        { 0xffe8a33d };
     const juce::Colour beatColour       { 0x40ffffff };
     const juce::Colour barColour        { 0x90ffffff };
     const juce::Colour loopColour       { 0xff4ad991 };
+
+    /** The colour of one column of waveform: how much of it is bass, how much
+        is midrange and how much is treble, as red, green and blue.
+
+        The three bands are read against the largest of the three, so whichever
+        one is leading this column is always at full strength and the other two
+        are seen against it. Bass alone comes out red, bass and midrange
+        together yellow, a broad mix orange, and a hi-hat pattern on its own
+        blue. How loud the passage is stays in the height of the bar, where it
+        already was, and is not said twice.
+
+        Scaling each band by its own loudest moment in the track was tried and
+        is worse: a record's midrange sits near its own peak almost all of the
+        time while its bass and treble only touch theirs on a hit, so every
+        track came out the same shade of green. */
+    juce::Colour colourForBucket (const WaveformPeaks::Bucket& bucket)
+    {
+        const auto strongest = juce::jmax (bucket.low, bucket.mid, bucket.high);
+
+        // Silence, or a track with nothing in any band to measure against.
+        if (strongest <= 0.0f)
+            return juce::Colour (0xff404048);
+
+        return juce::Colour::fromFloatRGBA (bucket.low / strongest,
+                                            bucket.mid / strongest,
+                                            bucket.high / strongest,
+                                            1.0f);
+    }
+
+    /** The same colour behind the playhead. Dimmed and pulled towards grey
+        rather than replaced with a flat colour, so the part already played
+        still reads as the same music rather than as a different track. */
+    juce::Colour asPlayed (juce::Colour colour)
+    {
+        return colour.withMultipliedSaturation (0.55f).withMultipliedBrightness (0.45f);
+    }
 }
 
 WaveformComponent::WaveformComponent (Mode modeToUse)
@@ -122,7 +156,9 @@ void WaveformComponent::paintOverview (juce::Graphics& g)
         const auto top = centre - bucket.maximum * centre;
         const auto bottom = centre - bucket.minimum * centre;
 
-        g.setColour (static_cast<float> (x) <= playedX ? playedColour : waveColour);
+        const auto colour = colourForBucket (bucket);
+
+        g.setColour (static_cast<float> (x) <= playedX ? asPlayed (colour) : colour);
         g.drawVerticalLine (x, top, juce::jmax (top + 1.0f, bottom));
     }
 
@@ -217,7 +253,9 @@ void WaveformComponent::paintScrolling (juce::Graphics& g)
         const auto top = centre - bucket.maximum * centre;
         const auto bottom = centre - bucket.minimum * centre;
 
-        g.setColour (seconds <= positionSeconds ? playedColour : waveColour);
+        const auto colour = colourForBucket (bucket);
+
+        g.setColour (seconds <= positionSeconds ? asPlayed (colour) : colour);
         g.drawVerticalLine (x, top, juce::jmax (top + 1.0f, bottom));
     }
 

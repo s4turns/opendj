@@ -8,6 +8,7 @@
 #include "analysis/TrackAnalysis.h"
 
 #include <memory>
+#include <vector>
 
 namespace opendj
 {
@@ -65,6 +66,19 @@ public:
 
     /** Peaks only, for when a waveform is wanted before the tempo pass finishes. */
     static WaveformPeaks buildPeaks (const juce::AudioBuffer<float>& audio, int samplesPerBucket);
+
+    /** Fills in the three band energies, and the reference levels the colours
+        are drawn against, on peaks `buildPeaks` has already produced.
+
+        Takes every set of peaks at once because the filtering, not the
+        bucketing, is the expensive part: one pass over the audio then serves
+        the overview and the detail waveform together. Nothing is copied and no
+        buffer the length of the track is allocated; the crossover runs a block
+        at a time and each bucket's running total is finished as the pass leaves
+        it behind. */
+    static void addBandEnergies (const juce::AudioBuffer<float>& audio,
+                                 double sampleRate,
+                                 const std::vector<WaveformPeaks*>& peaks);
 };
 
 } // namespace opendj
