@@ -5,6 +5,8 @@
 
 #include "ui/WaveformComponent.h"
 
+#include "ui/WaveformMath.h"
+
 #include <cmath>
 
 namespace opendj
@@ -59,7 +61,9 @@ WaveformComponent::WaveformComponent (Mode modeToUse)
     : mode (modeToUse)
 {
     setOpaque (true);
-    setInterceptsMouseClicks (mode == Mode::overview, false);
+    // The overview is clicked to seek; the scrolling view takes the wheel to
+    // zoom, and `seekFromMouse` is what keeps a click on it from scrubbing.
+    setInterceptsMouseClicks (true, false);
 }
 
 void WaveformComponent::setAnalysis (std::shared_ptr<const TrackAnalysis> newAnalysis)
@@ -144,15 +148,13 @@ void WaveformComponent::paintOverview (juce::Graphics& g)
         ? static_cast<float> (positionSeconds / trackLengthSeconds) * width
         : 0.0f;
 
+    const auto perPixel = trackLengthSeconds / juce::jmax (1, width);
+
     for (int x = 0; x < width; ++x)
     {
-        const auto bucketIndex = static_cast<size_t> (
-            static_cast<double> (x) / width * static_cast<double> (peaks.buckets.size()));
+        const auto seconds = x * perPixel;
+        const auto bucket = waveform::reduce (peaks, analysis->sampleRate, seconds, seconds + perPixel);
 
-        if (bucketIndex >= peaks.buckets.size())
-            break;
-
-        const auto& bucket = peaks.buckets[bucketIndex];
         const auto top = centre - bucket.maximum * centre;
         const auto bottom = centre - bucket.minimum * centre;
 
@@ -184,18 +186,18 @@ void WaveformComponent::paintOverview (juce::Graphics& g)
 
 void WaveformComponent::paintScrolling (juce::Graphics& g)
 {
-    const auto& peaks = analysis->detail;
-
-    if (peaks.isEmpty())
-        return;
-
     const auto width = getWidth();
     const auto height = static_cast<float> (getHeight());
     const auto centre = height * 0.5f;
 
     const auto spanSeconds = windowSeconds * 2.0;
     const auto startSeconds = positionSeconds - windowSeconds;
-    const auto secondsPerPixel = spanSeconds / juce::jmax (1, width);
+    const auto secondsPerPixel = waveform::secondsPerPixel (windowSeconds, width);
+
+    const auto& peaks = waveform::peaksFor (*analysis, secondsPerPixel);
+
+    if (peaks.isEmpty())
+        return;
 
     // The loop goes down first of all, so the grid and the waveform both read
     // over the top of it rather than being hidden by it.
@@ -214,8 +216,11 @@ void WaveformComponent::paintScrolling (juce::Graphics& g)
         g.fillRect (to - 1.0f, 0.0f, 2.0f, height);
     }
 
-    // Beat grid next, so the waveform draws over it.
-    if (analysis->hasTempo())
+    // Beat grid next, so the waveform draws over it. Zoomed far enough out the
+    // beats are closer together than the lines that would mark them, and a grid
+    // that cannot be counted only hides the waveform underneath it.
+    if (analysis->hasTempo()
+        && waveform::beatsAreWorthDrawing (analysis->secondsPerBeat(), secondsPerPixel))
     {
         const auto period = analysis->secondsPerBeat();
         const auto firstBeatIndex = std::floor ((startSeconds - analysis->firstBeatSeconds) / period);
@@ -247,8 +252,8 @@ void WaveformComponent::paintScrolling (juce::Graphics& g)
         if (seconds < 0.0 || seconds > trackLengthSeconds)
             continue;
 
-        const auto sampleIndex = static_cast<juce::int64> (seconds * analysis->sampleRate);
-        const auto& bucket = peaks.bucketAt (sampleIndex);
+        const auto bucket = waveform::reduce (peaks, analysis->sampleRate,
+                                             seconds, seconds + secondsPerPixel);
 
         const auto top = centre - bucket.maximum * centre;
         const auto bottom = centre - bucket.minimum * centre;
@@ -262,6 +267,25 @@ void WaveformComponent::paintScrolling (juce::Graphics& g)
     // The playhead is fixed in the middle; the track moves past it.
     g.setColour (juce::Colours::white);
     g.fillRect (width * 0.5f - 1.0f, 0.0f, 2.0f, height);
+}
+
+void WaveformComponent::mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails& wheel)
+{
+    if (mode != Mode::scrolling || onZoom == nullptr)
+        return;
+
+    // A wheel sends fractions of a notch on a trackpad, so they are gathered up
+    // until they amount to one: a rung per notch, rather than the view flying
+    // from one end of the ladder to the other under a thumb.
+    wheelGathered += wheel.deltaY * (wheel.isReversed ? -1.0f : 1.0f);
+
+    const auto notches = static_cast<int> (wheelGathered / wheelNotch);
+
+    if (notches == 0)
+        return;
+
+    wheelGathered -= notches * wheelNotch;
+    onZoom (notches);
 }
 
 void WaveformComponent::mouseDown (const juce::MouseEvent& e)

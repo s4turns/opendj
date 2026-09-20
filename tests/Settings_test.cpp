@@ -33,6 +33,7 @@ namespace
 
         state.tempoRanges = { 16.0, 50.0, 6.0, 100.0 };
         state.visibleDecks = { 2, 3 };
+        state.waveformZoomSeconds = 8.0;
 
         state.samplerGain = 0.55f;
         state.samplerCue = true;
@@ -70,6 +71,7 @@ namespace
         REQUIRE (a.crossfaderAssigns == b.crossfaderAssigns);
         REQUIRE (a.tempoRanges == b.tempoRanges);
         REQUIRE (a.visibleDecks == b.visibleDecks);
+        REQUIRE_THAT (a.waveformZoomSeconds, WithinAbs (b.waveformZoomSeconds, 1.0e-9));
         REQUIRE_THAT (a.samplerGain, WithinAbs (b.samplerGain, 1.0e-4f));
         REQUIRE (a.samplerCue == b.samplerCue);
         REQUIRE (a.samplerFiles == b.samplerFiles);
@@ -194,6 +196,22 @@ TEST_CASE ("out of range values are brought back in range", "[settings]")
     REQUIRE (state.samplerGains[0] <= 2.0f);
     REQUIRE (state.samplerGains[1] >= 0.0f);
     REQUIRE (state.micGain <= 2.0f);
+}
+
+TEST_CASE ("a waveform zoom is snapped to a rung of the ladder", "[settings][waveform]")
+{
+    // Nobody types a zoom into the file, but somebody reading it might try, and
+    // the nearest view that exists is a better answer than the default.
+    const auto edited = juce::JSON::parse (R"({ "waveform_zoom_seconds": 3.4 })");
+    REQUIRE_THAT (SessionState::fromVar (edited).waveformZoomSeconds, WithinAbs (3.0, 1.0e-9));
+
+    const auto absurd = juce::JSON::parse (R"({ "waveform_zoom_seconds": 900.0 })");
+    REQUIRE_THAT (SessionState::fromVar (absurd).waveformZoomSeconds,
+                  WithinAbs (opendj::waveform::zoomLevels.back(), 1.0e-9));
+
+    const auto nonsense = juce::JSON::parse (R"({ "waveform_zoom_seconds": "wide" })");
+    REQUIRE_THAT (SessionState::fromVar (nonsense).waveformZoomSeconds,
+                  WithinAbs (SessionState().waveformZoomSeconds, 1.0e-9));
 }
 
 TEST_CASE ("a state reaches the mixer and the sampler it was saved from", "[settings]")

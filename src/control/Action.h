@@ -44,6 +44,11 @@ enum class Action
     deckTrim,
     deckSeek,
 
+    /** Zooms the scrolling waveform. The value is signed rungs of a fixed
+        ladder, not normalised, the same shape as browseScroll; positive zooms
+        in. One zoom is shared by every deck, so `deck` is unused. */
+    deckWaveformZoom,
+
     // Jog wheel. slot is unused.
     jogTouch,           ///< value above zero means a hand is on the platter
     jogTurn,            ///< value is signed ticks, not normalised

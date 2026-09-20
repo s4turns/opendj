@@ -68,6 +68,13 @@ private:
         tells both of them which letter their swap button should carry. */
     void showDeck (int deckIndex);
 
+    /** Moves every deck's scrolling waveform a number of rungs up or down the
+        zoom ladder, positive to zoom in. One setting for all of them: two
+        waveforms side by side are there to be compared, and two scales make
+        that harder rather than easier. */
+    void stepWaveformZoom (int steps);
+    void applyWaveformZoom();
+
     /** Swaps one side for the deck behind it. */
     void swapSide (int side);
 

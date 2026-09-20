@@ -55,6 +55,10 @@ so a drop reads orange, a breakdown loses its red and a hi-hat pattern on its ow
 blue. The three bands are split at the same frequencies the mixer's EQ uses, so turning the Low
 knob down takes exactly the red out of what you can hear.
 
+The wheel over a scrolling waveform zooms it, from half a second either side of the playhead out
+to twenty-four: in to place a cue on the beat, out to see the shape of a phrase. Both decks move
+together, so the two are always at the same scale, and where it was left is where it opens.
+
 The platter turns at 33 1/3 rpm against the track position, so it is a readout and not
 decoration: if it is crawling, the deck is crawling. Drag the middle of it to scratch, exactly
 as if you had a hand on the record, and drag the outer ring to nudge the pitch without stopping

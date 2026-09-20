@@ -13,6 +13,7 @@
 #include "core/Sampler.h"
 #include "stream/IcecastConnection.h"
 #include "stream/RtmpConnection.h"
+#include "ui/WaveformMath.h"
 
 #include <array>
 
@@ -50,6 +51,11 @@ struct SessionState
 
     /** Which deck is on screen on each side. */
     std::array<int, 2> visibleDecks { 0, 1 };
+
+    /** How much of a track the scrolling waveforms show either side of the
+        playhead. One number for every deck: two waveforms side by side are
+        there to be compared, and two scales make that harder. */
+    double waveformZoomSeconds = waveform::defaultZoomSeconds;
 
     /** Where the master and cue busses go. Separate pairs by default: a split
         turns the master mono and puts it in one speaker, which nobody should

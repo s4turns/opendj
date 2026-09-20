@@ -109,6 +109,7 @@ MainComponent::MainComponent()
         // for D on the right. Four decks side by side would leave each of them
         // too narrow to read a waveform on, which is the thing a deck is for.
         deckViews[(size_t) i]->onSwapRequested = [this, i] { swapSide (i % 2); };
+        deckViews[(size_t) i]->onZoomRequested = [this] (int steps) { stepWaveformZoom (steps); };
     }
 
     showDeck (0);
@@ -168,6 +169,15 @@ MainComponent::MainComponent()
     // The controller's browse encoder and load buttons reach the browser through
     // the dispatcher, the same way every other input does.
     dispatcher.selectedFileProvider = [this] (int) { return browser->getSelectedFile(); };
+    dispatcher.waveformZoomHandler = [safe = juce::Component::SafePointer<MainComponent> (this)] (int steps)
+    {
+        juce::MessageManager::callAsync ([safe, steps]
+        {
+            if (safe != nullptr)
+                safe->stepWaveformZoom (steps);
+        });
+    };
+
     dispatcher.browseScrollHandler = [safe = juce::Component::SafePointer<MainComponent> (this)] (int rowsToMove)
     {
         juce::MessageManager::callAsync ([safe, rowsToMove]
@@ -239,6 +249,7 @@ MainComponent::~MainComponent()
     dispatcher.onStateChanged = nullptr;
     dispatcher.selectedFileProvider = nullptr;
     dispatcher.browseScrollHandler = nullptr;
+    dispatcher.waveformZoomHandler = nullptr;
     removeKeyListener (this);
 
     scanner.stop();
@@ -568,6 +579,9 @@ void MainComponent::restoreSettings()
     showDeck (settings.visibleDecks[0]);
     showDeck (settings.visibleDecks[1]);
 
+    settings.waveformZoomSeconds = waveform::nearestZoom (settings.waveformZoomSeconds);
+    applyWaveformZoom();
+
     // Pads are reloaded rather than remembered, because the audio behind them
     // lives in a file that may have moved. One that has is left empty, which is
     // the truth, instead of a pad that looks loaded and plays nothing.
@@ -591,6 +605,7 @@ void MainComponent::saveSettings()
         state.tempoRanges[(size_t) deck] = dispatcher.getTempoRange (deck);
 
     state.visibleDecks = visibleDecks;
+    state.waveformZoomSeconds = settings.waveformZoomSeconds;
 
     state.writeTo (SessionState::defaultFile());
 
@@ -619,6 +634,23 @@ void MainComponent::showDeck (int deckIndex)
         juce::String::charToString ('A' + (juce::juce_wchar) other));
 
     deckRow.resized();
+}
+
+void MainComponent::stepWaveformZoom (int steps)
+{
+    const auto wanted = waveform::stepZoom (settings.waveformZoomSeconds, steps);
+
+    if (juce::approximatelyEqual (wanted, settings.waveformZoomSeconds))
+        return;
+
+    settings.waveformZoomSeconds = wanted;
+    applyWaveformZoom();
+}
+
+void MainComponent::applyWaveformZoom()
+{
+    for (auto& view : deckViews)
+        view->setWaveformZoom (settings.waveformZoomSeconds);
 }
 
 void MainComponent::swapSide (int side)
