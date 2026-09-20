@@ -50,6 +50,14 @@ public:
         not the time since start: if the disk could not keep up, they differ. */
     double getRecordedSeconds() const noexcept;
 
+    /** How much audio the FIFO between the audio thread and the disk holds.
+
+        Roughly two seconds at 48 kHz. Public because it is the one number that
+        decides whether a block can be taken at all: anything larger than this
+        can never fit, whatever the disk is doing, which is what lets the
+        dropped-sample accounting be tested without racing a real writer. */
+    static constexpr int fifoSamples = 96000;
+
     /** Samples the disk could not keep up with, which are missing from the file.
         Dropping them is the right trade against stalling the audio thread, but
         it is not something to do quietly: a set with a hole in it should say so

@@ -14,10 +14,6 @@ namespace
     // delivery format, and the extra eight bits cost only disk.
     constexpr int bitsPerSample = 24;
 
-    // Roughly two seconds at 48 kHz. Enough that a disk pausing to think does
-    // not cost samples, and not so much that stopping takes noticeably long.
-    constexpr int fifoSamples = 96000;
-
     juce::String twoDigits (int value)
     {
         return juce::String (value).paddedLeft ('0', 2);
@@ -105,7 +101,7 @@ juce::File SetRecorder::start (const juce::File& folder, double sampleRate, juce
     stream.release();
 
     writer = std::make_unique<juce::AudioFormatWriter::ThreadedWriter> (
-        formatWriter.release(), writerThread, fifoSamples);
+        formatWriter.release(), writerThread, SetRecorder::fifoSamples);
 
     {
         std::lock_guard<std::mutex> lock (detailMutex);
