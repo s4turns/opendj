@@ -1,7 +1,7 @@
 # OpenDJ roadmap
 
 Where the project is and what to pick up next. Anything ticked has tests or a verified manual
-check behind it, not just code that compiles. The suite is **287 tests** on Linux and 286 on
+check behind it, not just code that compiles. The suite is **293 tests** on Linux and 292 on
 Windows, the one difference being a stderr test whose stand-in for ffmpeg is a shell script;
 anything touching audio is tested by measuring the output, not by checking that the code ran.
 
@@ -24,7 +24,7 @@ that was listed after it except video.
 | 4 | Tempo fader | ✅ | `src/core/Deck.*`, `src/ui/DeckComponent.*` |
 | 5 | Key lock, so tempo does not shift pitch | ✅ | `Deck::renderStretched`, via Rubber Band |
 | 6 | Mixer: fader, three-band EQ, crossfader, cue | ✅ | `src/core/Mixer.*` |
-| 7 | Scrolling and overview waveforms, coloured and zoomable | ✅ | `src/ui/WaveformComponent.*`, `src/ui/WaveformMath.h` |
+| 7 | Scrolling and overview waveforms, coloured and zoomable, and a strip lining the decks' beats up | ✅ | `src/ui/WaveformComponent.*`, `src/ui/BeatMatchComponent.*`, `src/ui/WaveformMath.h` |
 | 8 | BPM detection and beat grid | ✅ | `src/analysis/TrackAnalyser.*` |
 | 9 | Sync: tempo and beat phase | ✅ | `AudioEngine::syncDeck` |
 | 10 | Turntable platters, mouse drivable | ✅ | `src/ui/PlatterComponent.*`, `src/ui/AngleMath.h` |
@@ -94,7 +94,6 @@ set but nothing on screen shows or triggers.
 | More from stems | Separating the library ahead of time, stem pads such as vocal off or drums only, effects on one stem |
 | Library import and metadata | iTunes and Music, rekordbox and Serato libraries; a tag editor; cover art; colours, ratings and comments |
 | Saved cue points | Hot cues kept with the track in the library |
-| Waveforms | A strip showing both decks' beats lined up. Colour by frequency and zoom are done |
 | Sandbox | Previewing a later moment in the headphones while the master plays on |
 | Keyboard mapper | Shortcuts of your own; today there are only Q, W, O, P and the number row |
 | Master effects | Effects on the whole mix, and effect slots with parameters |
@@ -318,6 +317,21 @@ for the platters.
 | The beat grid disappears below two pixels a beat | A grid that cannot be counted only hides the waveform. It also bounds a loop that was unbounded in span, and would otherwise have walked thousands of beats a frame at the wide end |
 | Wheel movement is gathered up before it counts as a rung | A trackpad sends fractions of a notch, and without this the view either did nothing or crossed the whole ladder under a thumb |
 | The value is remembered, and snapped to a rung when read | It is a view preference like the tempo fader ranges, which are already kept. A number typed into the file by hand gives the nearest view that exists rather than nothing |
+
+Across the top of the window, above both decks, `BeatMatchComponent` draws a row per deck on one
+time axis: a tick per beat, the downbeat full height, and one playhead down the middle. In phase
+the two rows put their ticks in the same columns and read as lines through both. Out of phase
+they stagger, and the stagger is the error.
+
+| Decision | Why |
+| --- | --- |
+| Beats are placed in the time a listener is in, not in track time | The waveform draws a track, so track seconds are right there. This draws whether two decks land together as heard, which is a different question: a deck pulled by its tempo fader has to space its beats out to match, and two records cut at different tempos played at the same one have to agree |
+| One axis across the whole window, not a row inside each deck | The comparison is the feature. Split across two panels with a mixer between them there is nothing to line anything up against |
+| A fixed thirty-six pixel row | The same bargain the sampler row makes. Eight beats need the same height whatever else is on screen, and it is cheaper taken from the browser than from a waveform |
+| Four beats either side, averaged over the decks that have a tempo | The strip always shows about eight beats however fast the decks run, and a strip holding two nearly matched decks does not jump about depending on which is fractionally faster |
+| A deck with no tempo gets an empty row and a dimmed letter | A made up grid would be worse than no grid: it would look like something to line up against |
+| The downbeat is drawn full height | Matching tempo is not the same as matching the one beat in four the phrase turns on, and the second is the one that is easy to get wrong |
+| It holds no state and asks the decks afresh every frame | It is a readout, on the shell's timer like every other view, so there is nothing in it that can disagree with the engine |
 
 ## Sampler
 

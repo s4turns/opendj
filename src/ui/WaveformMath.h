@@ -11,16 +11,19 @@
 
 #include <array>
 #include <cmath>
+#include <vector>
 
 namespace opendj
 {
 
-/** The arithmetic behind the waveforms.
+/** The arithmetic behind the waveforms and the beat strip.
 
     Header only and free of any component, the same bargain `AngleMath.h` makes
     for the platters: what reliably goes wrong in a zoomable view is the mapping
-    between seconds, pixels and buckets at the ends of its range, and that
-    deserves to be tested on its own rather than only by eye.
+    between seconds, pixels and buckets at the ends of its range, and what goes
+    wrong in a strip comparing two decks is the one between track time and the
+    time a listener is in. Both deserve testing on their own rather than only by
+    eye.
 */
 namespace waveform
 {
@@ -152,6 +155,67 @@ namespace waveform
         result.energy = static_cast<float> (energy / count);
 
         return result;
+    }
+
+    /** One beat of a deck, placed in the time a listener is in.
+
+        `offsetSeconds` is how long until it is heard, negative once it has
+        been. */
+    struct BeatMark
+    {
+        double offsetSeconds = 0.0;
+        bool isDownbeat = false;
+    };
+
+    /** As many beats of a deck as fall within `spanSeconds` either side of now.
+
+        The waveform draws its grid in track seconds, which is right there: it
+        is drawing the track. This is not. The question a strip of two decks
+        answers is whether their beats land together as heard, so it works in
+        real time, and a deck pulled by its tempo fader spaces its beats out
+        accordingly. `bpm` and `firstBeatSeconds` are the recorded track's, and
+        `tempoRatio` is how much faster than recorded it is being played.
+
+        Nothing is returned for a deck with no tempo, rather than a grid made up
+        to fill the row. */
+    inline std::vector<BeatMark> beatMarks (double bpm,
+                                            double firstBeatSeconds,
+                                            double positionSeconds,
+                                            double tempoRatio,
+                                            double spanSeconds)
+    {
+        std::vector<BeatMark> marks;
+
+        if (bpm <= 0.0 || tempoRatio <= 0.0 || spanSeconds <= 0.0)
+            return marks;
+
+        const auto period = 60.0 / bpm;                    // track seconds a beat
+        const auto reach = spanSeconds * tempoRatio;       // track seconds in view
+
+        const auto from = std::ceil ((positionSeconds - reach - firstBeatSeconds) / period);
+        const auto to = std::floor ((positionSeconds + reach - firstBeatSeconds) / period);
+
+        // A tempo of 180 over a couple of seconds is a handful of beats. This is
+        // only here so that nonsense arriving from a bad analysis cannot turn
+        // into an allocation the size of the machine.
+        constexpr int mostWorthDrawing = 256;
+
+        for (auto beat = from; beat <= to && marks.size() < mostWorthDrawing; beat += 1.0)
+        {
+            const auto trackSeconds = firstBeatSeconds + beat * period;
+
+            marks.push_back ({ (trackSeconds - positionSeconds) / tempoRatio,
+                               std::abs (std::fmod (beat, 4.0)) < 0.001 });
+        }
+
+        return marks;
+    }
+
+    /** How long a beat of this deck lasts as heard, which is what two decks are
+        being compared on. Zero when the deck has no tempo. */
+    inline double playedSecondsPerBeat (double bpm, double tempoRatio) noexcept
+    {
+        return bpm > 0.0 && tempoRatio > 0.0 ? 60.0 / (bpm * tempoRatio) : 0.0;
     }
 
     /** Whether a beat grid at this scale would say anything.

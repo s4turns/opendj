@@ -7,6 +7,8 @@
 
 #include "ui/WaveformMath.h"
 
+#include <cmath>
+
 using Catch::Matchers::WithinAbs;
 using namespace opendj;
 
@@ -124,4 +126,96 @@ TEST_CASE ("a beat grid denser than two pixels a beat is not worth drawing", "[u
     REQUIRE (waveform::beatsAreWorthDrawing (secondsPerBeat, 0.25));
     REQUIRE_FALSE (waveform::beatsAreWorthDrawing (secondsPerBeat, 0.3));
     REQUIRE_FALSE (waveform::beatsAreWorthDrawing (0.0, 0.01));
+}
+
+TEST_CASE ("two decks in phase put their beats in the same places", "[ui][beatstrip]")
+{
+    // Both at 120 BPM, both sitting exactly on a downbeat.
+    const auto a = waveform::beatMarks (120.0, 0.0, 8.0, 1.0, 2.0);
+    const auto b = waveform::beatMarks (120.0, 0.0, 8.0, 1.0, 2.0);
+
+    REQUIRE (a.size() == b.size());
+    REQUIRE_FALSE (a.empty());
+
+    for (size_t i = 0; i < a.size(); ++i)
+        REQUIRE_THAT (a[i].offsetSeconds, WithinAbs (b[i].offsetSeconds, 1.0e-9));
+}
+
+TEST_CASE ("a deck half a beat out staggers exactly halfway", "[ui][beatstrip]")
+{
+    // 120 BPM is half a second a beat, so a quarter second of anchor is half of
+    // one. Counts are not compared: moving the anchor moves which beats fall
+    // inside the window, which is the truth and not a fault.
+    const auto onTheBeat = waveform::beatMarks (120.0, 0.0, 8.0, 1.0, 2.0);
+    const auto halfOut = waveform::beatMarks (120.0, 0.25, 8.0, 1.0, 2.0);
+
+    const auto nearestToNow = [] (const std::vector<waveform::BeatMark>& marks)
+    {
+        REQUIRE_FALSE (marks.empty());
+        auto best = marks.front().offsetSeconds;
+
+        for (const auto& mark : marks)
+            if (std::abs (mark.offsetSeconds) < std::abs (best))
+                best = mark.offsetSeconds;
+
+        return std::abs (best);
+    };
+
+    REQUIRE_THAT (nearestToNow (onTheBeat), WithinAbs (0.0, 1.0e-9));
+    REQUIRE_THAT (nearestToNow (halfOut), WithinAbs (0.25, 1.0e-9));
+}
+
+TEST_CASE ("the strip is drawn in the time a listener is in, not in track time", "[ui][beatstrip]")
+{
+    // The same record, one deck pulled eight per cent fast. Its beats must come
+    // round sooner, which is the whole thing the strip is for.
+    const auto normal = waveform::beatMarks (120.0, 0.0, 8.0, 1.0, 2.0);
+    const auto fast = waveform::beatMarks (120.0, 0.0, 8.0, 1.08, 2.0);
+
+    const auto spacing = [] (const std::vector<waveform::BeatMark>& marks)
+    {
+        REQUIRE (marks.size() > 1);
+        return marks[1].offsetSeconds - marks[0].offsetSeconds;
+    };
+
+    REQUIRE_THAT (spacing (normal), WithinAbs (0.5, 1.0e-9));
+    REQUIRE_THAT (spacing (fast), WithinAbs (0.5 / 1.08, 1.0e-9));
+
+    // And two records cut at different tempos, played at the same one, agree.
+    REQUIRE_THAT (waveform::playedSecondsPerBeat (120.0, 1.0),
+                  WithinAbs (waveform::playedSecondsPerBeat (128.0, 120.0 / 128.0), 1.0e-9));
+}
+
+TEST_CASE ("every fourth beat from the downbeat is marked as one", "[ui][beatstrip]")
+{
+    const auto marks = waveform::beatMarks (120.0, 0.0, 0.0, 1.0, 1.1);
+
+    auto downbeats = 0;
+
+    for (const auto& mark : marks)
+        if (mark.isDownbeat)
+        {
+            ++downbeats;
+
+            // A downbeat is a whole number of bars from the anchor, which at
+            // 120 BPM and four to a bar is every two seconds.
+            REQUIRE_THAT (std::fmod (std::abs (mark.offsetSeconds), 2.0), WithinAbs (0.0, 1.0e-9));
+        }
+
+    REQUIRE (downbeats > 0);
+    REQUIRE (downbeats < static_cast<int> (marks.size()));
+}
+
+TEST_CASE ("a deck with no tempo yields no beats rather than a made up grid", "[ui][beatstrip]")
+{
+    REQUIRE (waveform::beatMarks (0.0, 0.0, 10.0, 1.0, 2.0).empty());
+    REQUIRE (waveform::beatMarks (120.0, 0.0, 10.0, 0.0, 2.0).empty());
+    REQUIRE (waveform::beatMarks (120.0, 0.0, 10.0, 1.0, 0.0).empty());
+
+    REQUIRE_THAT (waveform::playedSecondsPerBeat (0.0, 1.0), WithinAbs (0.0, 1.0e-9));
+}
+
+TEST_CASE ("a nonsense tempo cannot ask for an unbounded number of beats", "[ui][beatstrip]")
+{
+    REQUIRE (waveform::beatMarks (100000.0, 0.0, 0.0, 1.0, 60.0).size() <= 256);
 }

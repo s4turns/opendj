@@ -9,7 +9,7 @@
 
 Free and open source DJ software, built in C++ with [JUCE](https://juce.com).
 
-![Decks A and B, each with a track loaded and its waveforms coloured by frequency, loop lengths, stem knobs, turntable platter, tempo fader and a button to swap in deck C or D, a four channel mixer between them with every control named on every channel: high, mid and low EQ, filter, echo and its length in beats, reverb, crossfader assignment, a channel fader and cue, the track library underneath showing tempo and key, a row of eight sampler pads with their own level and cue, a mic strip with talkover, and a bottom bar with audio setup, recording, Icecast and RTMP streaming, controller setup, and the audio device running at 10 ms](images/screenshot.jpg)
+![A strip across the top lining up both decks' beats, decks A and B below it, each with a track loaded and its waveforms coloured by frequency, loop lengths, stem knobs, turntable platter, tempo fader and a button to swap in deck C or D, a four channel mixer between them with every control named on every channel: high, mid and low EQ, filter, echo and its length in beats, reverb, crossfader assignment, a channel fader and cue, the track library underneath showing tempo and key, a row of eight sampler pads with their own level and cue, a mic strip with talkover, and a bottom bar with audio setup, recording, Icecast and RTMP streaming, controller setup, and the audio device running at 10 ms](images/screenshot.jpg)
 
 The goal is an application a VirtualDJ user can sit down at and already know how to use:
 the same deck layout, the same workflow, the same muscle memory. The artwork, the naming
@@ -58,6 +58,12 @@ knob down takes exactly the red out of what you can hear.
 The wheel over a scrolling waveform zooms it, from half a second either side of the playhead out
 to twenty-four: in to place a cue on the beat, out to see the shape of a phrase. Both decks move
 together, so the two are always at the same scale, and where it was left is where it opens.
+
+Across the top of the window is a strip with a row for each deck on screen, a tick for every beat
+and one playhead down the middle. When the decks are in phase the ticks line up into columns
+through both rows; when they are not, they stagger by exactly as much as the decks are out. Every
+fourth beat is drawn full height, because matching the tempo is not the same as matching the beat
+the phrase turns on.
 
 The platter turns at 33 1/3 rpm against the track position, so it is a readout and not
 decoration: if it is crawling, the deck is crawling. Drag the middle of it to scratch, exactly

@@ -118,6 +118,11 @@ MainComponent::MainComponent()
     mixerView = std::make_unique<MixerComponent> (engine, engine.getMixer());
     deckRow.addAndMakeVisible (*mixerView);
 
+    // Across the top rather than inside a deck: the whole point of it is the two
+    // decks against each other, which needs one axis, not one each.
+    beatStrip = std::make_unique<BeatMatchComponent> (engine);
+    addAndMakeVisible (*beatStrip);
+
     deckRow.onResized = [this] (juce::Rectangle<int> area)
     {
         // Four strips need about twice the centre section two did, but not at
@@ -372,6 +377,7 @@ void MainComponent::timerCallback()
     for (auto& view : deckViews)
         view->refresh();
 
+    beatStrip->refresh();
     mixerView->refresh();
 
     auto status = startupError.isNotEmpty() ? "Audio error: " + startupError
@@ -632,6 +638,9 @@ void MainComponent::showDeck (int deckIndex)
     // rather than as a label for where you already are.
     deckViews[(size_t) deckIndex]->setSwapTarget (
         juce::String::charToString ('A' + (juce::juce_wchar) other));
+
+    if (beatStrip != nullptr)
+        beatStrip->setDecks (visibleDecks[0], visibleDecks[1]);
 
     deckRow.resized();
 }
@@ -1325,6 +1334,12 @@ void MainComponent::paint (juce::Graphics& g)
 void MainComponent::resized()
 {
     auto area = getLocalBounds().reduced (10);
+
+    // A fixed row rather than a share of the window, the same bargain the
+    // sampler row makes: eight beats need the same height whatever else is on
+    // screen, and it is cheaper taken from the browser than from a waveform.
+    beatStrip->setBounds (area.removeFromTop (36));
+    area.removeFromTop (8);
 
     auto footer = area.removeFromBottom (26);
     audioSettingsButton.setBounds (footer.removeFromLeft (100));
