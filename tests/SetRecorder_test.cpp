@@ -120,9 +120,15 @@ TEST_CASE ("a recording produces a playable file of the right length", "[recorde
 
 TEST_CASE ("samples the disk could not take are counted, not lost quietly", "[recorder]")
 {
-    // Faster than any disk: the FIFO fills and write() starts refusing. Dropping
-    // is the right trade against stalling the audio thread, but a set with a
-    // hole in it has to say so rather than look complete.
+    // Dropping is the right trade against stalling the audio thread, but a set
+    // with a hole in it has to say so rather than look complete.
+    //
+    // The refusal is provoked with a block larger than the FIFO, which can
+    // never fit whatever the disk is doing. Racing a real background writer
+    // with a burst of ordinary blocks was tried first and is not a test: it
+    // passed only when the machine happened to be slower than the loop
+    // generating the audio, and failed about one run in fifteen both on the
+    // Debian CI job and locally.
     Folder folder;
     SetRecorder recorder;
 
@@ -130,11 +136,18 @@ TEST_CASE ("samples the disk could not take are counted, not lost quietly", "[re
     const auto file = recorder.start (folder.dir, sampleRate, error);
     REQUIRE (error.isEmpty());
 
-    writeBlocks (recorder, 2000);                  // twenty-one seconds, instantly
+    // Real audio first, so the hole is a hole in something.
+    writeBlocks (recorder, 20);
+    const auto droppedBefore = recorder.getDroppedSamples();
+
+    const auto tooBig = SetRecorder::fifoSamples * 2;
+    juce::AudioBuffer<float> oversized (2, tooBig);
+    oversized.clear();
+    recorder.write (oversized, tooBig);
 
     const auto dropped = recorder.getDroppedSamples();
-    INFO ("dropped " << dropped << " samples");
-    REQUIRE (dropped > 0);
+    INFO ("dropped " << dropped << " samples, " << droppedBefore << " of them before the big block");
+    REQUIRE (dropped - droppedBefore == tooBig);
     REQUIRE (recorder.hadDropouts());
 
     recorder.stop();
