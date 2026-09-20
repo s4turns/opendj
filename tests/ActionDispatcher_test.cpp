@@ -181,34 +181,3 @@ TEST_CASE ("a select button releasing does not re-arm the effect it named", "[co
     // button action; the selection made by the press must still stand.
     REQUIRE (dispatcher.getFxDepthTarget (0) == 1);
 }
-
-TEST_CASE ("waveform zoom is a named action carrying signed rungs", "[control][waveform]")
-{
-    REQUIRE (actionFromString ("deck.waveform_zoom") == Action::deckWaveformZoom);
-    REQUIRE (toString (Action::deckWaveformZoom) == "deck.waveform_zoom");
-
-    // Rungs, not a normalised position, the same as the browse encoder.
-    REQUIRE (isContinuous (Action::deckWaveformZoom));
-}
-
-TEST_CASE ("a zoom action reaches the handler with the rungs it carried", "[control][waveform]")
-{
-    AudioEngine engine;
-    ActionDispatcher dispatcher (engine);
-
-    auto steps = 0;
-    dispatcher.waveformZoomHandler = [&steps] (int moved) { steps += moved; };
-
-    dispatcher.dispatch ({ Action::deckWaveformZoom, 0, 0, 2.0f });
-    dispatcher.dispatch ({ Action::deckWaveformZoom, 0, 0, -1.0f });
-
-    REQUIRE (steps == 1);
-}
-
-TEST_CASE ("a zoom action with nobody listening is harmless", "[control][waveform]")
-{
-    AudioEngine engine;
-    ActionDispatcher dispatcher (engine);
-
-    dispatcher.dispatch ({ Action::deckWaveformZoom, 0, 0, 1.0f });
-}

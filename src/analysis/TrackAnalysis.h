@@ -22,14 +22,6 @@ struct WaveformPeaks
         float minimum = 0.0f;
         float maximum = 0.0f;
         float energy = 0.0f;   ///< RMS, which is what gives a waveform its body
-
-        /** RMS in each of the three bands the mixer's EQ splits at, which is
-            what colours the waveform. They do not add up to `energy`: the bands
-            come out of a Linkwitz-Riley crossover, whose halves add in amplitude
-            rather than in power. */
-        float low = 0.0f;
-        float mid = 0.0f;
-        float high = 0.0f;
     };
 
     int samplesPerBucket = 1;

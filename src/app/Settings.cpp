@@ -198,7 +198,6 @@ juce::var SessionState::toVar() const
     root->setProperty ("crossfader_assign", assigns);
     root->setProperty ("tempo_ranges", ranges);
     root->setProperty ("visible_decks", visible);
-    root->setProperty ("waveform_zoom_seconds", waveformZoomSeconds);
 
     root->setProperty ("output_mode", opendj::toString (outputMode));
 
@@ -276,12 +275,6 @@ SessionState SessionState::fromVar (const juce::var& source)
             if (juce::isPositiveAndBelow (deck, Mixer::numChannels) && deck % 2 == side)
                 state.visibleDecks[(size_t) side] = deck;
         }
-
-    // Snapped to a rung rather than refused, so a number typed into the file by
-    // hand gives the nearest view that exists instead of nothing.
-    state.waveformZoomSeconds = waveform::nearestZoom (
-        number (source, "waveform_zoom_seconds", state.waveformZoomSeconds,
-                waveform::zoomLevels.front(), waveform::zoomLevels.back()));
 
     state.outputMode = outputModeFromString (text (source, "output_mode"));
 

@@ -5,8 +5,6 @@
 
 #include "ui/WaveformComponent.h"
 
-#include "ui/WaveformMath.h"
-
 #include <cmath>
 
 namespace opendj
@@ -15,55 +13,19 @@ namespace opendj
 namespace
 {
     const juce::Colour backgroundColour { 0xff0e0e12 };
+    const juce::Colour waveColour       { 0xff35c2f0 };
+    const juce::Colour playedColour     { 0xff1d6a86 };
     const juce::Colour cueColour        { 0xffe8a33d };
     const juce::Colour beatColour       { 0x40ffffff };
     const juce::Colour barColour        { 0x90ffffff };
     const juce::Colour loopColour       { 0xff4ad991 };
-
-    /** The colour of one column of waveform: how much of it is bass, how much
-        is midrange and how much is treble, as red, green and blue.
-
-        The three bands are read against the largest of the three, so whichever
-        one is leading this column is always at full strength and the other two
-        are seen against it. Bass alone comes out red, bass and midrange
-        together yellow, a broad mix orange, and a hi-hat pattern on its own
-        blue. How loud the passage is stays in the height of the bar, where it
-        already was, and is not said twice.
-
-        Scaling each band by its own loudest moment in the track was tried and
-        is worse: a record's midrange sits near its own peak almost all of the
-        time while its bass and treble only touch theirs on a hit, so every
-        track came out the same shade of green. */
-    juce::Colour colourForBucket (const WaveformPeaks::Bucket& bucket)
-    {
-        const auto strongest = juce::jmax (bucket.low, bucket.mid, bucket.high);
-
-        // Silence, or a track with nothing in any band to measure against.
-        if (strongest <= 0.0f)
-            return juce::Colour (0xff404048);
-
-        return juce::Colour::fromFloatRGBA (bucket.low / strongest,
-                                            bucket.mid / strongest,
-                                            bucket.high / strongest,
-                                            1.0f);
-    }
-
-    /** The same colour behind the playhead. Dimmed and pulled towards grey
-        rather than replaced with a flat colour, so the part already played
-        still reads as the same music rather than as a different track. */
-    juce::Colour asPlayed (juce::Colour colour)
-    {
-        return colour.withMultipliedSaturation (0.55f).withMultipliedBrightness (0.45f);
-    }
 }
 
 WaveformComponent::WaveformComponent (Mode modeToUse)
     : mode (modeToUse)
 {
     setOpaque (true);
-    // The overview is clicked to seek; the scrolling view takes the wheel to
-    // zoom, and `seekFromMouse` is what keeps a click on it from scrubbing.
-    setInterceptsMouseClicks (true, false);
+    setInterceptsMouseClicks (mode == Mode::overview, false);
 }
 
 void WaveformComponent::setAnalysis (std::shared_ptr<const TrackAnalysis> newAnalysis)
@@ -148,19 +110,19 @@ void WaveformComponent::paintOverview (juce::Graphics& g)
         ? static_cast<float> (positionSeconds / trackLengthSeconds) * width
         : 0.0f;
 
-    const auto perPixel = trackLengthSeconds / juce::jmax (1, width);
-
     for (int x = 0; x < width; ++x)
     {
-        const auto seconds = x * perPixel;
-        const auto bucket = waveform::reduce (peaks, analysis->sampleRate, seconds, seconds + perPixel);
+        const auto bucketIndex = static_cast<size_t> (
+            static_cast<double> (x) / width * static_cast<double> (peaks.buckets.size()));
 
+        if (bucketIndex >= peaks.buckets.size())
+            break;
+
+        const auto& bucket = peaks.buckets[bucketIndex];
         const auto top = centre - bucket.maximum * centre;
         const auto bottom = centre - bucket.minimum * centre;
 
-        const auto colour = colourForBucket (bucket);
-
-        g.setColour (static_cast<float> (x) <= playedX ? asPlayed (colour) : colour);
+        g.setColour (static_cast<float> (x) <= playedX ? playedColour : waveColour);
         g.drawVerticalLine (x, top, juce::jmax (top + 1.0f, bottom));
     }
 
@@ -186,18 +148,18 @@ void WaveformComponent::paintOverview (juce::Graphics& g)
 
 void WaveformComponent::paintScrolling (juce::Graphics& g)
 {
+    const auto& peaks = analysis->detail;
+
+    if (peaks.isEmpty())
+        return;
+
     const auto width = getWidth();
     const auto height = static_cast<float> (getHeight());
     const auto centre = height * 0.5f;
 
     const auto spanSeconds = windowSeconds * 2.0;
     const auto startSeconds = positionSeconds - windowSeconds;
-    const auto secondsPerPixel = waveform::secondsPerPixel (windowSeconds, width);
-
-    const auto& peaks = waveform::peaksFor (*analysis, secondsPerPixel);
-
-    if (peaks.isEmpty())
-        return;
+    const auto secondsPerPixel = spanSeconds / juce::jmax (1, width);
 
     // The loop goes down first of all, so the grid and the waveform both read
     // over the top of it rather than being hidden by it.
@@ -216,11 +178,8 @@ void WaveformComponent::paintScrolling (juce::Graphics& g)
         g.fillRect (to - 1.0f, 0.0f, 2.0f, height);
     }
 
-    // Beat grid next, so the waveform draws over it. Zoomed far enough out the
-    // beats are closer together than the lines that would mark them, and a grid
-    // that cannot be counted only hides the waveform underneath it.
-    if (analysis->hasTempo()
-        && waveform::beatsAreWorthDrawing (analysis->secondsPerBeat(), secondsPerPixel))
+    // Beat grid next, so the waveform draws over it.
+    if (analysis->hasTempo())
     {
         const auto period = analysis->secondsPerBeat();
         const auto firstBeatIndex = std::floor ((startSeconds - analysis->firstBeatSeconds) / period);
@@ -252,40 +211,19 @@ void WaveformComponent::paintScrolling (juce::Graphics& g)
         if (seconds < 0.0 || seconds > trackLengthSeconds)
             continue;
 
-        const auto bucket = waveform::reduce (peaks, analysis->sampleRate,
-                                             seconds, seconds + secondsPerPixel);
+        const auto sampleIndex = static_cast<juce::int64> (seconds * analysis->sampleRate);
+        const auto& bucket = peaks.bucketAt (sampleIndex);
 
         const auto top = centre - bucket.maximum * centre;
         const auto bottom = centre - bucket.minimum * centre;
 
-        const auto colour = colourForBucket (bucket);
-
-        g.setColour (seconds <= positionSeconds ? asPlayed (colour) : colour);
+        g.setColour (seconds <= positionSeconds ? playedColour : waveColour);
         g.drawVerticalLine (x, top, juce::jmax (top + 1.0f, bottom));
     }
 
     // The playhead is fixed in the middle; the track moves past it.
     g.setColour (juce::Colours::white);
     g.fillRect (width * 0.5f - 1.0f, 0.0f, 2.0f, height);
-}
-
-void WaveformComponent::mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails& wheel)
-{
-    if (mode != Mode::scrolling || onZoom == nullptr)
-        return;
-
-    // A wheel sends fractions of a notch on a trackpad, so they are gathered up
-    // until they amount to one: a rung per notch, rather than the view flying
-    // from one end of the ladder to the other under a thumb.
-    wheelGathered += wheel.deltaY * (wheel.isReversed ? -1.0f : 1.0f);
-
-    const auto notches = static_cast<int> (wheelGathered / wheelNotch);
-
-    if (notches == 0)
-        return;
-
-    wheelGathered -= notches * wheelNotch;
-    onZoom (notches);
 }
 
 void WaveformComponent::mouseDown (const juce::MouseEvent& e)

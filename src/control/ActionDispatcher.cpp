@@ -134,13 +134,6 @@ void ActionDispatcher::dispatch (const ActionMessage& message)
                                       : Mixer::CrossfaderAssign::thru);
             break;
 
-        case Action::deckWaveformZoom:
-            if (waveformZoomHandler != nullptr)
-                waveformZoomHandler (juce::roundToInt (message.value));
-
-            notify = false;   // the waveforms redraw themselves
-            break;
-
         case Action::browseScroll:
             if (browseScrollHandler != nullptr)
                 browseScrollHandler (juce::roundToInt (message.value));

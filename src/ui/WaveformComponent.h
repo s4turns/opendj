@@ -7,7 +7,7 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
-#include "ui/WaveformMath.h"
+#include "analysis/TrackAnalysis.h"
 
 #include <functional>
 #include <memory>
@@ -43,16 +43,9 @@ public:
     /** Called with a position in seconds when the user clicks or drags. */
     std::function<void (double)> onSeek;
 
-    /** Called with a number of rungs when the wheel is turned over the
-        scrolling view. Positive zooms in. The component does not change its own
-        window: zoom is one setting shared by every deck, so the answer has to
-        come back from whoever owns it. */
-    std::function<void (int steps)> onZoom;
-
     void paint (juce::Graphics& g) override;
 
 private:
-    void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel) override;
     void mouseDown (const juce::MouseEvent& e) override;
     void mouseDrag (const juce::MouseEvent& e) override;
     void seekFromMouse (const juce::MouseEvent& e);
@@ -70,12 +63,7 @@ private:
     double loopStart = -1.0;
     double loopEnd = -1.0;
     bool loopEnabled = false;
-    double windowSeconds = waveform::defaultZoomSeconds;
-
-    /** Wheel movement not yet worth a rung. A trackpad sends this in fractions
-        of a notch and would otherwise either do nothing or everything. */
-    float wheelGathered = 0.0f;
-    static constexpr float wheelNotch = 0.5f;
+    double windowSeconds = 3.0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (WaveformComponent)
 };

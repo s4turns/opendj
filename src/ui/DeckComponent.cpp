@@ -224,7 +224,6 @@ DeckComponent::DeckComponent (AudioEngine& engineToUse, int deckIndex, const juc
         addAndMakeVisible (label);
     }
 
-    scrollingWave.onZoom = [this] (int steps) { if (onZoomRequested != nullptr) onZoomRequested (steps); };
     addAndMakeVisible (scrollingWave);
 
     overviewWave.onSeek = [this] (double seconds) { deck.seekToSeconds (seconds); refresh(); };
@@ -308,11 +307,6 @@ void DeckComponent::updateTempoReadout()
     const auto bpm = engine.getEffectiveBpm (index);
     bpmLabel.setText (bpm > 0.0 ? juce::String (bpm, 1) + " BPM" : juce::String ("-- BPM"),
                       juce::dontSendNotification);
-}
-
-void DeckComponent::setWaveformZoom (double seconds)
-{
-    scrollingWave.setWindowSeconds (seconds);
 }
 
 void DeckComponent::refresh()

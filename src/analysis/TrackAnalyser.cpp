@@ -6,7 +6,6 @@
 #include "analysis/TrackAnalyser.h"
 
 #include "analysis/KeyDetector.h"
-#include "core/Mixer.h"
 
 #include <juce_dsp/juce_dsp.h>
 
@@ -22,11 +21,6 @@ namespace
     constexpr int fftOrder = 10;              // 1024 point frames
     constexpr int fftSize = 1 << fftOrder;
     constexpr int hopSize = fftSize / 4;      // 75 percent overlap
-
-    /** How much audio the band split works through between calls to
-        snapToZero. Nothing depends on the size; it only bounds how long
-        denormals are allowed to sit in the filter state. */
-    constexpr int bandBlockSize = 4096;
 
     /** Sums the channels down to mono. Beat detection has no use for the stereo
         image, and one channel halves the work. */
@@ -555,115 +549,6 @@ WaveformPeaks TrackAnalyser::buildPeaks (const juce::AudioBuffer<float>& audio, 
     return peaks;
 }
 
-void TrackAnalyser::addBandEnergies (const juce::AudioBuffer<float>& audio,
-                                     double sampleRate,
-                                     const std::vector<WaveformPeaks*>& targets)
-{
-    const auto numSamples = audio.getNumSamples();
-    const auto numChannels = juce::jmax (1, audio.getNumChannels());
-
-    if (numSamples <= 0 || sampleRate <= 0.0)
-        return;
-
-    // One bucket's running totals. The pass walks the track in order, so only
-    // the bucket it is inside needs a total: it is finished and written out the
-    // moment the pass crosses into the next one. That is what keeps this free
-    // of any array the length of the track.
-    struct Running
-    {
-        WaveformPeaks* peaks = nullptr;
-        size_t bucket = 0;
-        double low = 0.0, mid = 0.0, high = 0.0;
-        int count = 0;
-
-        void finish() noexcept
-        {
-            if (count <= 0 || bucket >= peaks->buckets.size())
-                return;
-
-            auto& target = peaks->buckets[bucket];
-            target.low = static_cast<float> (std::sqrt (low / count));
-            target.mid = static_cast<float> (std::sqrt (mid / count));
-            target.high = static_cast<float> (std::sqrt (high / count));
-        }
-
-        void restart (size_t newBucket) noexcept
-        {
-            bucket = newBucket;
-            low = mid = high = 0.0;
-            count = 0;
-        }
-    };
-
-    std::vector<Running> running;
-    running.reserve (targets.size());
-
-    for (auto* peaks : targets)
-        if (peaks != nullptr && ! peaks->isEmpty() && peaks->samplesPerBucket > 0)
-            running.push_back (Running { peaks });
-
-    if (running.empty())
-        return;
-
-    // The mixer's own crossovers, so the red on a waveform is exactly what the
-    // Low knob reaches. Two filters rather than three: each one hands back both
-    // halves of its split, and the second splits what the first passed on. The
-    // phase matching allpass the mixer needs is not wanted here, because these
-    // bands are measured and never summed back together.
-    juce::dsp::LinkwitzRileyFilter<float> lowSplit, highSplit;
-
-    const juce::dsp::ProcessSpec spec { sampleRate, static_cast<juce::uint32> (bandBlockSize), 1 };
-    lowSplit.prepare (spec);
-    highSplit.prepare (spec);
-    lowSplit.setCutoffFrequency (Mixer::lowCrossoverHz);
-    highSplit.setCutoffFrequency (Mixer::highCrossoverHz);
-
-    for (int start = 0; start < numSamples; start += bandBlockSize)
-    {
-        const auto length = juce::jmin (bandBlockSize, numSamples - start);
-
-        for (int i = 0; i < length; ++i)
-        {
-            auto mono = 0.0f;
-
-            for (int ch = 0; ch < numChannels; ++ch)
-                mono += audio.getReadPointer (ch)[start + i];
-
-            mono /= static_cast<float> (numChannels);
-
-            float low = 0.0f, aboveLow = 0.0f, mid = 0.0f, high = 0.0f;
-            lowSplit.processSample (0, mono, low, aboveLow);
-            highSplit.processSample (0, aboveLow, mid, high);
-
-            const auto index = static_cast<juce::int64> (start + i);
-
-            for (auto& run : running)
-            {
-                if (const auto bucket = static_cast<size_t> (index / run.peaks->samplesPerBucket);
-                    bucket != run.bucket)
-                {
-                    run.finish();
-                    run.restart (bucket);
-                }
-
-                run.low += static_cast<double> (low) * low;
-                run.mid += static_cast<double> (mid) * mid;
-                run.high += static_cast<double> (high) * high;
-                ++run.count;
-            }
-        }
-
-        // Sample by sample processing leaves denormals in the state variables,
-        // and a track's worth of them is slow enough to feel.
-        lowSplit.snapToZero();
-        highSplit.snapToZero();
-    }
-
-    for (auto& run : running)
-        run.finish();
-
-}
-
 namespace
 {
     /** The waveforms and sample rate, which every analysis starts with.
@@ -685,10 +570,6 @@ namespace
 
         analysis.overview = TrackAnalyser::buildPeaks (audio, overviewBucket);
         analysis.detail = TrackAnalyser::buildPeaks (audio, detailBucket);
-
-        // Both waveforms are coloured off one pass, which is the whole reason
-        // this is not folded into buildPeaks.
-        TrackAnalyser::addBandEnergies (audio, sampleRate, { &analysis.overview, &analysis.detail });
         return true;
     }
 }

@@ -32,7 +32,6 @@ target_sources(opendj-tests PRIVATE
     KeyDetector_test.cpp
     MidiMapping_test.cpp
     AngleMath_test.cpp
-    WaveformMath_test.cpp
     StemDsp_test.cpp
     Library_test.cpp
     TagReader_test.cpp

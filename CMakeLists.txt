@@ -245,7 +245,6 @@ target_sources(OpenDJ PRIVATE
     src/app/Main.cpp
     src/app/MainComponent.cpp
     src/app/Settings.cpp
-    src/ui/BeatMatchComponent.cpp
     src/ui/BrowserComponent.cpp
     src/ui/DeckComponent.cpp
     src/ui/MidiSetupComponent.cpp
