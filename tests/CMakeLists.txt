@@ -74,6 +74,7 @@ target_link_libraries(opendj-tests PRIVATE
     juce::juce_dsp
     opendj_rubberband
     opendj_sqlite3
+    opendj_lame
     PUBLIC
     juce::juce_recommended_config_flags
     juce::juce_recommended_warning_flags)

@@ -43,7 +43,7 @@ that was listed after it except video.
 | Sampler | ✅ | `src/core/Sampler.*`, eight pads |
 | Mic input | 🚧 | `src/core/MicInput.*`, `src/ui/MicComponent.*`, with talkover and a stream-only switch. Tested by measuring the output; not yet tried with a real mic |
 | Stem separation | ✅ | `src/analysis/StemSeparator.*`, `StemDsp.*`, a knob per stem |
-| Record the master output | ✅ | `src/core/SetRecorder.*`, with a tracklist |
+| Record the master output | ✅ | `src/core/SetRecorder.*`: WAV, FLAC or MP3, with a tracklist |
 | Split output cue | ✅ | `src/core/OutputRouter.*`, headphones on a stereo interface |
 | Settings that survive a restart | ✅ | `src/app/Settings.*` |
 | Broadcasting to Icecast | ✅ | `src/stream/`, verified against a real Icecast 2.4.4 |
@@ -84,7 +84,6 @@ set but nothing on screen shows or triggers.
 | Auto gain | Tracks levelled by measured loudness | A trim, with no analysis behind it |
 | Automix | Unattended mixing through a playlist, beat matched | None |
 | MIDI learn and more controllers | Hundreds of controllers mapped out of the box, and a mapper that learns a control from the hardware | One mapping, written by hand. Issue #4 |
-| Recording formats | MP3, FLAC and others | WAV only |
 
 ### Expected by regular users
 
@@ -586,7 +585,8 @@ would fail.
 
 ## Recording a set
 
-The master output to a 24-bit WAV in the user's music folder, with a tracklist beside it.
+The master output to 24-bit WAV, 24-bit FLAC or MP3 in the user's music folder, with a tracklist
+beside it. Format, bitrate and folder are behind a right-click on the Record button.
 
 | Decision | Why |
 | --- | --- |
@@ -594,6 +594,42 @@ The master output to a 24-bit WAV in the user's music folder, with a tracklist b
 | Written through JUCE's `ThreadedWriter` | The audio thread copies into a FIFO and returns; encoding and disk writes happen elsewhere |
 | A full FIFO drops samples rather than blocking | The recording loses them, the room does not. The count is kept and reported: status bar, closing dialog, and the tracklist file, which is the one still there tomorrow. A set with a hole must not look complete |
 | The tracklist is timed against the recording, and seeded with whatever is already playing | The wall clock would drift if samples were dropped, and recording usually starts a minute into the first track, so the list would otherwise begin with the second record |
+| WAV stays the default | A recording is a master to work from later rather than a delivery format, and what an existing installation records to is not a decision to change on somebody's behalf |
+
+### The three formats
+
+A format is one `AudioFormatWriter` behind the same `ThreadedWriter`, so `SetRecorder` knows
+nothing about any of them past `makeWriter`. Everything above -- the FIFO, the drop accounting, the
+tracklist -- is shared and unchanged.
+
+FLAC cost nothing: JUCE bundles libFLAC's encoder and `StemSeparator` already wrote 24-bit FLAC
+with the same call.
+
+MP3 needed an encoder, and **LAME is compiled in** rather than shelled out to. JUCE has a
+`LAMEEncoderAudioFormat`, and it is the wrong shape twice over: it runs the `lame` command line
+program, which the user has to install, and it buffers the whole recording to a temporary WAV and
+converts it only when the writer is destroyed. For a three hour set that is gigabytes of scratch
+file and minutes of waiting after the stop button. `src/core/Mp3Writer.*` encodes block by block
+straight into the file instead, and is the same trick as `RtmpBroadcaster::PcmWriter`: an
+`AudioFormatWriter` over something that is not a JUCE format.
+
+Building LAME is `cmake/lame.cmake` and `cmake/lame-config.h`, following Rubber Band: fetch the
+tarball, compile it here, skip its autotools. A non-recursive glob over `libmp3lame/*.c` is the
+whole source list, because the config header switches off the hand-written i386 and SSE paths and
+`HAVE_MPGLIB`, which compiles `mpglib_interface.c` away to nothing -- OpenDJ decodes MP3 through
+JUCE and wants LAME only to encode. LGPL 2.1, so licence compatible.
+
+**MP3 has no 88.2 or 96 kHz and an audio interface very much does.** `lame_init_params` simply
+fails at a rate it cannot carry, which would have made MP3 recording refuse on exactly the
+hardware most likely to be in front of it. `Mp3Writer::nearestSupportedRate` picks the highest
+supported rate the device's is a whole multiple of and lets LAME resample, so 96 goes to 48 and
+88.2 to 44.1. Nearest in Hz would send 88.2 to 48, which is both the wrong family and the harder
+sum.
+
+The Xing header is written twice: LAME reserves a frame at the front, and the real one can only be
+filled in once the flush says how long the file is, so the writer's destructor winds the stream
+back to zero and overwrites it. Without that a variable bitrate file plays but reports the wrong
+length and cannot be scrubbed, which for a two hour set is most of the value of having it.
 
 ## What is remembered
 

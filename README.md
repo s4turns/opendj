@@ -18,7 +18,7 @@ and the code are entirely original and entirely open.
 **Status: early development, but it mixes.** Four decks with turntable platters you can scratch,
 waveforms, beat grids, automatic BPM and key detection, sync, key lock, beat-locked loops and
 rolls, stem separation with a knob per stem, a mixer with a filter, a beat-synced echo and a reverb per channel, hot cues, an eight slot sampler, a
-searchable track library, set recording with a tracklist, broadcasting to Icecast, and Roland
+searchable track library, set recording to WAV, FLAC or MP3 with a tracklist, broadcasting to Icecast, and Roland
 DJ-202 support including its own audio interface and its platters.
 
 ## Design goals
@@ -191,9 +191,13 @@ with Mixxx on 57 of them; [ROADMAP.md](ROADMAP.md) has the detail and the method
 
 ## Recording a set
 
-Press Record in the bottom bar. The master output goes to a 24-bit WAV in your music folder
-under OpenDJ, named for the date and time, and the button turns red and counts up while it
-runs. Press it again to stop.
+Press Record in the bottom bar. The master output goes to your music folder under OpenDJ,
+named for the date and time, and the button turns red and counts up while it runs. Press it
+again to stop.
+
+Right-click Record for the format and the folder. 24-bit WAV is the default and 24-bit FLAC
+holds the same audio in about half the space; MP3 is there for sending somebody the set, at
+320, 256 or 192 kbps or LAME's variable V0. Nothing has to be installed for any of them.
 
 Beside the audio you get a text file listing what you played and when, timed against the
 recording rather than the clock. Whatever was already playing when you pressed Record is the

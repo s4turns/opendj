@@ -9,6 +9,7 @@
 
 using Catch::Matchers::WithinAbs;
 using opendj::MicInput;
+using opendj::RecordingFormat;
 using opendj::Mixer;
 using opendj::Sampler;
 using opendj::SessionState;
@@ -42,6 +43,10 @@ namespace
         state.micGain = 1.4f;
         state.micTalkover = true;
         state.micRouting = MicInput::Routing::recordingOnly;
+
+        state.recording.format = RecordingFormat::flac;
+        state.recording.mp3Bitrate = 192;
+        state.recording.folder = "/music/sets";
 
         state.rtmp.server = "rtmp://live.twitch.tv/app";
         state.rtmp.streamKey = "live_123_abc";
@@ -80,6 +85,10 @@ namespace
         REQUIRE_THAT (a.micGain, WithinAbs (b.micGain, 1.0e-4f));
         REQUIRE (a.micTalkover == b.micTalkover);
         REQUIRE (a.micRouting == b.micRouting);
+
+        REQUIRE (a.recording.format == b.recording.format);
+        REQUIRE (a.recording.mp3Bitrate == b.recording.mp3Bitrate);
+        REQUIRE (a.recording.folder == b.recording.folder);
 
         REQUIRE (a.rtmp.server == b.rtmp.server);
         REQUIRE (a.rtmp.streamKey == b.rtmp.streamKey);
@@ -306,4 +315,45 @@ TEST_CASE ("saving over settings that already exist replaces them", "[settings]"
 
     // The file the write went through first is not left lying beside it.
     REQUIRE (! temporary.file.getSiblingFile (temporary.file.getFileName() + ".tmp").exists());
+}
+
+TEST_CASE ("a settings file from before the format choice still loads, as WAV",
+           "[settings][recorder]")
+{
+    // The recorder wrote 24-bit WAV and nothing else for as long as it has
+    // existed, so an installation that upgrades into this should keep doing
+    // exactly that until somebody says otherwise.
+    const auto older = juce::JSON::parse (R"({ "master_gain": 0.5 })");
+
+    const auto state = SessionState::fromVar (older);
+
+    REQUIRE (state.recording.format == RecordingFormat::wav);
+    REQUIRE (state.recording.folder.isEmpty());
+    REQUIRE (state.recording.mp3Bitrate == 320);
+}
+
+TEST_CASE ("a recording format is stored by name, not by number", "[settings][recorder]")
+{
+    // A settings file is something a person may well open, and "flac" says what
+    // it is where a 1 does not.
+    auto state = SessionState{};
+    state.recording.format = RecordingFormat::mp3;
+
+    const auto text = juce::JSON::toString (state.toVar());
+    INFO (text);
+    REQUIRE (text.contains ("\"mp3\""));
+}
+
+TEST_CASE ("a nonsense recording format falls back to WAV", "[settings][recorder]")
+{
+    const auto damaged = juce::JSON::parse (
+        R"({ "recording": { "format": "wobble", "mp3_bitrate_kbps": 9999 } })");
+
+    const auto state = SessionState::fromVar (damaged);
+
+    REQUIRE (state.recording.format == RecordingFormat::wav);
+
+    // 320 is the top of what MPEG-1 layer III carries, so a larger number in
+    // the file is clamped rather than handed to LAME.
+    REQUIRE (state.recording.mp3Bitrate == 320);
 }

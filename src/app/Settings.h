@@ -11,6 +11,7 @@
 #include "core/Mixer.h"
 #include "core/OutputRouter.h"
 #include "core/Sampler.h"
+#include "core/SetRecorder.h"
 #include "stream/IcecastConnection.h"
 #include "stream/RtmpConnection.h"
 #include "ui/WaveformMath.h"
@@ -78,6 +79,12 @@ struct SessionState
     float micGain = 1.0f;
     bool micTalkover = false;
     MicInput::Routing micRouting = MicInput::Routing::everywhere;
+
+    /** What the record button writes, and where. WAV by default, because a
+        recording is a master to work from later rather than something to
+        send, and because changing what an existing installation records to
+        is not a decision to make on somebody's behalf. */
+    RecordingSettings recording;
 
     /** The broadcast server, password included. Kept in clear text, which the
         dialog says out loud: it is what every DJ application does, and telling

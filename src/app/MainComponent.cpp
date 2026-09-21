@@ -220,8 +220,8 @@ MainComponent::MainComponent()
     midiSettingsButton.onClick = [this] { showMidiSettings(); };
     addAndMakeVisible (midiSettingsButton);
 
-    recordButton.setTooltip ("Record the master output to a WAV file, with a tracklist beside it");
     recordButton.onClick = [this] { toggleRecording(); };
+    recordButton.onSecondaryClick = [this] { showRecordingSettings(); };
     addAndMakeVisible (recordButton);
 
     statusLabel.setColour (juce::Label::textColourId, juce::Colours::grey);
@@ -588,6 +588,8 @@ void MainComponent::restoreSettings()
     settings.waveformZoomSeconds = waveform::nearestZoom (settings.waveformZoomSeconds);
     applyWaveformZoom();
 
+    updateRecordingTooltip();
+
     // Pads are reloaded rather than remembered, because the audio behind them
     // lives in a file that may have moved. One that has is left empty, which is
     // the truth, instead of a pad that looks loaded and plays nothing.
@@ -804,9 +806,208 @@ void MainComponent::toggleRecording()
 
     juce::String error;
 
-    if (engine.startRecording (error) == juce::File())
+    if (engine.startRecording (settings.recording, error) == juce::File())
         juce::NativeMessageBox::showMessageBoxAsync (
             juce::MessageBoxIconType::WarningIcon, "Could not start recording", error);
+}
+
+void MainComponent::updateRecordingTooltip()
+{
+    const auto& recording = settings.recording;
+
+    auto format = SetRecorder::nameFor (recording.format);
+
+    if (recording.format == RecordingFormat::mp3)
+        format << (recording.mp3Bitrate > 0
+                       ? " at " + juce::String (recording.mp3Bitrate) + " kbps"
+                       : " at V0");
+
+    recordButton.setTooltip ("Record the master output to " + format
+                             + ", with a tracklist beside it."
+                               "  Right-click for the format and the folder.");
+}
+
+void MainComponent::showRecordingSettings()
+{
+    // Zero is V0, which is variable. 320 leads because a DJ who picks MP3 at
+    // all usually means the one everybody recognises. Out here rather than
+    // inside the panel because a class declared inside a function cannot have
+    // static members of its own.
+    static constexpr int bitrates[] = { 320, 256, 192, 0 };
+
+    /** Format, bitrate and folder. No start button, unlike the broadcast
+        panel: the record button is right there behind this dialog and already
+        does that job. */
+    struct RecordingSetup final : public juce::Component
+    {
+        RecordingSetup (RecordingSettings starting,
+                        std::function<void (RecordingSettings)> onChanged)
+            : settings (std::move (starting)), changed (std::move (onChanged))
+        {
+            addLabel (formatLabel, "Format");
+            format.addItem ("WAV, 24-bit", 1 + (int) RecordingFormat::wav);
+            format.addItem ("FLAC, 24-bit", 1 + (int) RecordingFormat::flac);
+            format.addItem ("MP3", 1 + (int) RecordingFormat::mp3);
+            format.setSelectedId (1 + (int) settings.format, juce::dontSendNotification);
+            format.onChange = [this] { refreshEnablement(); };
+            addAndMakeVisible (format);
+
+            addLabel (bitrateLabel, "Bitrate");
+
+            for (int i = 0; i < (int) std::size (bitrates); ++i)
+                bitrate.addItem (bitrates[i] > 0 ? juce::String (bitrates[i]) + " kbps"
+                                                 : "V0, variable, about 245 kbps",
+                                 i + 1);
+
+            bitrate.setSelectedId (1 + indexOfBitrate (settings.mp3Bitrate),
+                                   juce::dontSendNotification);
+            addAndMakeVisible (bitrate);
+
+            addLabel (folderLabel, "Folder");
+            folder.setText (settings.folder, juce::dontSendNotification);
+            folder.setTextToShowWhenEmpty (SetRecorder::defaultFolder().getFullPathName(),
+                                           juce::Colours::grey);
+            folder.setColour (juce::TextEditor::backgroundColourId, juce::Colour (0xff101014));
+            addAndMakeVisible (folder);
+
+            browse.setButtonText ("Browse...");
+            browse.onClick = [this] { chooseFolder(); };
+            addAndMakeVisible (browse);
+
+            note.setText ("WAV and FLAC both keep every bit of what the room heard, FLAC in "
+                          "about half the space. MP3 is for sending somebody the set: what it "
+                          "throws away is gone, so it is a poor thing to remaster from.",
+                          juce::dontSendNotification);
+            note.setColour (juce::Label::textColourId, juce::Colours::grey);
+            note.setFont (juce::FontOptions (12.0f));
+            note.setJustificationType (juce::Justification::topLeft);
+            addAndMakeVisible (note);
+
+            save.setButtonText ("Save");
+            save.onClick = [this] { collectAndClose(); };
+            addAndMakeVisible (save);
+
+            refreshEnablement();
+        }
+
+        static int indexOfBitrate (int kbps)
+        {
+            for (int i = 0; i < (int) std::size (bitrates); ++i)
+                if (bitrates[i] == kbps)
+                    return i;
+
+            return 0;
+        }
+
+        void addLabel (juce::Label& label, const juce::String& text)
+        {
+            label.setText (text, juce::dontSendNotification);
+            label.setColour (juce::Label::textColourId, juce::Colours::white);
+            label.setFont (juce::FontOptions (12.0f));
+            addAndMakeVisible (label);
+        }
+
+        RecordingFormat chosenFormat() const
+        {
+            return (RecordingFormat) juce::jmax (0, format.getSelectedId() - 1);
+        }
+
+        /** The bitrate only means anything for MP3, so it says so by going
+            grey rather than by sitting there inviting a change that does
+            nothing. */
+        void refreshEnablement()
+        {
+            const auto isMp3 = chosenFormat() == RecordingFormat::mp3;
+            bitrate.setEnabled (isMp3);
+            bitrateLabel.setEnabled (isMp3);
+        }
+
+        void chooseFolder()
+        {
+            const juce::File start (settings.folder.isNotEmpty()
+                                        ? juce::File (settings.folder)
+                                        : SetRecorder::defaultFolder());
+
+            chooser = std::make_unique<juce::FileChooser> ("Where recordings go", start);
+
+            chooser->launchAsync (juce::FileBrowserComponent::openMode
+                                      | juce::FileBrowserComponent::canSelectDirectories,
+                                  [this] (const juce::FileChooser& fc)
+                                  {
+                                      if (const auto picked = fc.getResult();
+                                          picked != juce::File())
+                                      {
+                                          folder.setText (picked.getFullPathName(),
+                                                          juce::dontSendNotification);
+                                      }
+                                  });
+        }
+
+        void collectAndClose()
+        {
+            settings.format = chosenFormat();
+            settings.mp3Bitrate = bitrates[juce::jlimit (0, (int) std::size (bitrates) - 1,
+                                                         bitrate.getSelectedId() - 1)];
+            settings.folder = folder.getText().trim();
+
+            changed (settings);
+
+            if (auto* window = findParentComponentOfClass<juce::DialogWindow>())
+                window->exitModalState (0);
+        }
+
+        void resized() override
+        {
+            auto area = getLocalBounds().reduced (10);
+
+            auto row = area.removeFromTop (26);
+            formatLabel.setBounds (row.removeFromLeft (70));
+            format.setBounds (row);
+            area.removeFromTop (4);
+
+            row = area.removeFromTop (26);
+            bitrateLabel.setBounds (row.removeFromLeft (70));
+            bitrate.setBounds (row);
+            area.removeFromTop (4);
+
+            row = area.removeFromTop (26);
+            folderLabel.setBounds (row.removeFromLeft (70));
+            browse.setBounds (row.removeFromRight (84));
+            row.removeFromRight (6);
+            folder.setBounds (row);
+
+            area.removeFromTop (10);
+            note.setBounds (area.removeFromTop (64));
+
+            save.setBounds (area.removeFromBottom (28).removeFromRight (110));
+        }
+
+        RecordingSettings settings;
+        std::function<void (RecordingSettings)> changed;
+
+        juce::Label formatLabel, bitrateLabel, folderLabel, note;
+        juce::ComboBox format, bitrate;
+        juce::TextEditor folder;
+        juce::TextButton browse, save;
+        std::unique_ptr<juce::FileChooser> chooser;
+    };
+
+    auto content = std::make_unique<RecordingSetup> (settings.recording,
+                                                     [this] (RecordingSettings updated)
+                                                     {
+                                                         settings.recording = std::move (updated);
+                                                         updateRecordingTooltip();
+                                                     });
+    content->setSize (460, 230);
+
+    juce::DialogWindow::LaunchOptions options;
+    options.content.setOwned (content.release());
+    options.dialogTitle = "Recording";
+    options.dialogBackgroundColour = juce::Colour (0xff1c1c22);
+    options.escapeKeyTriggersCloseButton = true;
+    options.useNativeTitleBar = true;
+    options.resizable = false;
+    options.launchAsync();
 }
 
 void MainComponent::toggleBroadcast()

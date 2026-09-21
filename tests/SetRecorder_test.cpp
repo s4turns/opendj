@@ -3,13 +3,18 @@
 */
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include "core/Mp3Writer.h"
 #include "core/SetRecorder.h"
 
 #include <cmath>
 
 using Catch::Matchers::WithinAbs;
+using opendj::Mp3Writer;
+using opendj::RecordingFormat;
+using opendj::RecordingSettings;
 using opendj::SetRecorder;
 
 namespace
@@ -31,6 +36,18 @@ namespace
 
         juce::File dir;
     };
+
+    /** WAV unless asked otherwise, which is also the recorder's own default. */
+    RecordingSettings into (const Folder& folder,
+                            RecordingFormat format = RecordingFormat::wav,
+                            int mp3Bitrate = 320)
+    {
+        RecordingSettings settings;
+        settings.format = format;
+        settings.mp3Bitrate = mp3Bitrate;
+        settings.folder = folder.dir.getFullPathName();
+        return settings;
+    }
 
     void writeBlocks (SetRecorder& recorder, int blocks, float amplitude = 0.25f)
     {
@@ -73,17 +90,23 @@ TEST_CASE ("writing while stopped does nothing at all", "[recorder]")
     REQUIRE (recorder.getRecordedSeconds() == 0.0);
 }
 
-TEST_CASE ("a recording produces a playable file of the right length", "[recorder]")
+TEST_CASE ("a recording produces a playable file of the right length", "[recorder][format]")
 {
+    const auto format = GENERATE (RecordingFormat::wav, RecordingFormat::flac,
+                                  RecordingFormat::mp3);
+
+    INFO ("format: " << SetRecorder::nameFor (format));
+
     Folder folder;
     SetRecorder recorder;
 
     juce::String error;
-    const auto file = recorder.start (folder.dir, sampleRate, error);
+    const auto file = recorder.start (into (folder, format), sampleRate, error);
 
     INFO ("error: " << error);
     REQUIRE (error.isEmpty());
     REQUIRE (recorder.isRecording());
+    REQUIRE (file.getFileExtension() == SetRecorder::extensionFor (format));
 
     const auto blocks = 200;                       // a little over two seconds
     writeBlocks (recorder, blocks);
@@ -111,11 +134,117 @@ TEST_CASE ("a recording produces a playable file of the right length", "[recorde
     REQUIRE (reader != nullptr);
     REQUIRE (reader->numChannels == 2);
     REQUIRE_THAT (reader->sampleRate, WithinAbs (sampleRate, 0.1));
-    REQUIRE (reader->lengthInSamples == kept);
+
+    if (format == RecordingFormat::mp3)
+    {
+        // Not sample-exact, and cannot be. LAME pads the first frame with its
+        // own encoder delay and the last one out to a frame boundary, and JUCE
+        // over-reports an MP3's length on top of that (see ROADMAP.md). A
+        // quarter of a second either way catches a file that is the wrong
+        // length for a real reason while leaving the format its own padding.
+        REQUIRE_THAT ((double) reader->lengthInSamples / sampleRate,
+                      WithinAbs ((double) kept / sampleRate, 0.25));
+    }
+    else
+    {
+        REQUIRE (reader->lengthInSamples == kept);
+    }
 
     juce::AudioBuffer<float> back (2, (int) reader->lengthInSamples);
     REQUIRE (reader->read (&back, 0, (int) reader->lengthInSamples, 0, true, true));
     REQUIRE (back.getMagnitude (0, 0, back.getNumSamples()) > 0.2f);
+}
+
+TEST_CASE ("an MP3 recording is written at a rate MP3 has", "[recorder][format]")
+{
+    // A DJ interface at 96 kHz is ordinary and MP3 has no such rate, so LAME is
+    // asked to resample rather than refusing the recording. This is the one
+    // path that would otherwise be quietly broken on exactly the hardware most
+    // likely to be in front of it.
+    constexpr double deviceRate = 96000.0;
+
+    Folder folder;
+    SetRecorder recorder;
+
+    juce::String error;
+    const auto file = recorder.start (into (folder, RecordingFormat::mp3), deviceRate, error);
+
+    INFO ("error: " << error);
+    REQUIRE (error.isEmpty());
+
+    writeBlocks (recorder, 100);
+    recorder.stop();
+
+    juce::AudioFormatManager formats;
+    formats.registerBasicFormats();
+
+    std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (file));
+    REQUIRE (reader != nullptr);
+    REQUIRE_THAT (reader->sampleRate, WithinAbs (48000.0, 0.1));
+    REQUIRE (reader->lengthInSamples > 0);
+}
+
+TEST_CASE ("a rate MP3 cannot carry becomes the nearest one it can", "[recorder][format]")
+{
+    // By ratio rather than by difference: 88.2 is a doubled 44.1 and halving it
+    // is a clean decimation, where 48 is merely the closer of the two in Hz.
+    REQUIRE (Mp3Writer::nearestSupportedRate (44100.0) == 44100);
+    REQUIRE (Mp3Writer::nearestSupportedRate (48000.0) == 48000);
+    REQUIRE (Mp3Writer::nearestSupportedRate (88200.0) == 44100);
+    REQUIRE (Mp3Writer::nearestSupportedRate (96000.0) == 48000);
+    REQUIRE (Mp3Writer::nearestSupportedRate (176400.0) == 44100);
+    REQUIRE (Mp3Writer::nearestSupportedRate (192000.0) == 48000);
+    REQUIRE (Mp3Writer::nearestSupportedRate (32000.0) == 32000);
+
+    // Nothing divides it, so the closest one there is.
+    REQUIRE (Mp3Writer::nearestSupportedRate (50000.0) == 48000);
+}
+
+TEST_CASE ("a variable bitrate MP3 records too", "[recorder][format]")
+{
+    // Zero means V0, which is a different code path through LAME from a
+    // constant bitrate and the one that needs the Xing header rewritten on the
+    // way out.
+    Folder folder;
+    SetRecorder recorder;
+
+    juce::String error;
+    const auto file = recorder.start (into (folder, RecordingFormat::mp3, 0), sampleRate, error);
+
+    INFO ("error: " << error);
+    REQUIRE (error.isEmpty());
+
+    writeBlocks (recorder, 100);
+    recorder.stop();
+
+    juce::AudioFormatManager formats;
+    formats.registerBasicFormats();
+
+    std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (file));
+    REQUIRE (reader != nullptr);
+    REQUIRE (reader->lengthInSamples > 0);
+}
+
+TEST_CASE ("the tracklist sits beside the audio whatever the format", "[recorder][format]")
+{
+    const auto format = GENERATE (RecordingFormat::wav, RecordingFormat::flac,
+                                  RecordingFormat::mp3);
+
+    Folder folder;
+    SetRecorder recorder;
+
+    juce::String error;
+    const auto file = recorder.start (into (folder, format), sampleRate, error);
+    REQUIRE (error.isEmpty());
+
+    recorder.noteTrack ("Boys Noize - Oh!");
+    writeBlocks (recorder, 10);
+    recorder.stop();
+
+    const auto listFile = file.withFileExtension (".txt");
+    INFO (listFile.getFullPathName());
+    REQUIRE (listFile.existsAsFile());
+    REQUIRE (listFile.loadFileAsString().contains ("Boys Noize - Oh!"));
 }
 
 TEST_CASE ("samples the disk could not take are counted, not lost quietly", "[recorder]")
@@ -133,7 +262,7 @@ TEST_CASE ("samples the disk could not take are counted, not lost quietly", "[re
     SetRecorder recorder;
 
     juce::String error;
-    const auto file = recorder.start (folder.dir, sampleRate, error);
+    const auto file = recorder.start (into (folder), sampleRate, error);
     REQUIRE (error.isEmpty());
 
     // Real audio first, so the hole is a hole in something.
@@ -165,7 +294,7 @@ TEST_CASE ("a tracklist is written beside the audio", "[recorder][tracklist]")
     SetRecorder recorder;
 
     juce::String error;
-    const auto file = recorder.start (folder.dir, sampleRate, error);
+    const auto file = recorder.start (into (folder), sampleRate, error);
     REQUIRE (error.isEmpty());
 
     recorder.noteTrack ("Boys Noize - Oh!");
@@ -202,7 +331,7 @@ TEST_CASE ("the same track twice running is not listed twice", "[recorder][track
     SetRecorder recorder;
 
     juce::String error;
-    recorder.start (folder.dir, sampleRate, error);
+    recorder.start (into (folder), sampleRate, error);
 
     recorder.noteTrack ("One Track");
     recorder.noteTrack ("One Track");
@@ -222,7 +351,7 @@ TEST_CASE ("tracks noted while stopped are not kept", "[recorder][tracklist]")
     REQUIRE (recorder.getTracklist().empty());
 
     juce::String error;
-    recorder.start (folder.dir, sampleRate, error);
+    recorder.start (into (folder), sampleRate, error);
     REQUIRE (recorder.getTracklist().empty());
     recorder.stop();
 }
@@ -240,9 +369,9 @@ TEST_CASE ("a second start while recording is refused", "[recorder]")
     SetRecorder recorder;
 
     juce::String error;
-    REQUIRE (recorder.start (folder.dir, sampleRate, error).existsAsFile());
+    REQUIRE (recorder.start (into (folder), sampleRate, error).existsAsFile());
 
-    const auto second = recorder.start (folder.dir, sampleRate, error);
+    const auto second = recorder.start (into (folder), sampleRate, error);
 
     REQUIRE (second == juce::File());
     REQUIRE (error.contains ("Already recording"));
@@ -258,7 +387,7 @@ TEST_CASE ("recording without a sample rate is refused with a reason", "[recorde
     SetRecorder recorder;
 
     juce::String error;
-    const auto file = recorder.start (folder.dir, 0.0, error);
+    const auto file = recorder.start (into (folder), 0.0, error);
 
     REQUIRE (file == juce::File());
     REQUIRE (error.contains ("no audio device"));
@@ -270,11 +399,11 @@ TEST_CASE ("two recordings in a row do not overwrite each other", "[recorder]")
     SetRecorder recorder;
 
     juce::String error;
-    const auto first = recorder.start (folder.dir, sampleRate, error);
+    const auto first = recorder.start (into (folder), sampleRate, error);
     writeBlocks (recorder, 5);
     recorder.stop();
 
-    const auto second = recorder.start (folder.dir, sampleRate, error);
+    const auto second = recorder.start (into (folder), sampleRate, error);
     writeBlocks (recorder, 5);
     recorder.stop();
 

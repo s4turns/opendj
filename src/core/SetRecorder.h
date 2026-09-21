@@ -15,6 +15,33 @@
 namespace opendj
 {
 
+/** What the recorder writes, and where.
+
+    Kept beside the recorder rather than in `SessionState`, the same way
+    `BroadcastSettings` lives beside the Icecast connection: the thing that
+    consumes a setting is the thing that should define it, and this way the
+    core has no idea the application has a settings file.
+*/
+enum class RecordingFormat
+{
+    wav,    ///< 24-bit. The default: a recording is a master to work from later.
+    flac,   ///< 24-bit, lossless, about half the size.
+    mp3     ///< Lossy, and about a tenth. For sending somebody the set.
+};
+
+struct RecordingSettings
+{
+    RecordingFormat format = RecordingFormat::wav;
+
+    /** A constant bitrate in kilobits, or 0 for LAME's V0, which is variable
+        and averages around 245. Ignored unless the format is `mp3`. */
+    int mp3Bitrate = 320;
+
+    /** Empty means `SetRecorder::defaultFolder()`, which is what it stays
+        unless somebody goes looking for the setting. */
+    juce::String folder;
+};
+
 /** Records the master output to a file while you play.
 
     The audio thread only ever hands blocks to JUCE's ThreadedWriter, which
@@ -36,9 +63,10 @@ public:
     // Message thread
     //==========================================================================
 
-    /** Starts recording to a new file in the given folder, named for the date
-        and time. Returns the file, or an invalid file with `error` filled in. */
-    juce::File start (const juce::File& folder, double sampleRate, juce::String& error);
+    /** Starts recording to a new file, named for the date and time and given
+        the extension the chosen format asks for. Returns the file, or an
+        invalid file with `error` filled in. */
+    juce::File start (const RecordingSettings& settings, double sampleRate, juce::String& error);
 
     /** Stops, finishes the file and writes the tracklist beside it. Returns the
         audio file that was written, or an invalid file if nothing was. */
@@ -87,6 +115,12 @@ public:
         folder, under OpenDJ. */
     static juce::File defaultFolder();
 
+    /** ".wav", ".flac" or ".mp3". */
+    static juce::String extensionFor (RecordingFormat format);
+
+    /** "WAV", "FLAC" or "MP3", for the one error message and the dialog. */
+    static juce::String nameFor (RecordingFormat format);
+
     //==========================================================================
     // Audio thread
     //==========================================================================
@@ -97,6 +131,13 @@ public:
 
 private:
     juce::File writeTracklist (const juce::File& audioFile) const;
+
+    /** The one place a format turns into a writer. Null when the format could
+        not be started at this sample rate, and the stream is thrown away with
+        it. */
+    static std::unique_ptr<juce::AudioFormatWriter> makeWriter (
+        const RecordingSettings& settings, std::unique_ptr<juce::FileOutputStream> stream,
+        double sampleRate);
 
     // The writer is created on the message thread and used from the audio
     // thread, so the pointer the audio thread reads is swapped under a lock the

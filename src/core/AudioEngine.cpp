@@ -471,7 +471,7 @@ bool AudioEngine::syncDeck (int followerIndex, int leaderIndex)
     return true;
 }
 
-juce::File AudioEngine::startRecording (juce::String& error)
+juce::File AudioEngine::startRecording (const RecordingSettings& settings, juce::String& error)
 {
     auto* device = deviceManager.getCurrentAudioDevice();
 
@@ -481,8 +481,7 @@ juce::File AudioEngine::startRecording (juce::String& error)
         return {};
     }
 
-    const auto file = recorder.start (SetRecorder::defaultFolder(),
-                                      device->getCurrentSampleRate(), error);
+    const auto file = recorder.start (settings, device->getCurrentSampleRate(), error);
 
     // Whatever is already playing belongs at the top of the tracklist. Recording
     // usually starts a minute into the first track, not before it, and a list

@@ -52,6 +52,20 @@ if(WIN32)
     target_compile_options(opendj_rubberband PRIVATE /utf-8)
 endif()
 
+# LAME encodes the MP3 the recorder writes. JUCE bundles a FLAC encoder and a
+# Vorbis one but no MP3 encoder at all: its LAMEEncoderAudioFormat shells out to
+# a lame binary the user has to install, and buffers the whole recording to a
+# temporary WAV before converting it, which for a three hour set is gigabytes of
+# scratch file and minutes of waiting after the stop button. Compiling the
+# library in costs one dependency and removes both. LGPL 2.1 or later, so
+# licence compatible.
+FetchContent_Declare(lame
+    URL      https://downloads.sourceforge.net/project/lame/lame/3.100/lame-3.100.tar.gz
+    URL_HASH SHA256=ddfe36cab873794038ae2c1210557ad34857a4b6bdc515785d1da9e175b1da1e)
+FetchContent_MakeAvailable(lame)
+
+include("${CMAKE_SOURCE_DIR}/cmake/lame.cmake")
+
 # SQLite holds the track library. The system library is used where the
 # platform has one, and the public domain amalgamation is fetched and compiled
 # in otherwise, which is the Windows case.
@@ -206,6 +220,7 @@ set(OPENDJ_ENGINE_SOURCES
     ${CMAKE_SOURCE_DIR}/src/stream/RtmpConnection.cpp
     ${CMAKE_SOURCE_DIR}/src/core/Sampler.cpp
     ${CMAKE_SOURCE_DIR}/src/core/SetRecorder.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/Mp3Writer.cpp
     ${CMAKE_SOURCE_DIR}/src/analysis/KeyDetector.cpp
     ${CMAKE_SOURCE_DIR}/src/analysis/TrackAnalysis.cpp
     ${CMAKE_SOURCE_DIR}/src/analysis/TrackAnalyser.cpp
@@ -312,6 +327,7 @@ target_link_libraries(OpenDJ PRIVATE
     juce::juce_dsp
     opendj_rubberband
     opendj_sqlite3
+    opendj_lame
     PUBLIC
     juce::juce_recommended_config_flags
     juce::juce_recommended_lto_flags
