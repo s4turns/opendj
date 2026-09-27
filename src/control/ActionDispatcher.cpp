@@ -374,6 +374,36 @@ void ActionDispatcher::dispatch (const ActionMessage& message)
             mixer.setMasterGain (message.value);
             break;
 
+        // The unit is the deck number as sent, not clamped to a deck: there
+        // are two units, and a mapping naming a third should do nothing
+        // rather than quietly work the second.
+        case Action::masterFxToggle:
+            if (pressed)
+                mixer.getMasterEffects().toggleEnabled (message.deck);
+            break;
+
+        case Action::masterFxOn:
+            mixer.getMasterEffects().setEnabled (message.deck, pressed);
+            break;
+
+        case Action::masterFxWet:
+            mixer.getMasterEffects().setWet (message.deck, message.value);
+            break;
+
+        case Action::masterFxParam:
+            mixer.getMasterEffects().setParam (message.deck, message.slot, message.value);
+            break;
+
+        case Action::masterFxType:
+            if (pressed && juce::isPositiveAndBelow (message.slot, MasterEffects::numTypes))
+                mixer.getMasterEffects().setType (message.deck, (MasterEffects::Type) message.slot);
+            break;
+
+        case Action::masterFxNextType:
+            if (pressed)
+                mixer.getMasterEffects().stepType (message.deck);
+            break;
+
         case Action::cueGain:
             mixer.setCueGain (message.value);
             break;

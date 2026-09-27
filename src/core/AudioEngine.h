@@ -150,6 +150,13 @@ public:
     /** The deck's analysed tempo scaled by its tempo fader, or 0 with no grid. */
     double getEffectiveBpm (int deckIndex) const;
 
+    /** The deck whose tempo the master effects follow, or -1 with none.
+
+        The one the room is hearing: playing, with a grid, and loudest by its
+        fader and the crossfader. Whoever is playing into the mix is who a
+        master echo is meant to lock to, not whichever deck was touched last. */
+    int findMasterTempoDeck() const;
+
     bool isDeckLoading (int deckIndex) const noexcept
     {
         return juce::isPositiveAndBelow (deckIndex, numDecks)

@@ -40,6 +40,7 @@ that was listed after it except video.
 | Slip mode | ✅ | `Deck::setSlipEnabled`, sharing the roll's shadow playhead |
 | Key detection | ✅ | `src/analysis/KeyDetector.*`, in the browser's Key column |
 | Effects: filter, echo, reverb | ✅ | `src/core/Mixer.*`, one knob each per channel |
+| Master effects | ✅ | `src/core/MasterEffects.*`: two slots on the whole mix, each echo, reverb or filter with a wet level and two parameters |
 | Sampler | ✅ | `src/core/Sampler.*`, eight pads |
 | Mic input | 🚧 | `src/core/MicInput.*`, `src/ui/MicComponent.*`, with talkover and a stream-only switch. Tested by measuring the output; not yet tried with a real mic |
 | Stem separation | ✅ | `src/analysis/StemSeparator.*`, `StemDsp.*`, a knob per stem |
@@ -79,7 +80,7 @@ set but nothing on screen shows or triggers.
 | Hot cues on screen | Pads per deck with colours and names, and markers on the waveform | Controller only, never drawn |
 | Beat jump and quantize | Jumps of 1 to 32 beats; cues and loops snap to the grid | None. Automatic loops already start on the beat |
 | Beat grid editing | Adjust the BPM, move the downbeat, tap tempo | Detection only, so a wrong grid cannot be corrected |
-| More effects | Dozens, including flanger, phaser, gate, bitcrusher, brake, backspin, echo out and stutter, plus reverse and censor buttons | Filter, echo and reverb per channel |
+| More effects | Dozens, including flanger, phaser, gate, bitcrusher, brake, backspin, echo out and stutter, plus reverse and censor buttons | Filter, echo and reverb per channel, and the same three in two master slots |
 | Key tools | Key shift in semitones, key match between decks, Camelot display, harmonic hints in the browser | Detection only |
 | Auto gain | Tracks levelled by measured loudness | A trim, with no analysis behind it |
 | Automix | Unattended mixing through a playlist, beat matched | None |
@@ -95,7 +96,6 @@ set but nothing on screen shows or triggers.
 | Saved cue points | Hot cues kept with the track in the library |
 | Sandbox | Previewing a later moment in the headphones while the master plays on |
 | Keyboard mapper | Shortcuts of your own; today there are only Q, W, O, P and the number row |
-| Master effects | Effects on the whole mix, and effect slots with parameters |
 | Ableton Link | Tempo shared with other applications and devices |
 | Timecode vinyl | Decks driven by real turntables or CDJs |
 

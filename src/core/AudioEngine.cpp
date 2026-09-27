@@ -726,6 +726,39 @@ void AudioEngine::updateEchoTimes()
 
         mixer.setChannelEchoTime (i, beatSeconds * echoBeats[(size_t) i].load (std::memory_order_relaxed));
     }
+
+    const auto tempoDeck = findMasterTempoDeck();
+    mixer.getMasterEffects().setBeatSeconds (tempoDeck >= 0 ? 60.0 / getEffectiveBpm (tempoDeck) : 0.5);
+}
+
+int AudioEngine::findMasterTempoDeck() const
+{
+    // Where the crossfader leaves each side, on a straight line. The real curve
+    // does not matter here: only which deck is loudest does.
+    const auto x = (mixer.getCrossfaderPosition() + 1.0f) * 0.5f;
+
+    auto best = -1;
+    auto bestLevel = 0.0f;
+
+    for (int i = 0; i < numDecks; ++i)
+    {
+        if (! decks[(size_t) i]->isPlaying() || getEffectiveBpm (i) <= 0.0)
+            continue;
+
+        const auto assign = mixer.getChannelCrossfaderAssign (i);
+        const auto side = assign == Mixer::CrossfaderAssign::a ? 1.0f - x
+                        : assign == Mixer::CrossfaderAssign::b ? x
+                                                               : 1.0f;
+
+        // Ties go to the lower deck, as they do for sync.
+        if (const auto level = mixer.getChannelFader (i) * side; level > bestLevel)
+        {
+            bestLevel = level;
+            best = i;
+        }
+    }
+
+    return best;
 }
 
 void AudioEngine::timerCallback()

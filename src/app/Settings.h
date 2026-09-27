@@ -73,6 +73,23 @@ struct SessionState
     std::array<float, Sampler::numSlots> samplerGains { 1.0f, 1.0f, 1.0f, 1.0f,
                                                         1.0f, 1.0f, 1.0f, 1.0f };
 
+    /** One master effect unit: which effect it holds, and the wet level and
+        parameters of every effect it can hold, so each comes back as left. */
+    struct MasterFxSlotState
+    {
+        MasterEffects::Type type = MasterEffects::Type::echo;
+        std::array<float, MasterEffects::numTypes> wet {};
+        std::array<std::array<float, MasterEffects::numParams>, MasterEffects::numTypes> params {};
+    };
+
+    /** The master effects as a fresh installation has them. */
+    static std::array<MasterFxSlotState, MasterEffects::numSlots> defaultMasterFx();
+
+    /** The master effect units. Whether each is on is deliberately not kept,
+        for the same reason the faders are not: a set should never open with an
+        effect running that nobody can see was left on. */
+    std::array<MasterFxSlotState, MasterEffects::numSlots> masterFx = defaultMasterFx();
+
     /** The mic's level, talkover and where it is heard. Whether it is on is
         deliberately not kept: an open mic in front of the speakers howls, and
         nobody should get that from opening the application. */

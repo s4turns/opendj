@@ -60,6 +60,9 @@ MainComponent::MainComponent()
             // any other, and the interface has to show it moved.
             if (safe->mixerView != nullptr)
                 safe->mixerView->refresh();
+
+            if (safe->masterFxView != nullptr)
+                safe->masterFxView->refresh();
         });
     };
 
@@ -150,6 +153,9 @@ MainComponent::MainComponent()
                 showDeck (deckIndex);
         });
     };
+
+    masterFxView = std::make_unique<MasterFxComponent> (engine.getMixer().getMasterEffects());
+    addAndMakeVisible (*masterFxView);
 
     samplerView = std::make_unique<SamplerComponent> (engine);
     samplerView->onMessage = [this] (const juce::String& message)
@@ -379,6 +385,7 @@ void MainComponent::timerCallback()
 
     beatStrip->refresh();
     mixerView->refresh();
+    masterFxView->refresh();
 
     auto status = startupError.isNotEmpty() ? "Audio error: " + startupError
                                             : engine.getDeviceDescription();
@@ -1566,6 +1573,11 @@ void MainComponent::resized()
     micView->setBounds (samplerRow.removeFromRight (300));
     samplerRow.removeFromRight (8);
     samplerView->setBounds (samplerRow);
+    area.removeFromBottom (8);
+
+    // The effects on the whole mix get a row of their own above the pads, on
+    // the same bargain: fixed height, taken from the browser.
+    masterFxView->setBounds (area.removeFromBottom (58));
     area.removeFromBottom (8);
 
     juce::Component* rows[] = { &deckRow, resizerBar.get(), browser.get() };

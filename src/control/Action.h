@@ -114,6 +114,15 @@ enum class Action
     cueGain,
     cueMix,
 
+    // Master effects. deck selects the unit, 0 or 1, because they sit over
+    // the whole mix rather than on one channel.
+    masterFxToggle,     ///< press turns the unit on or off
+    masterFxOn,         ///< on while the value is above half, for a held button
+    masterFxWet,        ///< how much of the effect is heard
+    masterFxParam,      ///< slot picks the parameter, 0 or 1, of the current effect
+    masterFxType,       ///< press picks an effect: slot 0 echo, 1 reverb, 2 filter
+    masterFxNextType,   ///< press steps on to the next effect
+
     // Sampler. slot selects the pad, 0 to 7; deck is unused, because the
     // sampler sits over the whole mix rather than on one channel.
     samplerTrigger,     ///< press starts that slot from the beginning

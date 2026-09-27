@@ -213,6 +213,7 @@ set(OPENDJ_ENGINE_SOURCES
     ${CMAKE_SOURCE_DIR}/src/core/Deck.cpp
     ${CMAKE_SOURCE_DIR}/src/core/MicInput.cpp
     ${CMAKE_SOURCE_DIR}/src/core/Mixer.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/MasterEffects.cpp
     ${CMAKE_SOURCE_DIR}/src/core/OutputRouter.cpp
     ${CMAKE_SOURCE_DIR}/src/stream/Broadcaster.cpp
     ${CMAKE_SOURCE_DIR}/src/stream/IcecastConnection.cpp
@@ -267,6 +268,7 @@ target_sources(OpenDJ PRIVATE
     src/ui/PlatterComponent.cpp
     src/ui/WaveformComponent.cpp
     src/ui/MixerComponent.cpp
+    src/ui/MasterFxComponent.cpp
     src/ui/SamplerComponent.cpp
     src/ui/MicComponent.cpp
     src/ui/VisualizerComponent.cpp)

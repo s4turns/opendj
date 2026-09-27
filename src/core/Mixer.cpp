@@ -5,15 +5,17 @@
 
 #include "core/Mixer.h"
 
+#include "core/EffectCurves.h"
+
 #include <cmath>
 
 namespace opendj
 {
 
+using namespace effectCurves;
+
 namespace
 {
-    constexpr double smoothingSeconds = 0.02;
-
     /** Maps a 0 to 1 EQ knob onto a gain, with 0.5 flat, 0 a full kill and 1
         about +6 dB. The lower half is squared so the last part of the sweep
         into kill feels gradual rather than falling off a cliff. */
@@ -56,49 +58,6 @@ namespace
     {
         normalised = juce::jlimit (0.0f, 1.0f, normalised);
         return normalised * normalised;
-    }
-
-    // The dead zone either side of centre, so that a knob resting a hair off
-    // the middle is still audibly out of the way.
-    constexpr float filterDeadZone = 0.02f;
-
-    constexpr float filterLowestCutoff = 120.0f;
-    constexpr float filterHighestCutoff = 8000.0f;
-    constexpr float filterOpenLow = 22000.0f;   // a low pass this high is transparent
-    constexpr float filterOpenHigh = 15.0f;     // and a high pass this low likewise
-
-    // Long enough for two beats at 60 BPM, which is slower than anything anyone
-    // will echo. The line is sized once in prepare and never again.
-    constexpr double maxEchoSeconds = 4.0;
-
-    constexpr double shortestEchoSeconds = 0.02;
-
-    /** The knob turned up raises the wet level and the feedback together. Kept
-        under one so the echo always dies away: a DJ mixer that could be left
-        self-oscillating is a mixer that will be. */
-    float echoFeedbackFor (float amount) noexcept
-    {
-        return juce::jlimit (0.0f, 0.85f, amount * 0.85f);
-    }
-
-    /** Cutoff for the low pass half of the knob: transparent from the centre up. */
-    float lowPassCutoffFor (float position)
-    {
-        if (position >= 0.5f - filterDeadZone)
-            return filterOpenLow;
-
-        const auto amount = juce::jlimit (0.0f, 1.0f, (0.5f - filterDeadZone - position) / (0.5f - filterDeadZone));
-        return filterOpenLow * std::pow (filterLowestCutoff / filterOpenLow, amount);
-    }
-
-    /** And the high pass half: transparent from the centre down. */
-    float highPassCutoffFor (float position)
-    {
-        if (position <= 0.5f + filterDeadZone)
-            return filterOpenHigh;
-
-        const auto amount = juce::jlimit (0.0f, 1.0f, (position - 0.5f - filterDeadZone) / (0.5f - filterDeadZone));
-        return filterOpenHigh * std::pow (filterHighestCutoff / filterOpenHigh, amount);
     }
 }
 
@@ -430,6 +389,8 @@ void Mixer::prepare (double sampleRate, int blockSize)
     cueGain.reset (currentSampleRate, smoothingSeconds);
     cueMix.reset (currentSampleRate, smoothingSeconds);
 
+    masterFx.prepare (spec);
+
     reset();
 }
 
@@ -437,6 +398,8 @@ void Mixer::reset()
 {
     for (auto& strip : strips)
         strip.reset();
+
+    masterFx.reset();
 }
 
 void Mixer::processBlock (const std::array<juce::AudioBuffer<float>*, numChannels>& deckBuffers,
@@ -572,6 +535,10 @@ void Mixer::processBlock (const std::array<juce::AudioBuffer<float>*, numChannel
             }
         }
     }
+
+    // The whole mix, before the master gain and the soft clip, so that an
+    // echo piling up is caught by the same clip as everything else.
+    masterFx.process (master, numSamples);
 
     for (int i = 0; i < numSamples; ++i)
     {

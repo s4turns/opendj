@@ -19,6 +19,7 @@ target_sources(opendj-tests PRIVATE
     RtmpBroadcast_test.cpp
     Visualizer_test.cpp
     Mixer_test.cpp
+    MasterEffects_test.cpp
     OutputRouter_test.cpp
     Deck_test.cpp
     Loop_test.cpp

@@ -17,7 +17,7 @@ namespace
 
     // One table, read in both directions, so a name can never disagree with
     // itself between the parser and the writer.
-    constexpr std::array<Entry, 52> actionNames
+    constexpr std::array<Entry, 58> actionNames
     {{
         { Action::deckPlayToggle,   "deck.play_toggle" },
         { Action::deckPlay,         "deck.play" },
@@ -62,6 +62,12 @@ namespace
         { Action::masterGain,       "mixer.master" },
         { Action::cueGain,          "mixer.phones" },
         { Action::cueMix,           "mixer.cue_mix" },
+        { Action::masterFxToggle,   "master_fx.toggle" },
+        { Action::masterFxOn,       "master_fx.on" },
+        { Action::masterFxWet,      "master_fx.wet" },
+        { Action::masterFxParam,    "master_fx.param" },
+        { Action::masterFxType,     "master_fx.type" },
+        { Action::masterFxNextType, "master_fx.next_type" },
         { Action::samplerTrigger,   "sampler.trigger" },
         { Action::samplerStop,      "sampler.stop" },
         { Action::samplerGain,      "sampler.gain" },
@@ -121,6 +127,8 @@ bool isContinuous (Action action)
         case Action::masterGain:
         case Action::cueGain:
         case Action::cueMix:
+        case Action::masterFxWet:
+        case Action::masterFxParam:
         case Action::samplerGain:
         case Action::micGain:
         case Action::padMode:       // a code carried in the velocity, not a press

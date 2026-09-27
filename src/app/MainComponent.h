@@ -21,6 +21,7 @@
 #include "ui/BeatMatchComponent.h"
 #include "ui/BrowserComponent.h"
 #include "ui/DeckComponent.h"
+#include "ui/MasterFxComponent.h"
 #include "ui/MixerComponent.h"
 #include "app/Settings.h"
 #include "ui/SamplerComponent.h"
@@ -188,6 +189,7 @@ private:
     /** The two decks' beats on one axis, across the top of the window. */
     std::unique_ptr<BeatMatchComponent> beatStrip;
     std::unique_ptr<BrowserComponent> browser;
+    std::unique_ptr<MasterFxComponent> masterFxView;
     std::unique_ptr<SamplerComponent> samplerView;
     std::unique_ptr<MicComponent> micView;
 
