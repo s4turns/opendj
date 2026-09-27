@@ -48,6 +48,24 @@ namespace
         return Mixer::CrossfaderAssign::thru;
     }
 
+    juce::String recordingFormatName (RecordingFormat format)
+    {
+        switch (format)
+        {
+            case RecordingFormat::flac: return "flac";
+            case RecordingFormat::mp3:  return "mp3";
+            default:                    return "wav";
+        }
+    }
+
+    RecordingFormat recordingFormatFromName (const juce::String& name)
+    {
+        if (name == "flac") return RecordingFormat::flac;
+        if (name == "mp3")  return RecordingFormat::mp3;
+
+        return RecordingFormat::wav;
+    }
+
     juce::String routingName (MicInput::Routing routing)
     {
         return routing == MicInput::Routing::recordingOnly ? "recording_only" : "everywhere";
@@ -198,6 +216,7 @@ juce::var SessionState::toVar() const
     root->setProperty ("crossfader_assign", assigns);
     root->setProperty ("tempo_ranges", ranges);
     root->setProperty ("visible_decks", visible);
+    root->setProperty ("waveform_zoom_seconds", waveformZoomSeconds);
 
     root->setProperty ("output_mode", opendj::toString (outputMode));
 
@@ -214,6 +233,12 @@ juce::var SessionState::toVar() const
     server->setProperty ("public", broadcast.isPublic);
     server->setProperty ("quality", broadcast.quality);
     root->setProperty ("broadcast", juce::var (server));
+
+    auto* recorder = new juce::DynamicObject();
+    recorder->setProperty ("format", recordingFormatName (recording.format));
+    recorder->setProperty ("mp3_bitrate_kbps", recording.mp3Bitrate);
+    recorder->setProperty ("folder", recording.folder);
+    root->setProperty ("recording", juce::var (recorder));
 
     auto* rtmpServer = new juce::DynamicObject();
     rtmpServer->setProperty ("server", rtmp.server);
@@ -276,6 +301,12 @@ SessionState SessionState::fromVar (const juce::var& source)
                 state.visibleDecks[(size_t) side] = deck;
         }
 
+    // Snapped to a rung rather than refused, so a number typed into the file by
+    // hand gives the nearest view that exists instead of nothing.
+    state.waveformZoomSeconds = waveform::nearestZoom (
+        number (source, "waveform_zoom_seconds", state.waveformZoomSeconds,
+                waveform::zoomLevels.front(), waveform::zoomLevels.back()));
+
     state.outputMode = outputModeFromString (text (source, "output_mode"));
 
     if (const auto server = arrayOf (source, "broadcast"); server.getDynamicObject() != nullptr)
@@ -296,6 +327,20 @@ SessionState SessionState::fromVar (const juce::var& source)
         b.port = (int) number (server, "port", b.port, 1.0, 65535.0);
         b.quality = (int) number (server, "quality", b.quality, 0.0, 10.0);
         b.isPublic = flag (server, "public", b.isPublic);
+    }
+
+    if (const auto recorder = arrayOf (source, "recording"); recorder.getDynamicObject() != nullptr)
+    {
+        auto& r = state.recording;
+
+        // Field by field, like `broadcast` above, so a settings file written
+        // before there was a choice of format still loads, as WAV.
+        r.format = recordingFormatFromName (text (recorder, "format"));
+        r.folder = text (recorder, "folder");
+
+        // Zero is V0 and means variable, so the low end of the range is not
+        // the lowest bitrate LAME will take.
+        r.mp3Bitrate = (int) number (recorder, "mp3_bitrate_kbps", r.mp3Bitrate, 0.0, 320.0);
     }
 
     if (const auto rtmpServer = arrayOf (source, "rtmp"); rtmpServer.getDynamicObject() != nullptr)

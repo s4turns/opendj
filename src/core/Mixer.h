@@ -25,6 +25,14 @@ class Mixer
 public:
     static constexpr int numChannels = 4;
 
+    /** Where the three band EQ splits the signal.
+
+        Public because the waveform is coloured by the same three bands, and a
+        waveform whose red does not mean what the Low knob reaches would be
+        worse than no colour at all. */
+    static constexpr float lowCrossoverHz = 300.0f;
+    static constexpr float highCrossoverHz = 3000.0f;
+
     /** Which side of the crossfader a channel answers to.
 
         Two channels and a crossfader needs no such switch, because A and B are
@@ -178,9 +186,6 @@ private:
     };
 
     void recalculateCrossfader();
-
-    static constexpr float lowCrossoverHz = 300.0f;
-    static constexpr float highCrossoverHz = 3000.0f;
 
     std::array<ChannelStrip, numChannels> strips;
 

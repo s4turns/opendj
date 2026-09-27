@@ -239,9 +239,10 @@ public:
         having to know either end. */
     Visualizer& getVisualizer() noexcept { return visualizer; }
 
-    /** Starts recording at the open device's sample rate. Returns the file, or
-        an invalid file with `error` filled in. */
-    juce::File startRecording (juce::String& error);
+    /** Starts recording at the open device's sample rate, in the format the
+        settings ask for. Returns the file, or an invalid file with `error`
+        filled in. */
+    juce::File startRecording (const RecordingSettings& settings, juce::String& error);
 
 private:
     void audioDeviceIOCallbackWithContext (const float* const* inputChannelData,

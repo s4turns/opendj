@@ -5,13 +5,16 @@
 
 #include "core/SetRecorder.h"
 
+#include "core/Mp3Writer.h"
+
 namespace opendj
 {
 
 namespace
 {
     // 24 bit, because a recording is a master to work from later rather than a
-    // delivery format, and the extra eight bits cost only disk.
+    // delivery format, and the extra eight bits cost only disk. MP3 has no say
+    // in the matter and takes 16 through LAME whatever is asked for here.
     constexpr int bitsPerSample = 24;
 
     juce::String twoDigits (int value)
@@ -45,7 +48,68 @@ juce::File SetRecorder::defaultFolder()
                .getChildFile ("OpenDJ");
 }
 
-juce::File SetRecorder::start (const juce::File& folder, double sampleRate, juce::String& error)
+juce::String SetRecorder::extensionFor (RecordingFormat format)
+{
+    switch (format)
+    {
+        case RecordingFormat::flac: return ".flac";
+        case RecordingFormat::mp3:  return ".mp3";
+        case RecordingFormat::wav:  break;
+    }
+
+    return ".wav";
+}
+
+juce::String SetRecorder::nameFor (RecordingFormat format)
+{
+    switch (format)
+    {
+        case RecordingFormat::flac: return "FLAC";
+        case RecordingFormat::mp3:  return "MP3";
+        case RecordingFormat::wav:  break;
+    }
+
+    return "WAV";
+}
+
+std::unique_ptr<juce::AudioFormatWriter> SetRecorder::makeWriter (
+    const RecordingSettings& settings, std::unique_ptr<juce::FileOutputStream> stream,
+    double sampleRate)
+{
+    // MP3 is not a JUCE format and never becomes one: LAME is handed the
+    // stream directly, and a writer that could not start takes the stream down
+    // with it.
+    if (settings.format == RecordingFormat::mp3)
+    {
+        auto mp3 = std::make_unique<Mp3Writer> (std::move (stream), sampleRate,
+                                                settings.mp3Bitrate);
+
+        return mp3->openedOk() ? std::unique_ptr<juce::AudioFormatWriter> (std::move (mp3))
+                               : nullptr;
+    }
+
+    juce::WavAudioFormat wav;
+    juce::FlacAudioFormat flac;
+
+    auto& format = settings.format == RecordingFormat::flac
+                       ? static_cast<juce::AudioFormat&> (flac)
+                       : static_cast<juce::AudioFormat&> (wav);
+
+    const auto options = juce::AudioFormatWriterOptions{}
+                             .withSampleRate (sampleRate)
+                             .withNumChannels (2)
+                             .withBitsPerSample (bitsPerSample);
+
+    // This overload takes the stream only once it has agreed to write, which
+    // is why the stream is handed over as the unique_ptr rather than released
+    // first. Same call as `Broadcaster::openWriter`.
+    std::unique_ptr<juce::OutputStream> asStream (std::move (stream));
+
+    return format.createWriterFor (asStream, options);
+}
+
+juce::File SetRecorder::start (const RecordingSettings& settings, double sampleRate,
+                               juce::String& error)
 {
     error.clear();
 
@@ -60,6 +124,11 @@ juce::File SetRecorder::start (const juce::File& folder, double sampleRate, juce
         error = "There is no audio device open to record from.";
         return {};
     }
+
+    // Resolving an empty folder here rather than at the call site keeps the
+    // rule about where a recording goes in one place.
+    const auto folder = settings.folder.isNotEmpty() ? juce::File (settings.folder)
+                                                     : defaultFolder();
 
     if (const auto created = folder.createDirectory(); created.failed())
     {
@@ -76,7 +145,7 @@ juce::File SetRecorder::start (const juce::File& folder, double sampleRate, juce
                     + "." + twoDigits (now.getMinutes())
                     + "." + twoDigits (now.getSeconds());
 
-    auto file = folder.getChildFile (name + ".wav");
+    auto file = folder.getChildFile (name + extensionFor (settings.format));
     file = file.getNonexistentSibling();
 
     auto stream = std::make_unique<juce::FileOutputStream> (file);
@@ -87,18 +156,18 @@ juce::File SetRecorder::start (const juce::File& folder, double sampleRate, juce
         return {};
     }
 
-    juce::WavAudioFormat wav;
-    std::unique_ptr<juce::AudioFormatWriter> formatWriter (
-        wav.createWriterFor (stream.get(), sampleRate, 2, bitsPerSample, {}, 0));
+    auto formatWriter = makeWriter (settings, std::move (stream), sampleRate);
 
     if (formatWriter == nullptr)
     {
-        error = "Could not start a WAV file at " + juce::String (sampleRate, 0) + " Hz.";
+        error = "Could not start a " + nameFor (settings.format) + " file at "
+              + juce::String (sampleRate, 0) + " Hz.";
+
+        // Nothing was written to it, and a stopped recording should not leave
+        // an empty file behind looking like one that failed halfway.
+        file.deleteFile();
         return {};
     }
-
-    // The writer owns the stream from here.
-    stream.release();
 
     writer = std::make_unique<juce::AudioFormatWriter::ThreadedWriter> (
         formatWriter.release(), writerThread, SetRecorder::fifoSamples);

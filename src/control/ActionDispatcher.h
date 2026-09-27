@@ -44,6 +44,12 @@ public:
         May be called from the MIDI thread, so implementations must marshal. */
     std::function<void (int rows)> browseScrollHandler;
 
+    /** Zooms the scrolling waveforms by a number of rungs, positive to zoom in.
+        One zoom is shared by every deck, so no deck is named. Only the shell
+        knows the current level, so it provides this. May be called from the
+        MIDI thread, so implementations must marshal. */
+    std::function<void (int steps)> waveformZoomHandler;
+
     /** Puts a deck on screen. Given -1 it swaps whichever pair the last deck
         touched belongs to, which is what a single toggle button on a controller
         means. Only the shell knows which decks are on screen, so it provides

@@ -20,7 +20,12 @@ param(
     [int]$Height = 960,
     [ValidateRange(1, 100)]
     [int]$Quality = 90,
-    [int]$SettleSeconds = 3
+    [int]$SettleSeconds = 3,
+
+    # Tracks to start with on the decks. OpenDJ loads files named on its command
+    # line, and a screenshot of two empty decks shows none of the things a deck
+    # is for: the waveforms, their colours, the beat grid or the clocks.
+    [string[]]$Tracks = @()
 )
 
 $ErrorActionPreference = 'Stop'
@@ -59,7 +64,16 @@ $settingsBackup = if (Test-Path $settings) { Get-Content -Raw -LiteralPath $sett
 $process = $null
 
 try {
-    $process = Start-Process $exe -PassThru
+    # Quoted here rather than left to Start-Process, which joins an argument
+    # list with spaces and adds no quotes of its own: a path with a space in it
+    # would reach OpenDJ as two file names that do not exist.
+    $resolved = @($Tracks | ForEach-Object { '"{0}"' -f (Resolve-Path -LiteralPath $_).Path })
+
+    $process = if ($resolved.Count -gt 0) {
+        Start-Process $exe -PassThru -ArgumentList $resolved
+    } else {
+        Start-Process $exe -PassThru
+    }
     $deadline = (Get-Date).AddSeconds(20)
 
     do { Start-Sleep -Milliseconds 300; $process.Refresh() }
@@ -83,7 +97,9 @@ try {
         [int][math]::Round($Width * $scale) + $frameWidth,
         [int][math]::Round($Height * $scale) + $frameHeight, $SWP_NOMOVE_NOZORDER) | Out-Null
 
-    Start-Sleep -Seconds $SettleSeconds
+    # Decoding and analysis run in the background, so a track needs longer than
+    # a bare window does before there is a waveform to photograph.
+    Start-Sleep -Seconds ($SettleSeconds + ($resolved.Count -gt 0 ? 5 : 0))
 
     [OpenDjCapture]::GetWindowRect($window, [ref]$outer) | Out-Null
     [OpenDjCapture]::GetClientRect($window, [ref]$inner) | Out-Null

@@ -32,6 +32,7 @@ target_sources(opendj-tests PRIVATE
     KeyDetector_test.cpp
     MidiMapping_test.cpp
     AngleMath_test.cpp
+    WaveformMath_test.cpp
     StemDsp_test.cpp
     Library_test.cpp
     TagReader_test.cpp
@@ -73,6 +74,7 @@ target_link_libraries(opendj-tests PRIVATE
     juce::juce_dsp
     opendj_rubberband
     opendj_sqlite3
+    opendj_lame
     PUBLIC
     juce::juce_recommended_config_flags
     juce::juce_recommended_warning_flags)

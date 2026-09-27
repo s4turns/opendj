@@ -18,6 +18,7 @@
 #include "core/AudioEngine.h"
 #include "library/Library.h"
 #include "library/LibraryScanner.h"
+#include "ui/BeatMatchComponent.h"
 #include "ui/BrowserComponent.h"
 #include "ui/DeckComponent.h"
 #include "ui/MixerComponent.h"
@@ -27,10 +28,37 @@
 #include "ui/VisualizerComponent.h"
 
 #include <array>
+#include <functional>
 #include <memory>
 
 namespace opendj
 {
+
+/** A button with a second thing behind the right mouse button.
+
+    `TextButton::onClick` is the left button only, and the record button needs
+    somewhere to put its settings that is not a seventh button along the bottom
+    bar. This is the smallest thing that does it: a right-click never reaches
+    the base class, so it cannot also start a recording.
+*/
+class SecondaryClickButton final : public juce::TextButton
+{
+public:
+    using juce::TextButton::TextButton;
+
+    std::function<void()> onSecondaryClick;
+
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        if (e.mods.isPopupMenu() && onSecondaryClick != nullptr)
+        {
+            onSecondaryClick();
+            return;
+        }
+
+        juce::TextButton::mouseDown (e);
+    }
+};
 
 /** The application shell: two decks either side of the mixer, the browser
     underneath, a status bar, and buttons for the audio and controller setup.
@@ -68,6 +96,13 @@ private:
         tells both of them which letter their swap button should carry. */
     void showDeck (int deckIndex);
 
+    /** Moves every deck's scrolling waveform a number of rungs up or down the
+        zoom ladder, positive to zoom in. One setting for all of them: two
+        waveforms side by side are there to be compared, and two scales make
+        that harder rather than easier. */
+    void stepWaveformZoom (int steps);
+    void applyWaveformZoom();
+
     /** Swaps one side for the deck behind it. */
     void swapSide (int side);
 
@@ -85,6 +120,14 @@ private:
     void showAudioSettings();
     void showMidiSettings();
     void toggleRecording();
+
+    /** Format, quality and folder for the recorder. Behind a right-click on
+        the record button rather than a button of its own: the bottom bar is
+        full, and a setting nobody has to touch does not deserve a seventh. */
+    void showRecordingSettings();
+
+    /** The record button's tooltip, which names the format it would write. */
+    void updateRecordingTooltip();
 
     /** Opens the broadcast dialog, or stops a broadcast already running. */
     void toggleBroadcast();
@@ -141,6 +184,9 @@ private:
         where somebody who never presses the swap button stays. */
     std::array<int, 2> visibleDecks { 0, 1 };
     std::unique_ptr<MixerComponent> mixerView;
+
+    /** The two decks' beats on one axis, across the top of the window. */
+    std::unique_ptr<BeatMatchComponent> beatStrip;
     std::unique_ptr<BrowserComponent> browser;
     std::unique_ptr<SamplerComponent> samplerView;
     std::unique_ptr<MicComponent> micView;
@@ -150,7 +196,7 @@ private:
 
     juce::TextButton audioSettingsButton { "Audio setup" };
     juce::TextButton midiSettingsButton { "Controller" };
-    juce::TextButton recordButton { "Record" };
+    SecondaryClickButton recordButton { "Record" };
     juce::TextButton streamButton { "Stream" };
     juce::TextButton rtmpButton { "RTMP" };
     juce::TextButton visualsButton { "Visuals" };

@@ -9,7 +9,7 @@
 
 Free and open source DJ software, built in C++ with [JUCE](https://juce.com).
 
-![Decks A and B, each with its waveforms, loop lengths, stem knobs, turntable platter, tempo fader and a button to swap in deck C or D, a four channel mixer between them with every control named on every channel: high, mid and low EQ, filter, echo and its length in beats, reverb, crossfader assignment, a channel fader and cue, the track library underneath showing tempo and key, a row of eight sampler pads with their own level and cue, a mic strip with talkover, and a bottom bar with audio setup, recording, Icecast and RTMP streaming, controller setup, and the audio device running at 10 ms](images/screenshot.jpg)
+![A strip across the top lining up both decks' beats, decks A and B below it, each with a track loaded and its waveforms coloured by frequency, loop lengths, stem knobs, turntable platter, tempo fader and a button to swap in deck C or D, a four channel mixer between them with every control named on every channel: high, mid and low EQ, filter, echo and its length in beats, reverb, crossfader assignment, a channel fader and cue, the track library underneath showing tempo and key, a row of eight sampler pads with their own level and cue, a mic strip with talkover, and a bottom bar with audio setup, recording, Icecast and RTMP streaming, controller setup, and the audio device running at 10 ms](images/screenshot.jpg)
 
 The goal is an application a VirtualDJ user can sit down at and already know how to use:
 the same deck layout, the same workflow, the same muscle memory. The artwork, the naming
@@ -18,7 +18,7 @@ and the code are entirely original and entirely open.
 **Status: early development, but it mixes.** Four decks with turntable platters you can scratch,
 waveforms, beat grids, automatic BPM and key detection, sync, key lock, beat-locked loops and
 rolls, stem separation with a knob per stem, a mixer with a filter, a beat-synced echo and a reverb per channel, hot cues, an eight slot sampler, a
-searchable track library, set recording with a tracklist, broadcasting to Icecast, and Roland
+searchable track library, set recording to WAV, FLAC or MP3 with a tracklist, broadcasting to Icecast, and Roland
 DJ-202 support including its own audio interface and its platters.
 
 ## Design goals
@@ -49,6 +49,21 @@ overview waveform to move through the track.
 Each deck shows a scrolling waveform with the beat grid drawn over it, bar lines brighter than
 beats, and the detected tempo next to the title. Sync matches this deck's tempo and beat phase
 to the other one.
+
+Both waveforms are coloured by frequency: red is bass, green the midrange and blue the treble,
+so a drop reads orange, a breakdown loses its red and a hi-hat pattern on its own comes out
+blue. The three bands are split at the same frequencies the mixer's EQ uses, so turning the Low
+knob down takes exactly the red out of what you can hear.
+
+The wheel over a scrolling waveform zooms it, from half a second either side of the playhead out
+to twenty-four: in to place a cue on the beat, out to see the shape of a phrase. Both decks move
+together, so the two are always at the same scale, and where it was left is where it opens.
+
+Across the top of the window is a strip with a row for each deck on screen, a tick for every beat
+and one playhead down the middle. When the decks are in phase the ticks line up into columns
+through both rows; when they are not, they stagger by exactly as much as the decks are out. Every
+fourth beat is drawn full height, because matching the tempo is not the same as matching the beat
+the phrase turns on.
 
 The platter turns at 33 1/3 rpm against the track position, so it is a readout and not
 decoration: if it is crawling, the deck is crawling. Drag the middle of it to scratch, exactly
@@ -176,9 +191,13 @@ with Mixxx on 57 of them; [ROADMAP.md](ROADMAP.md) has the detail and the method
 
 ## Recording a set
 
-Press Record in the bottom bar. The master output goes to a 24-bit WAV in your music folder
-under OpenDJ, named for the date and time, and the button turns red and counts up while it
-runs. Press it again to stop.
+Press Record in the bottom bar. The master output goes to your music folder under OpenDJ,
+named for the date and time, and the button turns red and counts up while it runs. Press it
+again to stop.
+
+Right-click Record for the format and the folder. 24-bit WAV is the default and 24-bit FLAC
+holds the same audio in about half the space; MP3 is there for sending somebody the set, at
+320, 256 or 192 kbps or LAME's variable V0. Nothing has to be installed for any of them.
 
 Beside the audio you get a text file listing what you played and when, timed against the
 recording rather than the clock. Whatever was already playing when you pressed Record is the

@@ -1,7 +1,7 @@
 # OpenDJ roadmap
 
 Where the project is and what to pick up next. Anything ticked has tests or a verified manual
-check behind it, not just code that compiles. The suite is **268 tests** on Linux and 267 on
+check behind it, not just code that compiles. The suite is **293 tests** on Linux and 292 on
 Windows, the one difference being a stderr test whose stand-in for ffmpeg is a shell script;
 anything touching audio is tested by measuring the output, not by checking that the code ran.
 
@@ -24,7 +24,7 @@ that was listed after it except video.
 | 4 | Tempo fader | ✅ | `src/core/Deck.*`, `src/ui/DeckComponent.*` |
 | 5 | Key lock, so tempo does not shift pitch | ✅ | `Deck::renderStretched`, via Rubber Band |
 | 6 | Mixer: fader, three-band EQ, crossfader, cue | ✅ | `src/core/Mixer.*` |
-| 7 | Scrolling and overview waveforms | ✅ | `src/ui/WaveformComponent.*` |
+| 7 | Scrolling and overview waveforms, coloured and zoomable, and a strip lining the decks' beats up | ✅ | `src/ui/WaveformComponent.*`, `src/ui/BeatMatchComponent.*`, `src/ui/WaveformMath.h` |
 | 8 | BPM detection and beat grid | ✅ | `src/analysis/TrackAnalyser.*` |
 | 9 | Sync: tempo and beat phase | ✅ | `AudioEngine::syncDeck` |
 | 10 | Turntable platters, mouse drivable | ✅ | `src/ui/PlatterComponent.*`, `src/ui/AngleMath.h` |
@@ -43,7 +43,7 @@ that was listed after it except video.
 | Sampler | ✅ | `src/core/Sampler.*`, eight pads |
 | Mic input | 🚧 | `src/core/MicInput.*`, `src/ui/MicComponent.*`, with talkover and a stream-only switch. Tested by measuring the output; not yet tried with a real mic |
 | Stem separation | ✅ | `src/analysis/StemSeparator.*`, `StemDsp.*`, a knob per stem |
-| Record the master output | ✅ | `src/core/SetRecorder.*`, with a tracklist |
+| Record the master output | ✅ | `src/core/SetRecorder.*`: WAV, FLAC or MP3, with a tracklist |
 | Split output cue | ✅ | `src/core/OutputRouter.*`, headphones on a stereo interface |
 | Settings that survive a restart | ✅ | `src/app/Settings.*` |
 | Broadcasting to Icecast | ✅ | `src/stream/`, verified against a real Icecast 2.4.4 |
@@ -84,7 +84,6 @@ set but nothing on screen shows or triggers.
 | Auto gain | Tracks levelled by measured loudness | A trim, with no analysis behind it |
 | Automix | Unattended mixing through a playlist, beat matched | None |
 | MIDI learn and more controllers | Hundreds of controllers mapped out of the box, and a mapper that learns a control from the hardware | One mapping, written by hand. Issue #4 |
-| Recording formats | MP3, FLAC and others | WAV only |
 
 ### Expected by regular users
 
@@ -94,7 +93,6 @@ set but nothing on screen shows or triggers.
 | More from stems | Separating the library ahead of time, stem pads such as vocal off or drums only, effects on one stem |
 | Library import and metadata | iTunes and Music, rekordbox and Serato libraries; a tag editor; cover art; colours, ratings and comments |
 | Saved cue points | Hot cues kept with the track in the library |
-| Waveforms | Colour by frequency, zoom, and a strip showing both decks' beats lined up |
 | Sandbox | Previewing a later moment in the headphones while the master plays on |
 | Keyboard mapper | Shortcuts of your own; today there are only Q, W, O, P and the number row |
 | Master effects | Effects on the whole mix, and effect slots with parameters |
@@ -280,6 +278,59 @@ already turns an effect off at zero.
 | The selection lives in `ActionDispatcher`, one small integer per channel, alongside `shiftHeld` and `tempoRangePercent` | It is exactly that kind of state: not audio, not persisted, read by the next action rather than stored on a deck or the mixer |
 | Binding only CC 0x00 of the DEPTH knob | Measured on real hardware: the knob broadcasts the same value on 0x00, 0x01 and 0x02 at once, so binding all three would write the mapping three times for one hand movement |
 | FX3 and FX ON/TAP left unmapped | OpenDJ has two effects, not three, and a continuous knob already has an off position; inventing a use for either button would be design bolted onto a limitation the hardware does not actually have on this engine |
+
+## Waveforms
+
+Each deck draws the same analysis twice: a detail view that scrolls past a stationary playhead
+with the beat grid over it, and an overview of the whole track underneath. Both are coloured by
+frequency, so the shape of a record can be read before it is heard.
+
+The colour comes from three band energies stored on every waveform bucket alongside the minimum,
+maximum and RMS that were already there. They are measured once, on a single pass over the
+audio that serves both waveforms at once, by a Linkwitz-Riley crossover split at the same two
+frequencies the mixer's EQ uses.
+
+| Decision | Why |
+| --- | --- |
+| The bands are the mixer's own crossovers, 300 Hz and 3 kHz, shared from `Mixer` rather than chosen again | A waveform whose red does not mean what the Low knob reaches would be worse than no colour at all. Turning a band down and watching exactly that colour leave the waveform is the point |
+| A crossover filter, not the tempo pass's FFT | The FFT runs at a 1024 point frame every 256 samples and would have to be interpolated onto 2 ms buckets. A filter is sample accurate by construction, and the bucket boundaries stay where the minimum and maximum already put them |
+| One pass over the audio fills both waveforms | The filtering is the expensive part and the bucketing is nearly free, so running it once per resolution would have doubled the cost for nothing |
+| A running total per bucket rather than an array of them | The pass walks the track in order, so only the bucket it is inside needs a total. A sixty minute track has about 1.6 million detail buckets, and three sums each would have cost 40 MB to avoid arithmetic that is already free |
+| Nothing is cached, and `analysisVersion` is not bumped | Waveform peaks were never written to the library; only the tempo and key are. The extra pass is the one cost a track that has been analysed before now pays, and it is small beside the decode it already does |
+| Each column's three bands are read against the largest of the three | Bass alone is red, bass and midrange yellow, a broad mix orange, a hi-hat pattern blue. How loud the passage is already sits in the height of the bar and does not need saying twice |
+| Not against each band's own loudest moment in the track | Tried, and worse. A record's midrange sits near its own peak almost all the time while its bass and treble only touch theirs on a hit, so every track came out the same shade of green |
+| The played part keeps its colour, desaturated and dimmed | It is the same music. A flat second colour behind the playhead threw away everything the colouring had just said |
+
+The scrolling view zooms, on a fixed ladder from half a second either side of the playhead out to
+twenty-four. The wheel over the waveform moves it a rung at a time, `deck.waveform_zoom` does the
+same from a controller, and the level is kept in `settings.json`. The arithmetic is in
+`src/ui/WaveformMath.h`, header only and tested on its own, the same bargain `AngleMath.h` makes
+for the platters.
+
+| Decision | Why |
+| --- | --- |
+| Fixed rungs rather than a continuous zoom | The view can be put back exactly where it was, and two decks can be trusted to be at the same scale without anyone checking |
+| One zoom for every deck, not one each | Two waveforms side by side are there to be compared. Two scales make that harder, and nobody has ever wanted to argue with a second number to find out why one deck looks busier than the other |
+| A pixel reduces over its own span instead of sampling one bucket | Reading one 2 ms bucket per pixel already threw away six in every seven at the old fixed width, and turned into noise the moment it could be zoomed out. Extremes for the outline, averages for the colour: one loud sample should reach the top of the bar without deciding what colour the pixel is |
+| The overview's coarser buckets take over once a pixel is wider than one | Below that they would lose detail the fine set still has; above it they say the same thing for a fraction of the reads. It cannot be a constant, because the overview is a fixed number of buckets and one covers ten times as much of a five minute track as of a thirty second one |
+| The beat grid disappears below two pixels a beat | A grid that cannot be counted only hides the waveform. It also bounds a loop that was unbounded in span, and would otherwise have walked thousands of beats a frame at the wide end |
+| Wheel movement is gathered up before it counts as a rung | A trackpad sends fractions of a notch, and without this the view either did nothing or crossed the whole ladder under a thumb |
+| The value is remembered, and snapped to a rung when read | It is a view preference like the tempo fader ranges, which are already kept. A number typed into the file by hand gives the nearest view that exists rather than nothing |
+
+Across the top of the window, above both decks, `BeatMatchComponent` draws a row per deck on one
+time axis: a tick per beat, the downbeat full height, and one playhead down the middle. In phase
+the two rows put their ticks in the same columns and read as lines through both. Out of phase
+they stagger, and the stagger is the error.
+
+| Decision | Why |
+| --- | --- |
+| Beats are placed in the time a listener is in, not in track time | The waveform draws a track, so track seconds are right there. This draws whether two decks land together as heard, which is a different question: a deck pulled by its tempo fader has to space its beats out to match, and two records cut at different tempos played at the same one have to agree |
+| One axis across the whole window, not a row inside each deck | The comparison is the feature. Split across two panels with a mixer between them there is nothing to line anything up against |
+| A fixed thirty-six pixel row | The same bargain the sampler row makes. Eight beats need the same height whatever else is on screen, and it is cheaper taken from the browser than from a waveform |
+| Four beats either side, averaged over the decks that have a tempo | The strip always shows about eight beats however fast the decks run, and a strip holding two nearly matched decks does not jump about depending on which is fractionally faster |
+| A deck with no tempo gets an empty row and a dimmed letter | A made up grid would be worse than no grid: it would look like something to line up against |
+| The downbeat is drawn full height | Matching tempo is not the same as matching the one beat in four the phrase turns on, and the second is the one that is easy to get wrong |
+| It holds no state and asks the decks afresh every frame | It is a readout, on the shell's timer like every other view, so there is nothing in it that can disagree with the engine |
 
 ## Sampler
 
@@ -534,7 +585,8 @@ would fail.
 
 ## Recording a set
 
-The master output to a 24-bit WAV in the user's music folder, with a tracklist beside it.
+The master output to 24-bit WAV, 24-bit FLAC or MP3 in the user's music folder, with a tracklist
+beside it. Format, bitrate and folder are behind a right-click on the Record button.
 
 | Decision | Why |
 | --- | --- |
@@ -542,6 +594,42 @@ The master output to a 24-bit WAV in the user's music folder, with a tracklist b
 | Written through JUCE's `ThreadedWriter` | The audio thread copies into a FIFO and returns; encoding and disk writes happen elsewhere |
 | A full FIFO drops samples rather than blocking | The recording loses them, the room does not. The count is kept and reported: status bar, closing dialog, and the tracklist file, which is the one still there tomorrow. A set with a hole must not look complete |
 | The tracklist is timed against the recording, and seeded with whatever is already playing | The wall clock would drift if samples were dropped, and recording usually starts a minute into the first track, so the list would otherwise begin with the second record |
+| WAV stays the default | A recording is a master to work from later rather than a delivery format, and what an existing installation records to is not a decision to change on somebody's behalf |
+
+### The three formats
+
+A format is one `AudioFormatWriter` behind the same `ThreadedWriter`, so `SetRecorder` knows
+nothing about any of them past `makeWriter`. Everything above -- the FIFO, the drop accounting, the
+tracklist -- is shared and unchanged.
+
+FLAC cost nothing: JUCE bundles libFLAC's encoder and `StemSeparator` already wrote 24-bit FLAC
+with the same call.
+
+MP3 needed an encoder, and **LAME is compiled in** rather than shelled out to. JUCE has a
+`LAMEEncoderAudioFormat`, and it is the wrong shape twice over: it runs the `lame` command line
+program, which the user has to install, and it buffers the whole recording to a temporary WAV and
+converts it only when the writer is destroyed. For a three hour set that is gigabytes of scratch
+file and minutes of waiting after the stop button. `src/core/Mp3Writer.*` encodes block by block
+straight into the file instead, and is the same trick as `RtmpBroadcaster::PcmWriter`: an
+`AudioFormatWriter` over something that is not a JUCE format.
+
+Building LAME is `cmake/lame.cmake` and `cmake/lame-config.h`, following Rubber Band: fetch the
+tarball, compile it here, skip its autotools. A non-recursive glob over `libmp3lame/*.c` is the
+whole source list, because the config header switches off the hand-written i386 and SSE paths and
+`HAVE_MPGLIB`, which compiles `mpglib_interface.c` away to nothing -- OpenDJ decodes MP3 through
+JUCE and wants LAME only to encode. LGPL 2.1, so licence compatible.
+
+**MP3 has no 88.2 or 96 kHz and an audio interface very much does.** `lame_init_params` simply
+fails at a rate it cannot carry, which would have made MP3 recording refuse on exactly the
+hardware most likely to be in front of it. `Mp3Writer::nearestSupportedRate` picks the highest
+supported rate the device's is a whole multiple of and lets LAME resample, so 96 goes to 48 and
+88.2 to 44.1. Nearest in Hz would send 88.2 to 48, which is both the wrong family and the harder
+sum.
+
+The Xing header is written twice: LAME reserves a frame at the front, and the real one can only be
+filled in once the flush says how long the file is, so the writer's destructor winds the stream
+back to zero and overwrites it. Without that a variable bitrate file plays but reports the wrong
+length and cannot be scrubbed, which for a two hour set is most of the value of having it.
 
 ## What is remembered
 
@@ -554,6 +642,7 @@ audio device in JUCE's own `audio-device.xml` next to it.
 | Master, phones and cue mix levels | The channel faders and the crossfader |
 | Crossfader curve and per-channel assignment | EQ, filter, echo and reverb settings |
 | Tempo fader ranges, which decks are on screen | |
+| The waveform zoom | |
 | The sampler pads, their files, loops and gains | |
 | The mic's level, talkover and routing | Whether the mic was on |
 | The window's size and position | |
@@ -577,6 +666,7 @@ would say so.
 | Action | Takes | Notes |
 | --- | --- | --- |
 | `deck.select` | `deck` | Puts that deck on screen in place of the one it shares a side with |
+| `deck.waveform_zoom` | value | Signed rungs of the zoom ladder, positive to zoom in. One zoom for every deck, so no deck is named |
 | `deck.swap` | nothing | Swaps both sides at once. What a single deck-toggle button means |
 | `mixer.crossfader_assign` | `deck`, `slot` | 0 the A side, 1 neither, 2 the B side |
 | `sampler.trigger` | `slot` | Starts that pad; with shift, stops it |

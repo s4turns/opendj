@@ -68,6 +68,15 @@ public:
     /** Starts a background load and analysis of the given file. */
     void load (const juce::File& file);
 
+    /** How many seconds the scrolling waveform shows either side of the
+        playhead. Set by the shell, because the zoom is one setting shared by
+        every deck rather than something a deck decides for itself. */
+    void setWaveformZoom (double seconds);
+
+    /** Asked for when the wheel is turned over this deck's scrolling waveform,
+        with a number of rungs, positive to zoom in. */
+    std::function<void (int steps)> onZoomRequested;
+
     void paint (juce::Graphics& g) override;
     void resized() override;
 

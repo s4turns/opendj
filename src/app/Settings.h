@@ -11,8 +11,10 @@
 #include "core/Mixer.h"
 #include "core/OutputRouter.h"
 #include "core/Sampler.h"
+#include "core/SetRecorder.h"
 #include "stream/IcecastConnection.h"
 #include "stream/RtmpConnection.h"
+#include "ui/WaveformMath.h"
 
 #include <array>
 
@@ -51,6 +53,11 @@ struct SessionState
     /** Which deck is on screen on each side. */
     std::array<int, 2> visibleDecks { 0, 1 };
 
+    /** How much of a track the scrolling waveforms show either side of the
+        playhead. One number for every deck: two waveforms side by side are
+        there to be compared, and two scales make that harder. */
+    double waveformZoomSeconds = waveform::defaultZoomSeconds;
+
     /** Where the master and cue busses go. Separate pairs by default: a split
         turns the master mono and puts it in one speaker, which nobody should
         get without having asked for it. */
@@ -72,6 +79,12 @@ struct SessionState
     float micGain = 1.0f;
     bool micTalkover = false;
     MicInput::Routing micRouting = MicInput::Routing::everywhere;
+
+    /** What the record button writes, and where. WAV by default, because a
+        recording is a master to work from later rather than something to
+        send, and because changing what an existing installation records to
+        is not a decision to make on somebody's behalf. */
+    RecordingSettings recording;
 
     /** The broadcast server, password included. Kept in clear text, which the
         dialog says out loud: it is what every DJ application does, and telling
