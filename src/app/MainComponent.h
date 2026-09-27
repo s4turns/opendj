@@ -170,6 +170,10 @@ private:
     ActionDispatcher dispatcher { engine };
     MidiControlSurface midi { engine, dispatcher };
 
+    // Before the views, so the effects panel never outlives the host its
+    // plugins came from.
+    PluginHost pluginHost;
+
     /** The decks and mixer as one component, so the shell can split the window
         between them and the browser with a draggable bar. */
     struct DeckRow final : public juce::Component
@@ -209,6 +213,11 @@ private:
     class VisualsWindow;
     std::unique_ptr<VisualsWindow> visualsWindow;
     juce::Label statusLabel;
+
+    // A line about plugins, shown in the status bar for a while and then gone,
+    // since the bar is rebuilt from the engine on every tick.
+    juce::String pluginNotice;
+    juce::uint32 pluginNoticeUntil = 0;
     juce::String startupError;
 
     /** Read before the device is opened, written when the window closes. */

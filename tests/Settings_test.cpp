@@ -59,7 +59,11 @@ namespace
         state.rtmp.fps = 25;
 
         state.masterFx[0].type = MasterEffects::Type::filter;
-        state.masterFx[1].type = MasterEffects::Type::echo;
+        state.masterFx[1].type = MasterEffects::Type::plugin;
+        state.masterFx[1].pluginId = "VST3-Room-1a2b3c4d-5e6f7a8b";
+        state.masterFx[1].pluginName = "Room";
+        state.masterFx[1].pluginState = juce::MemoryBlock ("opaque state", 12).toBase64Encoding();
+        state.masterFx[1].pluginParamIndex = { 7, 3 };
 
         for (size_t fx = 0; fx < MasterEffects::numSlots; ++fx)
             for (size_t t = 0; t < MasterEffects::numTypes; ++t)
@@ -123,6 +127,10 @@ namespace
         for (size_t fx = 0; fx < MasterEffects::numSlots; ++fx)
         {
             REQUIRE (a.masterFx[fx].type == b.masterFx[fx].type);
+            REQUIRE (a.masterFx[fx].pluginId == b.masterFx[fx].pluginId);
+            REQUIRE (a.masterFx[fx].pluginName == b.masterFx[fx].pluginName);
+            REQUIRE (a.masterFx[fx].pluginState == b.masterFx[fx].pluginState);
+            REQUIRE (a.masterFx[fx].pluginParamIndex == b.masterFx[fx].pluginParamIndex);
 
             for (size_t t = 0; t < MasterEffects::numTypes; ++t)
             {

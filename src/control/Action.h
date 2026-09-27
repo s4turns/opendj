@@ -120,7 +120,7 @@ enum class Action
     masterFxOn,         ///< on while the value is above half, for a held button
     masterFxWet,        ///< how much of the effect is heard
     masterFxParam,      ///< slot picks the parameter, 0 or 1, of the current effect
-    masterFxType,       ///< press picks an effect: slot 0 echo, 1 reverb, 2 filter
+    masterFxType,       ///< press picks an effect: slot 0 echo, 1 reverb, 2 filter, 3 plugin
     masterFxNextType,   ///< press steps on to the next effect
 
     // Sampler. slot selects the pad, 0 to 7; deck is unused, because the

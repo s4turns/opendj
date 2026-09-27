@@ -767,6 +767,7 @@ void AudioEngine::timerCallback()
         deck->cleanUp();
 
     sampler.cleanUp();
+    mixer.getMasterEffects().collectGarbage();
 
     // The tempo fader moves, tracks change, and the echo has to follow both.
     updateEchoTimes();

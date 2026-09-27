@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_dsp/juce_dsp.h>
 
 #include <array>
@@ -27,6 +28,12 @@ namespace opendj
 
     Every slot remembers its settings per effect, so flicking from echo to
     reverb and back finds the echo as it was left.
+
+    A slot can also hold a plugin: any stereo AudioProcessor, which in the
+    application is a VST3 effect. It is an insert like the filter, its two
+    parameter knobs drive whichever of its parameters they are pointed at,
+    and it is handed to the audio thread and back without the audio thread
+    ever allocating or freeing anything.
 */
 class MasterEffects
 {
@@ -38,14 +45,16 @@ public:
     {
         echo,
         reverb,
-        filter
+        filter,
+        plugin
     };
 
-    static constexpr int numTypes = 3;
+    static constexpr int numTypes = 4;
 
     static juce::String getTypeName (Type type);
 
-    /** What a parameter knob does for an effect, short enough for a label. */
+    /** What a parameter knob does for an effect, short enough for a label.
+        A plugin's knobs are named by getParamLabel, which knows the plugin. */
     static juce::String getParamName (Type type, int param);
 
     /** The echo lengths, in beats, that the first echo parameter snaps to. */
@@ -55,6 +64,7 @@ public:
     static juce::String echoDivisionName (int index);
 
     MasterEffects();
+    ~MasterEffects();
 
     //==========================================================================
     // Message thread
@@ -62,7 +72,10 @@ public:
 
     void setType (int slot, Type type);
     Type getType (int slot) const noexcept;
-    void stepType (int slot);   ///< on to the next effect, wrapping round
+
+    /** On to the next effect, wrapping round. The plugin is skipped when the
+        slot has none, since stepping onto it would only be a dead stop. */
+    void stepType (int slot);
 
     void setEnabled (int slot, bool shouldBeOn);
     bool isEnabled (int slot) const noexcept;
@@ -88,6 +101,29 @@ public:
     /** One echo repeat in the slot, in seconds: the beat times the division. */
     double getEchoSeconds (int slot) const noexcept;
 
+    /** Puts a plugin in the slot, or takes it out with nullptr. It is prepared
+        here, at the rate and block size the slot was last prepared with, and
+        then handed over; the one it replaces comes back through
+        collectGarbage. Returns false, and keeps the old one, for a processor
+        wanting more than two channels in or out. */
+    bool setPlugin (int slot, std::unique_ptr<juce::AudioProcessor> processor);
+
+    /** The plugin most recently put in the slot, for its editor, its state and
+        its parameter names. Owned here; valid until it is replaced. */
+    juce::AudioProcessor* getPlugin (int slot) const noexcept;
+
+    /** Which of the plugin's parameters a knob drives. Pointing a knob at a
+        parameter picks up where that parameter already is. */
+    void setPluginParamIndex (int slot, int param, int pluginParameterIndex);
+    int getPluginParamIndex (int slot, int param) const noexcept;
+
+    /** A knob's label: the effect's own name for it, or the plugin's. */
+    juce::String getParamLabel (int slot, int param) const;
+
+    /** Deletes plugins the audio thread has finished with. Call it now and
+        then from the message thread; the engine's timer does. */
+    void collectGarbage();
+
     //==========================================================================
     // Audio thread
     //==========================================================================
@@ -99,6 +135,18 @@ public:
     void process (juce::AudioBuffer<float>& buffer, int numSamples);
 
 private:
+    /** A plugin on its way to or from the audio thread. Null inside means an
+        empty slot, which is how a plugin is taken out again. */
+    struct PluginHolder
+    {
+        std::unique_ptr<juce::AudioProcessor> processor;
+        int latency = 0;
+
+        // Where the knobs stood when it was put in, which is where its
+        // parameters already are. Only a knob that moves on from here is sent.
+        float knobsAtLoad[numParams] { -1.0f, -1.0f };
+    };
+
     struct Slot
     {
         void prepare (const juce::dsp::ProcessSpec& spec);
@@ -107,13 +155,22 @@ private:
         // Written on the message thread.
         std::atomic<Type> requestedType { Type::echo };
         std::atomic<bool> enabled { false };
-        std::atomic<float> wet[numTypes] { { 0.5f }, { 0.4f }, { 1.0f } };
+        std::atomic<float> wet[numTypes] { { 0.5f }, { 0.4f }, { 1.0f }, { 1.0f } };
         std::atomic<float> params[numTypes][numParams]
         {
             { { 0.6f }, { 0.5f } },     // one beat, moderate feedback
             { { 0.6f }, { 0.4f } },     // a medium room
-            { { 0.5f }, { 0.3f } }      // open, a little resonance
+            { { 0.5f }, { 0.3f } },     // open, a little resonance
+            { { 0.5f }, { 0.5f } }      // replaced by the plugin's own values
         };
+        std::atomic<int> pluginParamIndex[numParams] { { 0 }, { 1 } };
+
+        // A plugin goes in through `incoming` and its predecessor comes out
+        // through `outgoing`, each taken with an exchange, so exactly one side
+        // owns a holder at any moment. `current` is the message thread's view
+        // of the newest one.
+        std::atomic<PluginHolder*> incoming { nullptr }, outgoing { nullptr };
+        juce::AudioProcessor* current = nullptr;
 
         // Audio thread only. A change of effect fades the old one out, swaps,
         // and fades the new one in, so it can never click.
@@ -131,13 +188,30 @@ private:
 
         juce::dsp::StateVariableTPTFilter<float> filterLow, filterHigh;
         juce::SmoothedValue<float> filterLowCutoff, filterHighCutoff, filterResonance;
+
+        PluginHolder* active = nullptr;
+        float lastSentParam[numParams] { -1.0f, -1.0f };
+        juce::MidiBuffer midi;
+
+        // The dry signal held back by the plugin's latency, so the two meet in
+        // step instead of combing.
+        juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::None> dryDelay { 1 };
+        int dryDelaySamples = 0;
     };
 
     void processSlot (Slot& slot, juce::AudioBuffer<float>& buffer, int start, int numSamples);
+    bool swapPluginIfPossible (Slot& slot);
+    void preparePlugin (juce::AudioProcessor& processor) const;
 
     std::array<Slot, numSlots> slots;
     std::atomic<double> beatSeconds { 0.5 };
     double sampleRate = 44100.0;
+
+    // What a plugin is prepared with, and a lock kept by setPlugin and
+    // prepare alone, so the two never prepare one plugin at once. The audio
+    // callback never takes it.
+    int preparedBlockSize = 512;
+    juce::CriticalSection prepareLock;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MasterEffects)
 };

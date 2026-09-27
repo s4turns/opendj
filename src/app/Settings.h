@@ -80,6 +80,13 @@ struct SessionState
         MasterEffects::Type type = MasterEffects::Type::echo;
         std::array<float, MasterEffects::numTypes> wet {};
         std::array<std::array<float, MasterEffects::numParams>, MasterEffects::numTypes> params {};
+
+        /** The plugin in the slot, as `PluginDescription::createIdentifierString`
+            names it, its own saved state in base64, and which of its
+            parameters the two knobs drive. Empty for no plugin. The plugin is
+            loaded by whoever owns a PluginHost, not by applyTo. */
+        juce::String pluginId, pluginName, pluginState;
+        std::array<int, MasterEffects::numParams> pluginParamIndex { 0, 1 };
     };
 
     /** The master effects as a fresh installation has them. */

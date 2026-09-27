@@ -154,7 +154,12 @@ MainComponent::MainComponent()
         });
     };
 
-    masterFxView = std::make_unique<MasterFxComponent> (engine.getMixer().getMasterEffects());
+    masterFxView = std::make_unique<MasterFxComponent> (engine.getMixer().getMasterEffects(), pluginHost);
+    masterFxView->onMessage = [this] (const juce::String& message)
+    {
+        pluginNotice = message;
+        pluginNoticeUntil = juce::Time::getMillisecondCounter() + 8000;
+    };
     addAndMakeVisible (*masterFxView);
 
     samplerView = std::make_unique<SamplerComponent> (engine);
@@ -489,6 +494,9 @@ void MainComponent::timerCallback()
     if (const auto visualsStatus = visualizer.getStatusMessage(); visualsStatus.isNotEmpty())
         status << "  |  " << visualsStatus;
 
+    if (pluginNotice.isNotEmpty() && juce::Time::getMillisecondCounter() < pluginNoticeUntil)
+        status << "  |  " << pluginNotice;
+
     statusLabel.setText (status, juce::dontSendNotification);
 }
 
@@ -606,6 +614,27 @@ void MainComponent::restoreSettings()
 
         if (file.existsAsFile())
             engine.loadSampleAsync (slot, file);
+    }
+
+    // Plugins last, and never the one the previous run died loading: a plugin
+    // that crashes on start-up would otherwise crash every start-up after it.
+    const auto crashed = pluginHost.takeCrashedPluginName();
+
+    for (int slot = 0; slot < MasterEffects::numSlots; ++slot)
+    {
+        const auto& saved = settings.masterFx[(size_t) slot];
+
+        if (saved.pluginId.isEmpty())
+            continue;
+
+        if (crashed.isNotEmpty() && saved.pluginName == crashed)
+        {
+            masterFxView->onMessage ("OpenDJ closed while loading " + crashed
+                                     + " last time, so it has been left out of FX " + juce::String (slot + 1));
+            continue;
+        }
+
+        masterFxView->restorePlugin (slot, saved.pluginId, saved.pluginName, saved.pluginState);
     }
 }
 
