@@ -386,7 +386,12 @@ void MainComponent::loadInitialTracks (const juce::StringArray& paths)
 
 void MainComponent::timerCallback()
 {
-    nowPlaying.setTitle (engine.getNowPlayingTitle());
+    {
+        const auto playingDeck = engine.findNowPlayingDeck();
+        const auto status = engine.getDeckStatus (playingDeck);
+        nowPlaying.setNowPlaying (engine.getNowPlayingTitle(), status.audibility, status.playing);
+        nowPlaying.setComingUp (engine.getComingUpTitle());
+    }
 
     // Noted while the window is alive and healthy, never asked for on the way
     // out: by the time this component is destroyed the window that owns it is

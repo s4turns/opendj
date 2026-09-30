@@ -218,6 +218,9 @@ bool Deck::loadFile (const juce::File& file, const KnownTrack* known)
 
     publish (std::move (track));
     analysisData.store (std::move (analysis));
+
+    static std::atomic<juce::uint64> nextSerial { 0 };
+    loadSerial.store (++nextSerial, std::memory_order_relaxed);
     return true;
 }
 
@@ -270,6 +273,7 @@ void Deck::unload()
 {
     publish (nullptr);
     analysisData.store (nullptr);
+    loadSerial.store (0, std::memory_order_relaxed);
 }
 
 juce::String Deck::getLastLoadError() const

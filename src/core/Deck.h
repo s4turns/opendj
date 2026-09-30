@@ -231,6 +231,11 @@ public:
 
     bool isLoaded() const noexcept  { return activeTrack.load (std::memory_order_acquire) != nullptr; }
     bool isPlaying() const noexcept { return playing.load (std::memory_order_relaxed); }
+
+    /** Which load this deck's track came from, counted across all decks, so
+        the most recently loaded deck has the highest number. Zero before
+        anything has been loaded. */
+    juce::uint64 getLoadSerial() const noexcept { return loadSerial.load (std::memory_order_relaxed); }
     double getPositionSeconds() const noexcept { return positionSeconds.load (std::memory_order_relaxed); }
     double getLengthSeconds() const noexcept   { return lengthSeconds.load (std::memory_order_relaxed); }
     double getCueSeconds() const noexcept      { return cuePointSeconds.load (std::memory_order_relaxed); }
@@ -267,6 +272,7 @@ private:
     mutable std::mutex loadErrorMutex;
     juce::String lastLoadError;
 
+    std::atomic<juce::uint64> loadSerial { 0 };
     std::atomic<Track*> activeTrack { nullptr };
 
     // Stems live beside the track rather than inside it: a separation arrives

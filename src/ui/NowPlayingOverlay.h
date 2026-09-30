@@ -7,41 +7,58 @@
 
 #include <juce_graphics/juce_graphics.h>
 
+#include "core/AudioEngine.h"
+
 #include <mutex>
 
 namespace opendj
 {
 
-/** The track name drawn over the visuals, in the lower third, the way
-    VirtualDJ shows it: it comes up when the track changes, holds for a while,
-    and fades away, so the picture is clean for the rest of the song.
+/** What is drawn over the visuals, in the way VirtualDJ's video output does
+    it: the name of what is playing, a "coming up next" line when a track is
+    waiting on another deck, and the turntables of the decks in use, turning
+    in the top corners.
 
-    `setTitle` is the message thread's side and `draw` the render thread's.
-    The title is a string copy under a lock rather than a read of the deck,
-    because a deck frees the track it just replaced on the message thread and
-    the render thread has no business holding a pointer into it. */
+    The titles are the message thread's (`setNowPlaying`, `setComingUp`) and
+    are copied here under a lock, because a deck frees the track it replaced
+    on the message thread and the render thread has no business holding a
+    pointer into it. The turntables are read straight off the engine's
+    atomics in `draw`, on the render thread, so they turn smoothly at the
+    frame rate rather than at the message timer's. */
 class NowPlayingOverlay
 {
 public:
-    /** Empty means nothing is playing; nothing is drawn. A changed title
-        restarts the show-and-fade. */
-    void setTitle (const juce::String& newTitle);
+    explicit NowPlayingOverlay (const AudioEngine& engineToWatch) : engine (engineToWatch) {}
 
-    /** How long the title is shown in full, and how long the fades take. */
-    static constexpr double holdSeconds = 12.0;
-    static constexpr double fadeSeconds = 1.0;
+    /** Empty means nothing is playing. A changed title restarts its
+        fade in; `audibility` and `playing` keep it up while its deck is in
+        the mix and let it go when the deck is faded out. */
+    void setNowPlaying (const juce::String& title, float audibility, bool playing);
 
-    /** 0 to 1: how visible the title is `secondsSinceChange` after it
-        changed. Split out so it can be tested without drawing anything. */
-    static float opacityAt (double secondsSinceChange) noexcept;
+    /** The track waiting on another deck, or empty. */
+    void setComingUp (const juce::String& title);
 
     /** Draws onto a tightly packed RGB frame, top row first. */
     void draw (unsigned char* rgb, int width, int height);
 
 private:
+    struct Line
+    {
+        juce::String text;
+        double changedAtSeconds = 0.0;
+    };
+
+    void drawTurntable (juce::Graphics& g, juce::Point<float> centre, float radius,
+                        const AudioEngine::DeckStatus& status, int deckIndex) const;
+
+    void composite (unsigned char* rgb, int width, int top, int bottom) const;
+
+    const AudioEngine& engine;
+
     std::mutex mutex;
-    juce::String title;
-    double changedAtSeconds = 0.0;
+    Line nowPlaying, comingUp;
+    float nowAudibility = 0.0f;
+    bool nowIsPlaying = false;
 
     juce::Image canvas;
 };

@@ -162,6 +162,33 @@ public:
         Empty when nothing is playing. */
     juce::String getNowPlayingTitle() const;
 
+    /** The deck `getNowPlayingTitle` names, or -1. */
+    int findNowPlayingDeck() const { return findLoudestPlayingDeck (false); }
+
+    /** How much of a deck reaches the room: its fader times its side of the
+        crossfader, 0 to 1, whether or not it is playing. */
+    float getDeckAudibility (int deckIndex) const;
+
+    /** What the visuals need of a deck, from atomics only, so the render
+        thread can ask thirty times a second. */
+    struct DeckStatus
+    {
+        bool loaded = false;
+        bool playing = false;
+        float audibility = 0.0f;
+        double positionSeconds = 0.0;
+    };
+
+    DeckStatus getDeckStatus (int deckIndex) const;
+
+    /** The deck most recently loaded that is waiting its turn while another
+        is on air: loaded, not playing, and not the one the room hears. -1
+        when nothing is on air or nothing is waiting. */
+    int findNextUpDeck() const;
+
+    /** Title of `findNextUpDeck`, or empty. */
+    juce::String getComingUpTitle() const;
+
     bool isDeckLoading (int deckIndex) const noexcept
     {
         return juce::isPositiveAndBelow (deckIndex, numDecks)

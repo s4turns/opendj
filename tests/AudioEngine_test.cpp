@@ -317,3 +317,50 @@ TEST_CASE ("nothing is named as now playing when no deck is playing", "[engine][
     AudioEngine engine;
     REQUIRE (engine.getNowPlayingTitle().isEmpty());
 }
+
+TEST_CASE ("a track loaded while another plays is named as coming up next", "[engine][decks]")
+{
+    ScopedJuce scoped;
+    ToneFile first, second;
+    Harness h;
+
+    // Nothing on air, so nothing is "next" yet.
+    REQUIRE (h.engine.findNextUpDeck() == -1);
+    REQUIRE (h.engine.getComingUpTitle().isEmpty());
+
+    h.loadAndPlay (0, first.get());
+    REQUIRE (h.engine.findNextUpDeck() == -1);
+
+    REQUIRE (h.engine.getDeck (1).loadFile (second.get()));
+    REQUIRE (h.engine.findNextUpDeck() == 1);
+    REQUIRE (h.engine.getComingUpTitle() == h.engine.getDeck (1).getTrackTitle());
+
+    // Once it plays it is no longer waiting.
+    h.engine.getDeck (1).play();
+    REQUIRE (h.engine.findNextUpDeck() == -1);
+
+    // The newest load wins when two are waiting.
+    h.engine.getDeck (1).pause();
+    REQUIRE (h.engine.getDeck (2).loadFile (second.get()));
+    REQUIRE (h.engine.findNextUpDeck() == 2);
+
+    h.engine.getDeck (2).unload();
+    REQUIRE (h.engine.findNextUpDeck() == 1);
+}
+
+TEST_CASE ("a deck's audibility follows its fader and its side of the crossfader", "[engine][mixer]")
+{
+    AudioEngine engine;
+    auto& mixer = engine.getMixer();
+
+    mixer.setChannelFader (0, 0.5f);
+    mixer.setChannelCrossfaderAssign (0, Mixer::CrossfaderAssign::thru);
+    REQUIRE_THAT (engine.getDeckAudibility (0), WithinAbs (0.5f, 1.0e-4f));
+
+    mixer.setChannelFader (0, 1.0f);
+    mixer.setChannelCrossfaderAssign (0, Mixer::CrossfaderAssign::a);
+    mixer.setCrossfaderPosition (-1.0f);
+    REQUIRE_THAT (engine.getDeckAudibility (0), WithinAbs (1.0f, 1.0e-4f));
+    mixer.setCrossfaderPosition (1.0f);
+    REQUIRE_THAT (engine.getDeckAudibility (0), WithinAbs (0.0f, 1.0e-4f));
+}

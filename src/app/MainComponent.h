@@ -168,7 +168,7 @@ private:
     juce::String libraryError;
 
     AudioEngine engine;
-    NowPlayingOverlay nowPlaying;
+    NowPlayingOverlay nowPlaying { engine };
     ActionDispatcher dispatcher { engine };
     MidiControlSurface midi { engine, dispatcher };
 

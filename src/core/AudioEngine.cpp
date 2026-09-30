@@ -742,12 +742,63 @@ juce::String AudioEngine::getNowPlayingTitle() const
     return deck >= 0 ? decks[(size_t) deck]->getTrackTitle() : juce::String();
 }
 
-int AudioEngine::findLoudestPlayingDeck (bool requireBeatGrid) const
+float AudioEngine::getDeckAudibility (int deckIndex) const
 {
     // Where the crossfader leaves each side, on a straight line. The real curve
     // does not matter here: only which deck is loudest does.
     const auto x = (mixer.getCrossfaderPosition() + 1.0f) * 0.5f;
+    const auto assign = mixer.getChannelCrossfaderAssign (deckIndex);
+    const auto side = assign == Mixer::CrossfaderAssign::a ? 1.0f - x
+                    : assign == Mixer::CrossfaderAssign::b ? x
+                                                           : 1.0f;
 
+    return mixer.getChannelFader (deckIndex) * side;
+}
+
+AudioEngine::DeckStatus AudioEngine::getDeckStatus (int deckIndex) const
+{
+    if (! juce::isPositiveAndBelow (deckIndex, numDecks))
+        return {};
+
+    const auto& deck = *decks[(size_t) deckIndex];
+    return { deck.isLoaded(), deck.isPlaying(), getDeckAudibility (deckIndex), deck.getPositionSeconds() };
+}
+
+int AudioEngine::findNextUpDeck() const
+{
+    const auto onAir = findLoudestPlayingDeck (false);
+
+    if (onAir < 0)
+        return -1;
+
+    auto best = -1;
+    juce::uint64 bestSerial = 0;
+
+    for (int i = 0; i < numDecks; ++i)
+    {
+        const auto& deck = *decks[(size_t) i];
+
+        if (i == onAir || ! deck.isLoaded() || deck.isPlaying())
+            continue;
+
+        if (deck.getLoadSerial() > bestSerial)
+        {
+            bestSerial = deck.getLoadSerial();
+            best = i;
+        }
+    }
+
+    return best;
+}
+
+juce::String AudioEngine::getComingUpTitle() const
+{
+    const auto deck = findNextUpDeck();
+    return deck >= 0 ? decks[(size_t) deck]->getTrackTitle() : juce::String();
+}
+
+int AudioEngine::findLoudestPlayingDeck (bool requireBeatGrid) const
+{
     auto best = -1;
     auto bestLevel = 0.0f;
 
@@ -756,13 +807,8 @@ int AudioEngine::findLoudestPlayingDeck (bool requireBeatGrid) const
         if (! decks[(size_t) i]->isPlaying() || (requireBeatGrid && getEffectiveBpm (i) <= 0.0))
             continue;
 
-        const auto assign = mixer.getChannelCrossfaderAssign (i);
-        const auto side = assign == Mixer::CrossfaderAssign::a ? 1.0f - x
-                        : assign == Mixer::CrossfaderAssign::b ? x
-                                                               : 1.0f;
-
         // Ties go to the lower deck, as they do for sync.
-        if (const auto level = mixer.getChannelFader (i) * side; level > bestLevel)
+        if (const auto level = getDeckAudibility (i); level > bestLevel)
         {
             bestLevel = level;
             best = i;
