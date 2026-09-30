@@ -35,6 +35,9 @@ public:
     void resized() override;
     void paint (juce::Graphics& g) override;
 
+    /** Re-reads the playlists after something outside changed them. */
+    void refresh() { reloadPlaylists(); pushQueue(); }
+
     // Dragging a track from the browser onto the list.
     bool isInterestedInDragSource (const SourceDetails& details) override;
     void itemDropped (const SourceDetails& details) override;

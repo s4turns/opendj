@@ -136,23 +136,27 @@ void NowPlayingOverlay::draw (unsigned char* rgb, int width, int height)
         playing = nowIsPlaying;
     }
 
+    {
+        now.text = "Debug Artist - Debug Title"; now.changedAtSeconds = nowSeconds() - 3.0; playing = true; audibility = 1.0f;
+        next.text = "Next Artist - Next Title"; next.changedAtSeconds = nowSeconds() - 3.0;
+    }
+
     const auto t = nowSeconds();
     const auto nowOpacity = now.text.isEmpty()
         ? 0.0f : overlay::nowPlayingOpacity (t - now.changedAtSeconds, audibility, playing);
     const auto nextOpacity = next.text.isEmpty()
         ? 0.0f : juce::jlimit (0.0f, 1.0f, (float) ((t - next.changedAtSeconds) / overlay::fadeSeconds));
 
-    std::array<overlay::DeckLook, AudioEngine::numDecks> looks {};
+    // One corner for each deck: A top left, B top right, C bottom left, D
+    // bottom right. A deck with nothing on it leaves its corner empty.
     std::array<AudioEngine::DeckStatus, AudioEngine::numDecks> statuses {};
+    auto anyTurntable = false;
 
     for (int i = 0; i < AudioEngine::numDecks; ++i)
     {
         statuses[(size_t) i] = engine.getDeckStatus (i);
-        looks[(size_t) i] = { statuses[(size_t) i].loaded, statuses[(size_t) i].playing, statuses[(size_t) i].audibility };
+        anyTurntable = anyTurntable || statuses[(size_t) i].loaded;
     }
-
-    const auto corners = overlay::pickCornerDecks (looks);
-    const auto anyTurntable = corners[0] >= 0 || corners[1] >= 0;
 
     if (nowOpacity <= 0.0f && nextOpacity <= 0.0f && ! anyTurntable)
         return;
@@ -162,12 +166,16 @@ void NowPlayingOverlay::draw (unsigned char* rgb, int width, int height)
     // visuals can do without.
     const auto margin = (float) height / 24.0f;
     const auto turntableRadius = (float) height / 9.0f;
-    const auto topBand = juce::jmin (height, (int) (turntableRadius * 2.0f + margin * 2.0f));
-    const auto bottomBand = juce::jmin (height - topBand, height / 4);
+    const auto band = juce::jmin (height / 2, (int) (turntableRadius * 2.0f + margin * 2.0f));
+    const auto topBand = band;
+    const auto bottomBand = band;
     const auto bottomTop = height - bottomBand;
 
+    // A plain software image, not the platform's native one: on Windows that
+    // is Direct2D backed, and text drawn into it from this thread, which is
+    // not the message thread, does not come out.
     if (! canvas.isValid() || canvas.getWidth() != width || canvas.getHeight() != height)
-        canvas = juce::Image (juce::Image::ARGB, width, height, true);
+        canvas = juce::Image (juce::Image::ARGB, width, height, true, juce::SoftwareImageType());
 
     canvas.clear ({ 0, 0, width, topBand });
     canvas.clear ({ 0, bottomTop, width, bottomBand });
@@ -175,18 +183,16 @@ void NowPlayingOverlay::draw (unsigned char* rgb, int width, int height)
     {
         juce::Graphics g (canvas);
 
-        if (anyTurntable)
-        {
-            const auto y = margin + turntableRadius;
+        const auto left = margin + turntableRadius;
+        const auto right = (float) width - margin - turntableRadius;
+        const auto top = margin + turntableRadius;
+        const auto bottom = (float) height - margin - turntableRadius;
+        const juce::Point<float> centres[AudioEngine::numDecks] {
+            { left, top }, { right, top }, { left, bottom }, { right, bottom } };
 
-            if (corners[0] >= 0)
-                drawTurntable (g, { margin + turntableRadius, y }, turntableRadius,
-                               statuses[(size_t) corners[0]], corners[0]);
-
-            if (corners[1] >= 0)
-                drawTurntable (g, { (float) width - margin - turntableRadius, y }, turntableRadius,
-                               statuses[(size_t) corners[1]], corners[1]);
-        }
+        for (int i = 0; i < AudioEngine::numDecks; ++i)
+            if (statuses[(size_t) i].loaded)
+                drawTurntable (g, centres[i], turntableRadius, statuses[(size_t) i], i);
 
         if (nowOpacity > 0.0f || nextOpacity > 0.0f)
         {
@@ -197,7 +203,8 @@ void NowPlayingOverlay::draw (unsigned char* rgb, int width, int height)
             g.fillRect (0, bottomTop, width, bottomBand);
 
             const auto fontHeight = (float) height / 18.0f;
-            const auto area = juce::Rectangle<float> (margin, (float) bottomTop, (float) width - margin * 2.0f,
+            const auto inset = margin * 2.0f + turntableRadius * 2.0f;
+            const auto area = juce::Rectangle<float> (inset, (float) bottomTop, (float) width - inset * 2.0f,
                                                       (float) bottomBand).withTrimmedBottom (margin * 0.6f);
 
             auto text = area;
@@ -208,9 +215,9 @@ void NowPlayingOverlay::draw (unsigned char* rgb, int width, int height)
                 g.beginTransparencyLayer (nowOpacity);
                 g.setFont (juce::FontOptions (fontHeight, juce::Font::bold));
                 g.setColour (juce::Colours::black.withAlpha (0.8f));
-                g.drawText (now.text, line.translated (2.0f, 2.0f), juce::Justification::bottomLeft, true);
+                g.drawText (now.text, line.translated (2.0f, 2.0f), juce::Justification::centredBottom, true);
                 g.setColour (juce::Colours::white);
-                g.drawText (now.text, line, juce::Justification::bottomLeft, true);
+                g.drawText (now.text, line, juce::Justification::centredBottom, true);
                 g.endTransparencyLayer();
             }
 
@@ -221,9 +228,9 @@ void NowPlayingOverlay::draw (unsigned char* rgb, int width, int height)
                 g.beginTransparencyLayer (nextOpacity);
                 g.setFont (juce::FontOptions (fontHeight * 0.68f, juce::Font::plain));
                 g.setColour (juce::Colours::black.withAlpha (0.8f));
-                g.drawText (message, line.translated (1.5f, 1.5f), juce::Justification::bottomLeft, true);
+                g.drawText (message, line.translated (1.5f, 1.5f), juce::Justification::centredBottom, true);
                 g.setColour (accentColour);
-                g.drawText (message, line, juce::Justification::bottomLeft, true);
+                g.drawText (message, line, juce::Justification::centredBottom, true);
                 g.endTransparencyLayer();
             }
         }

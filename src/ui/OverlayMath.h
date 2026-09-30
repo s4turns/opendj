@@ -6,8 +6,6 @@
 #pragma once
 
 #include <algorithm>
-#include <array>
-#include <cstddef>
 
 namespace opendj
 {
@@ -47,46 +45,6 @@ namespace overlay
         const auto held = secondsSinceChange >= 0.0 && secondsSinceChange < holdSeconds ? 1.0f : 0.0f;
         const auto inMix = playing ? std::clamp (audibility, 0.0f, 1.0f) : 0.0f;
         return fadeIn * std::max (held, inMix);
-    }
-
-    /** What the picker needs to know about a deck. */
-    struct DeckLook
-    {
-        bool loaded = false;
-        bool playing = false;
-        float audibility = 0.0f;
-    };
-
-    /** The two decks whose turntables are drawn, lower index first, or -1
-        for an empty corner. Playing decks win, loudest first; loaded decks
-        fill what is left; ties go to the lower deck. */
-    template <std::size_t N>
-    inline std::array<int, 2> pickCornerDecks (const std::array<DeckLook, N>& decks) noexcept
-    {
-        std::array<int, N> order {};
-
-        for (std::size_t i = 0; i < N; ++i)
-            order[i] = (int) i;
-
-        const auto rank = [&] (int i)
-        {
-            const auto& d = decks[(std::size_t) i];
-            return d.playing ? 2.0f + d.audibility : d.loaded ? 1.0f : 0.0f;
-        };
-
-        std::stable_sort (order.begin(), order.end(), [&] (int a, int b) { return rank (a) > rank (b); });
-
-        std::array<int, 2> picked { -1, -1 };
-        std::size_t count = 0;
-
-        for (const auto i : order)
-            if (count < 2 && decks[(std::size_t) i].loaded)
-                picked[count++] = i;
-
-        if (picked[1] >= 0 && picked[0] > picked[1])
-            std::swap (picked[0], picked[1]);
-
-        return picked;
     }
 }
 

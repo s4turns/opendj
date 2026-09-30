@@ -322,6 +322,41 @@ void BrowserComponent::sortOrderChanged (int columnId, bool forwards)
     refreshNow();
 }
 
+void BrowserComponent::cellClicked (int row, int, const juce::MouseEvent& e)
+{
+    if (! e.mods.isPopupMenu() || ! juce::isPositiveAndBelow (row, (int) rows.size()))
+        return;
+
+    // The row under the pointer is what the menu is about, selected or not.
+    table.selectRow (row);
+    const auto file = rows[(size_t) row].file;
+
+    // Item ids are the playlist's id plus one, so zero stays "nothing chosen".
+    juce::PopupMenu playlists;
+    const auto lists = library.getPlaylists();
+
+    for (const auto& playlist : lists)
+        playlists.addItem ((int) (playlist.id + 1), playlist.name + " (" + juce::String (playlist.numTracks) + ")");
+
+    if (lists.empty())
+        playlists.addItem (-1, "No playlists yet: make one in the Playlists tab", false, false);
+
+    juce::PopupMenu menu;
+    menu.addSubMenu ("Add to playlist", playlists);
+
+    menu.showMenuAsync (juce::PopupMenu::Options(),
+        [safe = juce::Component::SafePointer<BrowserComponent> (this), file] (int chosen)
+        {
+            if (safe == nullptr || chosen <= 0)
+                return;
+
+            safe->library.addToPlaylist ((juce::int64) chosen - 1, { file });
+
+            if (safe->onPlaylistsChanged != nullptr)
+                safe->onPlaylistsChanged();
+        });
+}
+
 void BrowserComponent::cellDoubleClicked (int row, int, const juce::MouseEvent&)
 {
     if (juce::isPositiveAndBelow (row, (int) rows.size()) && onLoad != nullptr)

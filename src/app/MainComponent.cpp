@@ -184,6 +184,8 @@ MainComponent::MainComponent()
     playlistView = std::make_unique<PlaylistComponent> (library, autoMix,
                                                         [this] { return browser->getSelectedFile(); });
 
+    browser->onPlaylistsChanged = [this] { playlistView->refresh(); };
+
     browserTabs = std::make_unique<juce::TabbedComponent> (juce::TabbedButtonBar::TabsAtTop);
     browserTabs->setTabBarDepth (26);
     browserTabs->setOutline (0);

@@ -32,27 +32,3 @@ TEST_CASE ("the now-playing title stays while its deck is in the mix and leaves 
     // Just after a change it is held in full whatever the fader says.
     REQUIRE_THAT (nowPlayingOpacity (3.0, 0.0f, true), WithinAbs (1.0, 1e-6));
 }
-
-TEST_CASE ("the corner turntables are the two decks that matter", "[overlay]")
-{
-    std::array<DeckLook, 4> decks {};
-
-    REQUIRE (pickCornerDecks (decks) == std::array<int, 2> { -1, -1 });
-
-    decks[2].loaded = true;
-    REQUIRE (pickCornerDecks (decks) == std::array<int, 2> { 2, -1 });
-
-    decks[0].loaded = true;
-    decks[3].loaded = decks[3].playing = true;
-    decks[3].audibility = 0.8f;
-    decks[1].loaded = decks[1].playing = true;
-    decks[1].audibility = 0.3f;
-
-    // Both playing decks win over loaded ones, lower index on the left.
-    REQUIRE (pickCornerDecks (decks) == std::array<int, 2> { 1, 3 });
-
-    // A third playing deck, louder than the quietest, pushes it out.
-    decks[0].playing = true;
-    decks[0].audibility = 1.0f;
-    REQUIRE (pickCornerDecks (decks) == std::array<int, 2> { 0, 3 });
-}

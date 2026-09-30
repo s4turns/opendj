@@ -36,6 +36,10 @@ public:
         -1 means "whichever is free", which is what a double-click means. */
     std::function<void (const juce::File&, int deck)> onLoad;
 
+    /** Called after the right-click menu put a track in a playlist, so the
+        playlist tab can show it. */
+    std::function<void()> onPlaylistsChanged;
+
     /** The highlighted track, or an invalid file. Safe from any thread, so the
         controller's load button can ask on the MIDI thread. */
     juce::File getSelectedFile() const;
@@ -53,6 +57,7 @@ private:
     void paintCell (juce::Graphics&, int row, int columnId, int width, int height, bool selected) override;
     void sortOrderChanged (int columnId, bool forwards) override;
     void cellDoubleClicked (int row, int columnId, const juce::MouseEvent&) override;
+    void cellClicked (int row, int columnId, const juce::MouseEvent&) override;
     void selectedRowsChanged (int lastRowSelected) override;
     juce::var getDragSourceDescription (const juce::SparseSet<int>& selectedRows) override;
 
