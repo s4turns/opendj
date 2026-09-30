@@ -15,11 +15,6 @@ namespace opendj
     `AngleMath.h`). `AutoMix` is the thin part that acts on them. */
 namespace automix
 {
-    /** How long before the fade starts the next track is loaded. Decoding and
-        analysing a long track takes a second or two, and a slow disk takes
-        longer; this is enough to be ready, with room to spare. */
-    inline constexpr double preloadLeadSeconds = 25.0;
-
     enum class Step
     {
         wait,   ///< nothing to do yet
@@ -48,10 +43,10 @@ namespace automix
         if (s.nextReady)
             return s.skipRequested || s.remainingSeconds <= fadeSeconds ? Step::fade : Step::wait;
 
-        if (! s.nextLoading && (s.skipRequested || s.remainingSeconds <= fadeSeconds + preloadLeadSeconds))
-            return Step::load;
-
-        return Step::wait;
+        // Loaded straight away, not shortly before it is needed: the track on
+        // the idle deck is what the visuals announce as coming up next, and a
+        // DJ has the next record cued long before the mix.
+        return s.nextLoading ? Step::wait : Step::load;
     }
 
     /** The fade can never be longer than half of either track, or a short

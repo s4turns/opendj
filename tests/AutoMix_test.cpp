@@ -10,16 +10,14 @@
 using Catch::Matchers::WithinAbs;
 using namespace opendj::automix;
 
-TEST_CASE ("the next track is loaded early and faded in on time", "[automix]")
+TEST_CASE ("the next track is loaded at once and faded in on time", "[automix]")
 {
     Situation s;
     s.haveNext = true;
     const auto fade = 12.0;
 
-    s.remainingSeconds = 120.0;
-    REQUIRE (decide (s, fade) == Step::wait);
-
-    s.remainingSeconds = fade + preloadLeadSeconds - 1.0;
+    // However much of the current track is left, the next one is cued now.
+    s.remainingSeconds = 300.0;
     REQUIRE (decide (s, fade) == Step::load);
 
     // Already loading or loaded: do not ask again.
