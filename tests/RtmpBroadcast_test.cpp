@@ -728,3 +728,94 @@ TEST_CASE ("a real RTMP target accepts the broadcast", "[.live]")
 
     broadcaster.stop();
 }
+
+//==============================================================================
+// Stopping a stream whose ffmpeg has stopped listening.
+
+namespace
+{
+    void setFfmpegOverride (const juce::String& value)
+    {
+       #if JUCE_WINDOWS
+        _putenv_s ("OPENDJ_RTMP_FFMPEG", value.toRawUTF8());
+       #else
+        if (value.isNotEmpty())
+            ::setenv ("OPENDJ_RTMP_FFMPEG", value.toRawUTF8(), 1);
+        else
+            ::unsetenv ("OPENDJ_RTMP_FFMPEG");
+       #endif
+    }
+}
+
+/** Ending a broadcast from the window froze the application when ffmpeg had
+    stalled: the audio writer was stuck in a write ffmpeg would never read,
+    and `stop` joined that writer before touching ffmpeg. Windows recorded it
+    as an application hang, twice.
+
+    The stand-in answers the capability checks, confirms the connection, and
+    then never reads its input again, so the pipe fills and the writer blocks,
+    which is the state the freeze needed. Stopping must still return promptly. */
+TEST_CASE ("stopping a broadcast returns even when ffmpeg has stopped reading", "[rtmp]")
+{
+    const auto script = juce::File::createTempFile (JUCE_WINDOWS ? ".bat" : ".sh");
+    const auto previous = juce::SystemStats::getEnvironmentVariable ("OPENDJ_RTMP_FFMPEG", {});
+
+    struct Restore
+    {
+        juce::File file;
+        juce::String previous;
+        ~Restore() { setFfmpegOverride (previous); file.deleteFile(); }
+    } restore { script, previous };
+
+   #if JUCE_WINDOWS
+    REQUIRE (script.replaceWithText (
+        "@echo off\r\n"
+        "echo %* | findstr /C:\"-encoders\" >nul && (echo  V....D libx264 stand-in& exit /b 0)\r\n"
+        "echo %* | findstr /C:\"-version\" >nul && (echo ffmpeg version stand-in& exit /b 0)\r\n"
+        "echo Output #0, flv, to 'rtmp://stand-in': 1>&2\r\n"
+        // One process, no children: a child such as ping would inherit the pipe
+        // and keep it open after this one was killed, unlike a real ffmpeg.
+        "for /L %%i in (1,1,60000000) do @rem\r\n", false, false, "\r\n"));
+   #else
+    REQUIRE (script.replaceWithText (
+        "#!/bin/sh\n"
+        "case \"$*\" in\n"
+        "  *-encoders*) echo ' V....D libx264              stand-in'; exit 0 ;;\n"
+        "  *-version*)  echo 'ffmpeg version stand-in'; exit 0 ;;\n"
+        "esac\n"
+        "echo \"Output #0, flv, to 'rtmp://stand-in':\" >&2\n"
+        "exec sleep 60\n", false, false, "\n"));
+    REQUIRE (script.setExecutePermission (true));
+   #endif
+
+    setFfmpegOverride (script.getFullPathName());
+
+    juce::String diagnostic;
+    REQUIRE (opendj::RtmpConnection::findFfmpeg (diagnostic) == script.getFullPathName());
+
+    RtmpBroadcaster broadcaster;
+    juce::String error;
+    REQUIRE (broadcaster.start (usable(), 48000.0, error));
+
+    // Several seconds of audio, well past what the pipe and the writer's
+    // FIFO hold, so something is certainly blocked in a write.
+    juce::AudioBuffer<float> block (2, 4800);
+
+    for (int ch = 0; ch < 2; ++ch)
+        for (int i = 0; i < block.getNumSamples(); ++i)
+            block.setSample (ch, i, (float) std::sin (i * 0.05) * 0.5f);
+
+    for (int i = 0; i < 100; ++i)
+    {
+        broadcaster.write (block, block.getNumSamples());
+        juce::Thread::sleep (5);
+    }
+
+    const auto started = juce::Time::getMillisecondCounter();
+    broadcaster.stop();
+    const auto took = juce::Time::getMillisecondCounter() - started;
+
+    INFO ("stop took " << took << " ms");
+    REQUIRE (took < 6000);
+    REQUIRE (broadcaster.getState() == RtmpBroadcaster::State::offline);
+}

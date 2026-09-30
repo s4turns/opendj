@@ -9,6 +9,7 @@
 
 #include <atomic>
 #include <memory>
+#include <mutex>
 
 namespace opendj
 {
@@ -137,6 +138,13 @@ public:
         requirement is met without leaning on the audio thread. */
     bool waitForConfirmation (juce::String& error);
 
+    /** Ends ffmpeg at once and returns without waiting for it. Anything stuck
+        writing to it fails straight away instead of waiting on a process
+        that has stopped reading, which is what lets a stop from the window
+        return: without this, ending a stream whose ffmpeg had stalled froze
+        the application. Safe from any thread; follow with `disconnect`. */
+    void abort();
+
     void disconnect();
     bool isConnected() const noexcept { return connected.load (std::memory_order_relaxed); }
 
@@ -171,6 +179,7 @@ private:
     class Process;
 
     std::unique_ptr<Process> process;
+    std::mutex processMutex;
     std::atomic<bool> connected { false };
     std::atomic<juce::int64> bytesSent { 0 };
 

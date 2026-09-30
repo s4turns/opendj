@@ -584,6 +584,18 @@ public:
 
     bool hasVideoPipe() const noexcept { return videoHandle != nullptr; }
 
+    /** Ends ffmpeg now and returns at once, without closing anything. Every
+        write to it then fails, which is what frees a thread stuck in one:
+        a stalled ffmpeg stops reading its stdin, and a blocked WriteFile has
+        no other way out. Safe from any thread. */
+    void terminate()
+    {
+        const std::lock_guard<std::mutex> lock (processMutex);
+
+        if (processHandle != nullptr)
+            TerminateProcess (processHandle, 1);
+    }
+
     void stop()
     {
         if (videoHandle != nullptr)
@@ -626,17 +638,26 @@ public:
             stderrHandle = nullptr;
         }
 
-        if (processHandle != nullptr)
+        // Taken out from under the lock, so `terminate` either gets there
+        // first or finds nothing, and never a handle that is being closed.
+        HANDLE process = nullptr;
+
         {
-            WaitForSingleObject (processHandle, (DWORD) stopGraceMs);
+            const std::lock_guard<std::mutex> lock (processMutex);
+            process = processHandle;
+            processHandle = nullptr;
+        }
+
+        if (process != nullptr)
+        {
+            WaitForSingleObject (process, (DWORD) stopGraceMs);
 
             DWORD exitCode = 0;
 
-            if (GetExitCodeProcess (processHandle, &exitCode) != 0 && exitCode == STILL_ACTIVE)
-                TerminateProcess (processHandle, 1);
+            if (GetExitCodeProcess (process, &exitCode) != 0 && exitCode == STILL_ACTIVE)
+                TerminateProcess (process, 1);
 
-            CloseHandle (processHandle);
-            processHandle = nullptr;
+            CloseHandle (process);
         }
     }
 
@@ -786,6 +807,7 @@ private:
     static constexpr DWORD videoPipeBytes = 8 * 1024 * 1024;
 
     HANDLE processHandle = nullptr;
+    std::mutex processMutex;
     HANDLE stdinHandle = nullptr;
     HANDLE stderrHandle = nullptr;
     HANDLE videoHandle = nullptr;
@@ -963,6 +985,18 @@ public:
     bool writeVideo (const void* data, size_t numBytes) { return writeTo (videoFd, data, numBytes); }
 
     bool hasVideoPipe() const noexcept { return videoFd >= 0; }
+
+    /** Asks ffmpeg to end and returns at once; see the Windows half. Its
+        exit closes the pipes, which fails any write a thread is stuck in. */
+    void terminate()
+    {
+        // Copied first: `stop` sets it to -1, and kill(-1) signals everything
+        // this user owns.
+        const auto target = pid;
+
+        if (target > 0)
+            ::kill (target, SIGTERM);
+    }
 
 private:
     /** One routine for both pipes, because the discipline it follows -- a
@@ -1276,7 +1310,10 @@ bool RtmpConnection::launch (const RtmpSettings& settings, double sampleRate, ju
     if (ffmpegPath.isEmpty())
         return false;
 
-    process = std::make_unique<Process>();
+    {
+        const std::lock_guard<std::mutex> lock (processMutex);
+        process = std::make_unique<Process>();
+    }
 
     // Where ffmpeg is told to read frames from has to be settled before the
     // arguments are built, because it goes into them, and only the platform
@@ -1285,7 +1322,7 @@ bool RtmpConnection::launch (const RtmpSettings& settings, double sampleRate, ju
 
     if (settings.liveVideo && ! process->createVideoPipe (videoSource, error))
     {
-        process.reset();
+        disconnect();
         return false;
     }
 
@@ -1293,7 +1330,7 @@ bool RtmpConnection::launch (const RtmpSettings& settings, double sampleRate, ju
 
     if (! process->start (ffmpegPath, args, settings.liveVideo, error))
     {
-        process.reset();
+        disconnect();
         return false;
     }
 
@@ -1337,10 +1374,30 @@ bool RtmpConnection::waitForConfirmation (juce::String& error)
     return false;
 }
 
+void RtmpConnection::abort()
+{
+    connected.store (false, std::memory_order_relaxed);
+
+    const std::lock_guard<std::mutex> lock (processMutex);
+
+    if (process != nullptr)
+        process->terminate();
+}
+
 void RtmpConnection::disconnect()
 {
     connected.store (false, std::memory_order_relaxed);
-    process.reset();
+
+    // Moved out under the lock and destroyed outside it: stopping ffmpeg can
+    // take seconds, and `abort` must never wait that long for the lock.
+    std::unique_ptr<Process> finished;
+
+    {
+        const std::lock_guard<std::mutex> lock (processMutex);
+        finished = std::move (process);
+    }
+
+    finished.reset();
 }
 
 bool RtmpConnection::send (const void* data, int numBytes)

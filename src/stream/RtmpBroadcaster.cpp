@@ -319,6 +319,17 @@ bool RtmpBroadcaster::start (const RtmpSettings& settingsToUse, double sampleRat
 
 void RtmpBroadcaster::stop()
 {
+    // ffmpeg goes first. The writer, the video feeder and the reconnector
+    // are each somewhere inside a write to it or a wait on it, and a stalled
+    // ffmpeg never answers either; joining them first is how stopping a
+    // stream from the window used to freeze the whole application. With it
+    // gone every one of those fails at once and the joins are quick.
+    if (reconnector != nullptr)
+        reconnector->signalThreadShouldExit();
+
+    if (connection != nullptr)
+        connection->abort();
+
     if (reconnector != nullptr)
     {
         reconnector->stopThread (2000);

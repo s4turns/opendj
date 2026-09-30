@@ -150,16 +150,9 @@ void NowPlayingOverlay::draw (unsigned char* rgb, int width, int height)
     // One corner for each deck: A top left, B top right, C bottom left, D
     // bottom right. A deck with nothing on it leaves its corner empty.
     std::array<AudioEngine::DeckStatus, AudioEngine::numDecks> statuses {};
-    auto anyTurntable = false;
 
     for (int i = 0; i < AudioEngine::numDecks; ++i)
-    {
         statuses[(size_t) i] = engine.getDeckStatus (i);
-        anyTurntable = anyTurntable || statuses[(size_t) i].loaded;
-    }
-
-    if (nowOpacity <= 0.0f && nextOpacity <= 0.0f && ! anyTurntable)
-        return;
 
     // Only the two bands anything is drawn in are cleared and blended: a full
     // frame through a software renderer thirty times a second is work the
@@ -193,6 +186,18 @@ void NowPlayingOverlay::draw (unsigned char* rgb, int width, int height)
         for (int i = 0; i < AudioEngine::numDecks; ++i)
             if (statuses[(size_t) i].loaded)
                 drawTurntable (g, centres[i], turntableRadius, statuses[(size_t) i], i);
+
+        // The watermark, in the gutter under the last deck's turntable, in the
+        // bottom right corner. Always on, and faint enough to ignore.
+        {
+            const auto box = juce::Rectangle<float> ((float) width - margin - 240.0f, (float) height - margin,
+                                                     240.0f, margin);
+            g.setFont (juce::FontOptions (margin * 0.78f, juce::Font::bold));
+            g.setColour (juce::Colours::black.withAlpha (0.45f));
+            g.drawText ("OpenDJ", box.translated (1.0f, 1.0f), juce::Justification::centredRight, false);
+            g.setColour (juce::Colours::white.withAlpha (0.6f));
+            g.drawText ("OpenDJ", box, juce::Justification::centredRight, false);
+        }
 
         if (nowOpacity > 0.0f || nextOpacity > 0.0f)
         {
