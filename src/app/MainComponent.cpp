@@ -180,7 +180,16 @@ MainComponent::MainComponent()
 
     browser = std::make_unique<BrowserComponent> (library, scanner);
     browser->onLoad = [this] (const juce::File& file, int deckIndex) { loadOntoDeck (file, deckIndex); };
-    addAndMakeVisible (*browser);
+
+    playlistView = std::make_unique<PlaylistComponent> (library, autoMix,
+                                                        [this] { return browser->getSelectedFile(); });
+
+    browserTabs = std::make_unique<juce::TabbedComponent> (juce::TabbedButtonBar::TabsAtTop);
+    browserTabs->setTabBarDepth (26);
+    browserTabs->setOutline (0);
+    browserTabs->addTab ("Library", juce::Colour (0xff15151a), browser.get(), false);
+    browserTabs->addTab ("Playlists", juce::Colour (0xff15151a), playlistView.get(), false);
+    addAndMakeVisible (*browserTabs);
 
     // The controller's browse encoder and load buttons reach the browser through
     // the dispatcher, the same way every other input does.
@@ -266,6 +275,7 @@ MainComponent::~MainComponent()
     // timer, and the visualiser is the engine's.
     visualsWindow.reset();
 
+    autoMix.stop();
     engine.stop();
     engine.getVisualizer().setFrameOverlay ({});
 
@@ -386,6 +396,8 @@ void MainComponent::loadInitialTracks (const juce::StringArray& paths)
 
 void MainComponent::timerCallback()
 {
+    autoMix.tick (juce::Time::getMillisecondCounterHiRes() / 1000.0);
+
     {
         const auto playingDeck = engine.findNowPlayingDeck();
         const auto status = engine.getDeckStatus (playingDeck);
@@ -1624,7 +1636,7 @@ void MainComponent::resized()
     masterFxView->setBounds (area.removeFromBottom (58));
     area.removeFromBottom (8);
 
-    juce::Component* rows[] = { &deckRow, resizerBar.get(), browser.get() };
+    juce::Component* rows[] = { &deckRow, resizerBar.get(), browserTabs.get() };
     verticalLayout.layOutComponents (rows, 3, area.getX(), area.getY(), area.getWidth(), area.getHeight(),
                                      true, true);
 }

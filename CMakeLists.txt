@@ -274,7 +274,8 @@ target_sources(OpenDJ PRIVATE
     src/ui/SamplerComponent.cpp
     src/ui/MicComponent.cpp
     src/ui/VisualizerComponent.cpp
-    src/ui/NowPlayingOverlay.cpp)
+    src/ui/NowPlayingOverlay.cpp
+    src/ui/PlaylistComponent.cpp)
 
 target_include_directories(OpenDJ PRIVATE src)
 

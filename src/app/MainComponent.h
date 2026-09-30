@@ -27,6 +27,8 @@
 #include "ui/SamplerComponent.h"
 #include "ui/MicComponent.h"
 #include "ui/NowPlayingOverlay.h"
+#include "ui/PlaylistComponent.h"
+#include "core/AutoMix.h"
 #include "ui/VisualizerComponent.h"
 
 #include <array>
@@ -169,6 +171,7 @@ private:
 
     AudioEngine engine;
     NowPlayingOverlay nowPlaying { engine };
+    AutoMix autoMix { engine };
     ActionDispatcher dispatcher { engine };
     MidiControlSurface midi { engine, dispatcher };
 
@@ -195,6 +198,11 @@ private:
     /** The two decks' beats on one axis, across the top of the window. */
     std::unique_ptr<BeatMatchComponent> beatStrip;
     std::unique_ptr<BrowserComponent> browser;
+    std::unique_ptr<PlaylistComponent> playlistView;
+
+    /** The library and the playlists as two tabs in the browser's place.
+        Declared after what it shows, so it is gone first. */
+    std::unique_ptr<juce::TabbedComponent> browserTabs;
     std::unique_ptr<MasterFxComponent> masterFxView;
     std::unique_ptr<SamplerComponent> samplerView;
     std::unique_ptr<MicComponent> micView;
