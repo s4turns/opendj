@@ -157,6 +157,11 @@ public:
         master echo is meant to lock to, not whichever deck was touched last. */
     int findMasterTempoDeck() const;
 
+    /** What the room is hearing, for the visuals to name: the loudest playing
+        deck by its fader and the crossfader, with or without a beat grid.
+        Empty when nothing is playing. */
+    juce::String getNowPlayingTitle() const;
+
     bool isDeckLoading (int deckIndex) const noexcept
     {
         return juce::isPositiveAndBelow (deckIndex, numDecks)
@@ -305,6 +310,9 @@ private:
         the timer rather than per block: a tempo fader does not move fast enough
         for a fiftieth of a second to matter. */
     void updateEchoTimes();
+
+    /** The playing deck the room hears most, or -1. */
+    int findLoudestPlayingDeck (bool requireBeatGrid) const;
 
     /** Asks the open device for a buffer size a DJ can play on, if it is
         sitting on something far larger. Some backends open at a quarter of a

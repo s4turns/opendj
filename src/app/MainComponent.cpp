@@ -243,6 +243,13 @@ MainComponent::MainComponent()
     addKeyListener (this);
     setWantsKeyboardFocus (true);
 
+    // The track name over the visuals, for the window and the broadcast. Set
+    // before the visuals can start, and taken off again in the destructor.
+    engine.getVisualizer().setFrameOverlay ([this] (unsigned char* rgb, int width, int height)
+    {
+        nowPlaying.draw (rgb, width, height);
+    });
+
     startTimerHz (refreshRateHz);
     setSize (1280, 960);
 }
@@ -260,6 +267,7 @@ MainComponent::~MainComponent()
     visualsWindow.reset();
 
     engine.stop();
+    engine.getVisualizer().setFrameOverlay ({});
 
     stopTimer();
     dispatcher.onStateChanged = nullptr;
@@ -378,6 +386,8 @@ void MainComponent::loadInitialTracks (const juce::StringArray& paths)
 
 void MainComponent::timerCallback()
 {
+    nowPlaying.setTitle (engine.getNowPlayingTitle());
+
     // Noted while the window is alive and healthy, never asked for on the way
     // out: by the time this component is destroyed the window that owns it is
     // already half gone, and asking it anything then is an access violation.

@@ -311,3 +311,9 @@ TEST_CASE ("a mic on an input that shares memory with an output is still heard",
     // arrive.
     REQUIRE_THAT (h.renderWithInput (0, h.storage[0], 0.25f), WithinAbs (0.25f, 1.0e-3f));
 }
+
+TEST_CASE ("nothing is named as now playing when no deck is playing", "[engine][decks]")
+{
+    AudioEngine engine;
+    REQUIRE (engine.getNowPlayingTitle().isEmpty());
+}

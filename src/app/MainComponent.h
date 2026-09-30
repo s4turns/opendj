@@ -26,6 +26,7 @@
 #include "app/Settings.h"
 #include "ui/SamplerComponent.h"
 #include "ui/MicComponent.h"
+#include "ui/NowPlayingOverlay.h"
 #include "ui/VisualizerComponent.h"
 
 #include <array>
@@ -167,6 +168,7 @@ private:
     juce::String libraryError;
 
     AudioEngine engine;
+    NowPlayingOverlay nowPlaying;
     ActionDispatcher dispatcher { engine };
     MidiControlSurface midi { engine, dispatcher };
 

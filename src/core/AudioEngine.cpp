@@ -733,6 +733,17 @@ void AudioEngine::updateEchoTimes()
 
 int AudioEngine::findMasterTempoDeck() const
 {
+    return findLoudestPlayingDeck (true);
+}
+
+juce::String AudioEngine::getNowPlayingTitle() const
+{
+    const auto deck = findLoudestPlayingDeck (false);
+    return deck >= 0 ? decks[(size_t) deck]->getTrackTitle() : juce::String();
+}
+
+int AudioEngine::findLoudestPlayingDeck (bool requireBeatGrid) const
+{
     // Where the crossfader leaves each side, on a straight line. The real curve
     // does not matter here: only which deck is loudest does.
     const auto x = (mixer.getCrossfaderPosition() + 1.0f) * 0.5f;
@@ -742,7 +753,7 @@ int AudioEngine::findMasterTempoDeck() const
 
     for (int i = 0; i < numDecks; ++i)
     {
-        if (! decks[(size_t) i]->isPlaying() || getEffectiveBpm (i) <= 0.0)
+        if (! decks[(size_t) i]->isPlaying() || (requireBeatGrid && getEffectiveBpm (i) <= 0.0))
             continue;
 
         const auto assign = mixer.getChannelCrossfaderAssign (i);

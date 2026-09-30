@@ -272,7 +272,8 @@ target_sources(OpenDJ PRIVATE
     src/ui/MasterFxComponent.cpp
     src/ui/SamplerComponent.cpp
     src/ui/MicComponent.cpp
-    src/ui/VisualizerComponent.cpp)
+    src/ui/VisualizerComponent.cpp
+    src/ui/NowPlayingOverlay.cpp)
 
 target_include_directories(OpenDJ PRIVATE src)
 

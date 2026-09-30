@@ -581,6 +581,9 @@ private:
                               rows + (size_t) (top + 1) * rowBytes,
                               rows + (size_t) bottom * rowBytes);
 
+        if (owner.frameOverlay != nullptr)
+            owner.frameOverlay (scratch.data(), settings.width, settings.height);
+
         const auto published = publishFrame();
         owner.framesRendered.fetch_add (1, std::memory_order_relaxed);
 

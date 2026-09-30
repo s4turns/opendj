@@ -349,3 +349,37 @@ TEST_CASE ("stopping is safe at any point, including twice and never", "[visual]
 
     SUCCEED();
 }
+
+TEST_CASE ("the overlay draws on a frame before the sink and the panel see it", "[visual][gpu]")
+{
+    Visualizer visualizer;
+    const auto settings = smallSettings();
+
+    std::atomic<int> sinkFrames { 0 };
+    std::atomic<int> sinkFramesMarked { 0 };
+
+    // Stamps the first pixel, which no preset is going to draw as exactly this.
+    visualizer.setFrameOverlay ([] (unsigned char* rgb, int, int)
+    {
+        rgb[0] = 12; rgb[1] = 34; rgb[2] = 56;
+    });
+
+    visualizer.setFrameSink ([&] (const unsigned char* rgb, int)
+    {
+        ++sinkFrames;
+        if (rgb[0] == 12 && rgb[1] == 34 && rgb[2] == 56)
+            ++sinkFramesMarked;
+    });
+
+    if (! startOrSkip (visualizer, settings))
+        return;
+
+    REQUIRE (waitFor ([&] { return sinkFrames.load() >= 5; }));
+
+    std::vector<unsigned char> latest;
+    REQUIRE (visualizer.copyLatestFrame (latest));
+    REQUIRE (latest[0] == 12);
+
+    visualizer.stop();
+    REQUIRE (sinkFramesMarked.load() == sinkFrames.load());
+}
