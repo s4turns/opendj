@@ -40,7 +40,7 @@ struct RtmpSettings
 
     int videoWidth = 1280;
     int videoHeight = 720;
-    int videoBitrateKbps = 2500;
+    int videoBitrateKbps = 4500;
     int audioBitrateKbps = 160;
 
     /** Frames a second when the video is live (see `liveVideo`). Ignored for

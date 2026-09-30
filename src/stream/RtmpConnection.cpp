@@ -317,14 +317,31 @@ juce::StringArray buildFfmpegArguments (const RtmpSettings& settings, double sam
         // every frame.
         args.add ("-tune"); args.add ("stillimage");
 
-        // A key frame every 50 frames of a 2 fps source is one every 25
-        // seconds, comfortably under what a player waits before it gives up
-        // looking for one, without paying the cost of a key frame for a
-        // picture that never changes.
-        args.add ("-g"); args.add ("50");
+        // A key frame every two seconds of the 2 fps source, four frames.
+        // The old fifty frames was twenty-five seconds, and YouTube rejects
+        // anything over four ("Please use a keyframe frequency of four
+        // seconds or less") and warns viewers of buffering. A still picture
+        // makes the extra key frames nearly free.
+        args.add ("-g"); args.add ("4");
     }
 
+    // Key frames by timestamp as well as by count, so the interval YouTube
+    // measures stays at two seconds even if frames arrive slower than the
+    // nominal rate and a frame-counted GOP would stretch to many more.
+    args.add ("-force_key_frames"); args.add ("expr:gte(t,n_forced*2)");
+
     args.add ("-b:v"); args.add (juce::String (settings.videoBitrateKbps) + "k");
+
+    // Without a cap and a buffer, bitrate mode averages over the whole stream
+    // and lets a burst of visualiser motion overshoot what the ingest wants,
+    // while the quiet stretches starve; `zerolatency` has no lookahead to
+    // smooth that. A buffer of two seconds at the target rate is constant
+    // bitrate in the sense YouTube asks for, and gives the encoder room to
+    // spend bits on the frames that need them. High profile is the one
+    // every ingest decodes and it compresses better than the default.
+    args.add ("-maxrate"); args.add (juce::String (settings.videoBitrateKbps) + "k");
+    args.add ("-bufsize"); args.add (juce::String (settings.videoBitrateKbps * 2) + "k");
+    args.add ("-profile:v"); args.add ("high");
 
     args.add ("-c:a"); args.add ("aac");
     args.add ("-b:a"); args.add (juce::String (settings.audioBitrateKbps) + "k");
