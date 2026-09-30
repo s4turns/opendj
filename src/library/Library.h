@@ -63,6 +63,14 @@ struct LibraryQuery
     thread, the scanner and the engine's loader threads alike. None of them are
     the audio thread and none of them should be.
 */
+/** A named, ordered list of tracks. */
+struct PlaylistInfo
+{
+    juce::int64 id = 0;
+    juce::String name;
+    int numTracks = 0;
+};
+
 class Library final : public AnalysisCache
 {
 public:
@@ -119,6 +127,30 @@ public:
     int countAnalysed() const;
 
     //==========================================================================
+    // Playlists
+    //
+    // Kept by path rather than by track id, so a rescan that drops and
+    // re-adds a file does not quietly empty the set list someone built.
+    //==========================================================================
+
+    /** Returns the new playlist's id, or 0 when the name is empty or taken. */
+    juce::int64 createPlaylist (const juce::String& name);
+    bool renamePlaylist (juce::int64 id, const juce::String& name);
+    bool deletePlaylist (juce::int64 id);
+    std::vector<PlaylistInfo> getPlaylists() const;
+
+    /** The playlist's files in order. Files that no longer exist are still
+        listed, since the disk may just be unplugged. */
+    std::vector<juce::File> getPlaylistFiles (juce::int64 id) const;
+
+    /** Appends to the end. */
+    bool addToPlaylist (juce::int64 id, const std::vector<juce::File>& files);
+    bool removeFromPlaylist (juce::int64 id, int position);
+
+    /** Moves the entry at `from` so it ends up at `to`. */
+    bool movePlaylistTrack (juce::int64 id, int from, int to);
+
+    //==========================================================================
     // AnalysisCache
     //==========================================================================
 
@@ -129,6 +161,8 @@ private:
     class Statement;
 
     bool execute (const char* sql) const;
+    std::vector<juce::File> readPlaylistFiles (juce::int64 id) const;
+    bool writePlaylistFiles (juce::int64 id, const std::vector<juce::File>& files);
     juce::Result createSchema();
     static TrackRecord recordFromRow (Statement& statement);
     static bool isFileUnchanged (const TrackRecord& record, const juce::File& file);

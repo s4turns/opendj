@@ -364,3 +364,69 @@ TEST_CASE ("a deck's audibility follows its fader and its side of the crossfader
     mixer.setCrossfaderPosition (1.0f);
     REQUIRE_THAT (engine.getDeckAudibility (0), WithinAbs (0.0f, 1.0e-4f));
 }
+
+#include "core/AutoMix.h"
+
+TEST_CASE ("the auto crossfader carries a playlist from one track to the next", "[engine][automix]")
+{
+    ScopedJuce scoped;
+    ToneFile a (6.0, 330.0), b (6.0, 440.0), c (6.0, 550.0);
+    Harness h;
+
+    opendj::AutoMix automix (h.engine);
+    automix.setQueue ({ a.get(), b.get(), c.get() });
+    automix.setFadeSeconds (2.0);
+    automix.setLoop (false);
+
+    // A block at a time: the audio advances by real block lengths, the
+    // clock handed to the mixer is the same simulated time, and the message
+    // loop is pumped so loader callbacks land.
+    auto now = 0.0;
+    const auto step = [&]
+    {
+        h.engine.renderNextBlock (h.outputs.data(), (int) h.outputs.size(), blockSize);
+        now += blockSize / sampleRate;
+        automix.tick (now);
+        juce::MessageManager::getInstance()->runDispatchLoopUntil (1);
+    };
+
+    const auto runUntil = [&] (std::function<bool()> done, double limitSeconds)
+    {
+        const auto end = now + limitSeconds;
+
+        while (! done() && now < end)
+            step();
+
+        return done();
+    };
+
+    automix.start (0);
+    REQUIRE (runUntil ([&] { return automix.getCurrentIndex() == 0; }, 5.0));
+    REQUIRE (h.engine.getDeck (0).isPlaying());
+    REQUIRE (h.engine.getMixer().getCrossfaderPosition() == -1.0f);
+
+    // The second track is loaded ahead and waits on the idle deck.
+    REQUIRE (runUntil ([&] { return automix.getNextIndex() == 1 && h.engine.getDeck (1).isLoaded(); }, 5.0));
+    REQUIRE_FALSE (h.engine.getDeck (1).isPlaying());
+
+    // Then the fade: the crossfader leaves deck A and deck B starts.
+    REQUIRE (runUntil ([&] { return automix.isFading(); }, 8.0));
+    REQUIRE (h.engine.getDeck (1).isPlaying());
+    REQUIRE (automix.getCurrentIndex() == 1);
+
+    REQUIRE (runUntil ([&] { return ! automix.isFading(); }, 4.0));
+    REQUIRE (h.engine.getMixer().getCrossfaderPosition() == 1.0f);
+    REQUIRE_FALSE (h.engine.getDeck (0).isLoaded());   // cleared for the next one
+    REQUIRE (h.engine.getDeck (1).isPlaying());
+
+    // And on to the third, back on deck A.
+    REQUIRE (runUntil ([&] { return automix.isFading(); }, 8.0));
+    REQUIRE (automix.getCurrentIndex() == 2);
+    REQUIRE (runUntil ([&] { return ! automix.isFading(); }, 4.0));
+    REQUIRE (h.engine.getMixer().getCrossfaderPosition() == -1.0f);
+    REQUIRE (h.engine.getDeck (0).isPlaying());
+
+    // Nothing follows the last track, and it plays out and stops the run.
+    REQUIRE (automix.getNextIndex() == -1);
+    REQUIRE (runUntil ([&] { return ! automix.isRunning(); }, 10.0));
+}
