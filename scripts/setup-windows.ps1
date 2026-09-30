@@ -10,6 +10,8 @@
         it and brings the CMake and Ninja that build.ps1 prefers, so neither
         has to be installed separately.
       * git, because CMake clones JUCE at configure time.
+    And to run RTMP broadcasts rather than build:
+      * ffmpeg with libx264 (Gyan.FFmpeg), which the broadcaster launches.
     Everything else is fetched by CMake during the build.
 
     Not installed here: Steinberg's ASIO SDK. Its licence forbids
@@ -19,20 +21,30 @@
         -Check    Report what is present and what is missing; install nothing.
         -Yes      Do not ask before installing. The Build Tools are several GB.
         -DryRun   Print the install commands instead of running them.
-        -ForceMissing  Treat these as missing ('git', 'msvc'); for testing.
+        -ForceMissing  Treat these as missing ('git', 'msvc', 'ffmpeg'); for testing.
 #>
 [CmdletBinding()]
 param(
     [switch]$Check,
     [switch]$Yes,
     [switch]$DryRun,
-    [ValidateSet('git', 'msvc')]
+    [ValidateSet('git', 'msvc', 'ffmpeg')]
     [string[]]$ForceMissing = @()
 )
 
 $ErrorActionPreference = 'Stop'
 
 function Test-Git { Get-Command git -ErrorAction SilentlyContinue }
+
+# winget's shim and package folder count too: a session that predates the
+# install has a stale PATH, and the app looks in the same places.
+function Test-Ffmpeg {
+    if (Get-Command ffmpeg -ErrorAction SilentlyContinue) { return $true }
+    $winget = Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet'
+    if (Test-Path (Join-Path $winget 'Linksfmpeg.exe')) { return $true }
+    [bool](Get-ChildItem (Join-Path $winget 'Packages') -Filter 'Gyan.FFmpeg*' -ErrorAction SilentlyContinue |
+        Get-ChildItem -Recurse -Filter ffmpeg.exe -ErrorAction SilentlyContinue | Select-Object -First 1)
+}
 
 function Get-VsInstall {
     $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
@@ -51,13 +63,14 @@ function Update-SessionPath {
 }
 
 $missing = [ordered]@{}
+if ($ForceMissing -contains 'ffmpeg' -or -not (Test-Ffmpeg)) { $missing['ffmpeg'] = 'ffmpeg' }
 if ($ForceMissing -contains 'git' -or -not (Test-Git)) { $missing['git'] = 'git' }
 if ($ForceMissing -contains 'msvc' -or -not (Get-VsInstall)) {
     $missing['msvc'] = 'Visual Studio 2022 Build Tools (C++ workload, CMake, Ninja, Windows SDK)'
 }
 
 Write-Host 'Build requirements:' -ForegroundColor Cyan
-foreach ($item in @(@('git', 'git'), @('msvc', 'Visual Studio 2022 Build Tools (C++ workload)'))) {
+foreach ($item in @(@('git', 'git'), @('msvc', 'Visual Studio 2022 Build Tools (C++ workload)'), @('ffmpeg', 'ffmpeg (RTMP broadcast)'))) {
     if ($missing.Contains($item[0])) {
         Write-Host "  [missing] $($item[1])" -ForegroundColor Yellow
     } else {
@@ -84,6 +97,9 @@ $common = @('--exact', '--accept-package-agreements', '--accept-source-agreement
 $commands = @()
 if ($missing.Contains('git')) {
     $commands += , (@('install', '--id', 'Git.Git') + $common)
+}
+if ($missing.Contains('ffmpeg')) {
+    $commands += , (@('install', '--id', 'Gyan.FFmpeg') + $common)
 }
 if ($missing.Contains('msvc')) {
     $commands += , (@('install', '--id', 'Microsoft.VisualStudio.2022.BuildTools') + $common +
@@ -153,6 +169,7 @@ Update-SessionPath
 
 $stillMissing = @()
 if (-not (Test-Git)) { $stillMissing += 'git' }
+if (-not (Test-Ffmpeg)) { $stillMissing += 'ffmpeg' }
 if (-not (Get-VsInstall)) { $stillMissing += 'Visual Studio Build Tools (C++ workload)' }
 
 if ($stillMissing.Count -gt 0) {

@@ -37,6 +37,17 @@ namespace
         return opendj::RtmpConnection::findFfmpeg (diagnostic);
     }
 
+    /** ffprobe lives next to the ffmpeg that was found, which may be a full path
+        that is not on PATH; a bare "ffprobe" would miss it the same way. */
+    juce::String siblingFfprobe (const juce::String& ffmpegPath)
+    {
+        if (! ffmpegPath.containsChar (juce::File::getSeparatorChar()))
+            return "ffprobe";
+
+        const auto sibling = juce::File (ffmpegPath).getSiblingFile ("ffprobe" + juce::File (ffmpegPath).getFileExtension());
+        return sibling.existsAsFile() ? sibling.getFullPathName() : juce::String ("ffprobe");
+    }
+
     /** Waits for something to become true, rather than sleeping and hoping.
         The same helper `Broadcast_test.cpp` uses. */
     bool waitFor (std::function<bool()> condition, int timeoutMs = 5000)
@@ -279,7 +290,9 @@ TEST_CASE ("ffmpeg that cannot be reached fails with a reason, not a hang", "[rt
 {
     juce::String diagnostic;
 
-    if (findCapableFfmpeg (diagnostic).isEmpty())
+    const auto ffmpegPath = findCapableFfmpeg (diagnostic);
+
+    if (ffmpegPath.isEmpty())
     {
         WARN (diagnostic);
         return;
@@ -312,7 +325,9 @@ TEST_CASE ("a broadcast reaches ffmpeg's own receiver with a video track and an 
 {
     juce::String diagnostic;
 
-    if (findCapableFfmpeg (diagnostic).isEmpty())
+    const auto ffmpegPath = findCapableFfmpeg (diagnostic);
+
+    if (ffmpegPath.isEmpty())
     {
         WARN (diagnostic);
         return;
@@ -331,7 +346,7 @@ TEST_CASE ("a broadcast reaches ffmpeg's own receiver with a video track and an 
     outFile.deleteFile();
 
     juce::ChildProcess receiver;
-    const juce::StringArray receiverArgs { "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+    const juce::StringArray receiverArgs { ffmpegPath, "-hide_banner", "-loglevel", "error", "-y",
                                            "-listen", "1", "-f", "flv", "-i", url,
                                            "-c", "copy", outFile.getFullPathName() };
     REQUIRE (receiver.start (receiverArgs));
@@ -442,7 +457,7 @@ TEST_CASE ("a broadcast reaches ffmpeg's own receiver with a video track and an 
     // AAC, which is exactly what the README says YouTube, Twitch and
     // Mixcloud require and Ogg over Icecast cannot provide.
     juce::ChildProcess probe;
-    const juce::StringArray probeArgs { "ffprobe", "-v", "error", "-show_entries",
+    const juce::StringArray probeArgs { siblingFfprobe (ffmpegPath), "-v", "error", "-show_entries",
                                         "stream=codec_type,codec_name", "-of", "csv=p=0",
                                         outFile.getFullPathName() };
     REQUIRE (probe.start (probeArgs));
@@ -473,7 +488,9 @@ TEST_CASE ("live frames pushed in reach the receiver as a moving video track",
 {
     juce::String diagnostic;
 
-    if (findCapableFfmpeg (diagnostic).isEmpty())
+    const auto ffmpegPath = findCapableFfmpeg (diagnostic);
+
+    if (ffmpegPath.isEmpty())
     {
         WARN (diagnostic);
         return;
@@ -489,7 +506,7 @@ TEST_CASE ("live frames pushed in reach the receiver as a moving video track",
     outFile.deleteFile();
 
     juce::ChildProcess receiver;
-    const juce::StringArray receiverArgs { "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+    const juce::StringArray receiverArgs { ffmpegPath, "-hide_banner", "-loglevel", "error", "-y",
                                            "-listen", "1", "-f", "flv", "-i", url,
                                            "-c", "copy", outFile.getFullPathName() };
     REQUIRE (receiver.start (receiverArgs));
@@ -587,7 +604,7 @@ TEST_CASE ("live frames pushed in reach the receiver as a moving video track",
     // video clock was starving, which is the one thing the feeder exists to
     // prevent.
     juce::ChildProcess probe;
-    const juce::StringArray probeArgs { "ffprobe", "-v", "error", "-select_streams", "v:0",
+    const juce::StringArray probeArgs { siblingFfprobe (ffmpegPath), "-v", "error", "-select_streams", "v:0",
                                         "-count_frames", "-show_entries",
                                         "stream=codec_name,width,height,nb_read_frames",
                                         "-of", "csv=p=0", outFile.getFullPathName() };
@@ -608,7 +625,7 @@ TEST_CASE ("live frames pushed in reach the receiver as a moving video track",
     juce::ChildProcess decodeEarly, decodeLate;
     const auto decode = [&] (double atSeconds, juce::ChildProcess& process)
     {
-        const juce::StringArray args { "ffmpeg", "-v", "error", "-ss", juce::String (atSeconds),
+        const juce::StringArray args { ffmpegPath, "-v", "error", "-ss", juce::String (atSeconds),
                                        "-i", outFile.getFullPathName(), "-frames:v", "1",
                                        "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1" };
         REQUIRE (process.start (args, juce::ChildProcess::wantStdOut));

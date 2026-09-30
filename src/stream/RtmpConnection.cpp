@@ -1180,6 +1180,33 @@ juce::String RtmpConnection::findFfmpeg (juce::String& diagnostic)
 
    #if JUCE_WINDOWS
     candidates.add ("ffmpeg.exe");
+
+    // Where installers put it, for when this process started before the
+    // install and its PATH has not caught up: winget's shim and package
+    // folder, then the usual manual, Chocolatey and Scoop spots.
+    const auto env = [] (const char* name) { return juce::SystemStats::getEnvironmentVariable (name, {}); };
+
+    if (const auto localAppData = env ("LOCALAPPDATA"); localAppData.isNotEmpty())
+    {
+        const juce::File winget (localAppData);
+        candidates.add (winget.getChildFile ("Microsoft\\WinGet\\Links\\ffmpeg.exe").getFullPathName());
+
+        for (const auto& found : winget.getChildFile ("Microsoft\\WinGet\\Packages")
+                                     .findChildFiles (juce::File::findFiles, true, "ffmpeg.exe"))
+            if (found.getFullPathName().containsIgnoreCase ("FFmpeg"))
+                candidates.add (found.getFullPathName());
+    }
+
+    if (const auto programFiles = env ("ProgramFiles"); programFiles.isNotEmpty())
+        candidates.add (juce::File (programFiles).getChildFile ("ffmpeg\\bin\\ffmpeg.exe").getFullPathName());
+
+    candidates.add ("C:\\ffmpeg\\bin\\ffmpeg.exe");
+
+    if (const auto programData = env ("ProgramData"); programData.isNotEmpty())
+        candidates.add (juce::File (programData).getChildFile ("chocolatey\\bin\\ffmpeg.exe").getFullPathName());
+
+    if (const auto profile = env ("USERPROFILE"); profile.isNotEmpty())
+        candidates.add (juce::File (profile).getChildFile ("scoop\\shims\\ffmpeg.exe").getFullPathName());
    #else
     candidates.add ("/usr/local/bin/ffmpeg");
     candidates.add ("/opt/homebrew/bin/ffmpeg");
@@ -1215,8 +1242,8 @@ juce::String RtmpConnection::findFfmpeg (juce::String& diagnostic)
         ? juce::String ("Found ffmpeg, but none of it can encode H.264 (no libx264 in any "
                         "copy on PATH or the usual install locations). Install a build that "
                         "can, or set OPENDJ_RTMP_FFMPEG to one that does.")
-        : juce::String ("Could not find ffmpeg anywhere. Install it, or set OPENDJ_RTMP_FFMPEG "
-                        "to its full path.");
+        : juce::String ("Could not find ffmpeg anywhere. Install it (scripts/setup-windows.ps1 does) "
+                        "and restart OpenDJ, or set OPENDJ_RTMP_FFMPEG to its full path.");
     return {};
 }
 
