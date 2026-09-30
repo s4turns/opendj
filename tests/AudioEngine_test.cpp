@@ -430,3 +430,23 @@ TEST_CASE ("the auto crossfader carries a playlist from one track to the next", 
     REQUIRE (automix.getNextIndex() == -1);
     REQUIRE (runUntil ([&] { return ! automix.isRunning(); }, 10.0));
 }
+
+TEST_CASE ("a deck playing on a mixer nobody has touched is audible, and named", "[engine][mixer]")
+{
+    ScopedJuce scoped;
+    ToneFile tone;
+
+    // No Harness: it sets every fader itself, which is exactly what hid this.
+    // A fresh mixer had its gain at 0.8 but its reported fader position at 0,
+    // so the deck was heard and yet counted as silent.
+    AudioEngine engine;
+    REQUIRE_THAT (engine.getMixer().getChannelFader (0), WithinAbs (0.8f, 1.0e-4f));
+
+    REQUIRE (engine.getDeck (0).loadFile (tone.get()));
+    engine.getDeck (0).play();
+
+    REQUIRE (engine.getDeckAudibility (0) > 0.0f);
+    REQUIRE (engine.findNowPlayingDeck() == 0);
+    REQUIRE (engine.getNowPlayingTitle() == engine.getDeck (0).getTrackTitle());
+    REQUIRE (engine.getNowPlayingTitle().isNotEmpty());
+}

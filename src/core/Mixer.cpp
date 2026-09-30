@@ -143,6 +143,12 @@ Mixer::Mixer()
 {
     for (auto& strip : strips)
     {
+        // The position as well as the gain it gives: the gain was set here and the
+        // position was left at zero, so until a fader was touched every channel
+        // was audible but reported as silent, and anything asking which deck the
+        // room is hearing (the track names on the visuals, the echo following a
+        // tempo) found none.
+        strip.faderPosition.store (0.8f, std::memory_order_relaxed);
         strip.targetFaderGain.store (faderToGain (0.8f), std::memory_order_relaxed);
 
         for (auto& g : strip.targetBandGain)
