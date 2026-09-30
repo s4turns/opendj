@@ -136,11 +136,6 @@ void NowPlayingOverlay::draw (unsigned char* rgb, int width, int height)
         playing = nowIsPlaying;
     }
 
-    {
-        now.text = "Debug Artist - Debug Title"; now.changedAtSeconds = nowSeconds() - 3.0; playing = true; audibility = 1.0f;
-        next.text = "Next Artist - Next Title"; next.changedAtSeconds = nowSeconds() - 3.0;
-    }
-
     const auto t = nowSeconds();
     const auto nowOpacity = now.text.isEmpty()
         ? 0.0f : overlay::nowPlayingOpacity (t - now.changedAtSeconds, audibility, playing);
