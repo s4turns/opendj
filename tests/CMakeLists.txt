@@ -57,6 +57,10 @@ target_compile_definitions(opendj-tests PRIVATE
 if(OpenVINO_FOUND)
     target_compile_definitions(opendj-tests PRIVATE OPENDJ_HAVE_OPENVINO=1)
     target_link_libraries(opendj-tests PRIVATE openvino::runtime)
+
+    if(WIN32)
+        opendj_copy_openvino_dlls(opendj-tests)
+    endif()
 endif()
 
 if(OPENDJ_VISUALIZER_AVAILABLE)

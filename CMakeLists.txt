@@ -100,6 +100,33 @@ find_package(OpenVINO QUIET COMPONENTS Runtime)
 
 if(OpenVINO_FOUND)
     message(STATUS "OpenVINO found: stem separation will be built in")
+
+    # Windows does not look in OpenVINO's install folder for its DLLs, and the
+    # winget package does not put it on PATH, so a program linked against it
+    # fails to start (0xC0000135) unless they sit next to it. The CPU and GPU
+    # plugins and the reader for the converted model are what stem separation
+    # uses; the NPU compiler alone is eighty megabytes it never loads.
+    if(WIN32)
+        get_filename_component(OPENDJ_OPENVINO_ROOT "${OpenVINO_DIR}/.." ABSOLUTE)
+        set(OPENDJ_OPENVINO_DLLS
+            "${OPENDJ_OPENVINO_ROOT}/bin/intel64/Release/openvino.dll"
+            "${OPENDJ_OPENVINO_ROOT}/bin/intel64/Release/openvino_ir_frontend.dll"
+            "${OPENDJ_OPENVINO_ROOT}/bin/intel64/Release/openvino_intel_cpu_plugin.dll"
+            "${OPENDJ_OPENVINO_ROOT}/bin/intel64/Release/openvino_intel_gpu_plugin.dll"
+            "${OPENDJ_OPENVINO_ROOT}/bin/intel64/Release/openvino_auto_plugin.dll"
+            "${OPENDJ_OPENVINO_ROOT}/3rdparty/tbb/bin/tbb12.dll"
+            "${OPENDJ_OPENVINO_ROOT}/3rdparty/tbb/bin/tbbmalloc.dll"
+            "${OPENDJ_OPENVINO_ROOT}/3rdparty/tbb/bin/tbbbind_2_5.dll")
+
+        function(opendj_copy_openvino_dlls target)
+            foreach(dll IN LISTS OPENDJ_OPENVINO_DLLS)
+                if(EXISTS "${dll}")
+                    add_custom_command(TARGET ${target} POST_BUILD
+                        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${dll}" "$<TARGET_FILE_DIR:${target}>")
+                endif()
+            endforeach()
+        endfunction()
+    endif()
 else()
     message(STATUS "OpenVINO not found: OpenDJ will build without stem separation")
 endif()
@@ -312,6 +339,10 @@ endif()
 if(OpenVINO_FOUND)
     target_compile_definitions(OpenDJ PRIVATE OPENDJ_HAVE_OPENVINO=1)
     target_link_libraries(OpenDJ PRIVATE openvino::runtime)
+
+    if(WIN32)
+        opendj_copy_openvino_dlls(OpenDJ)
+    endif()
 endif()
 
 if(OPENDJ_VISUALIZER_AVAILABLE)

@@ -34,6 +34,19 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $buildDir = Join-Path $repoRoot 'build'
 
+# OpenVINO from winget is an MSIX package, which is not on any search path, so
+# say where it is. Nothing is passed when it is not installed; the build then
+# simply goes without stem separation.
+$openvinoArgs = @()
+if (-not $env:OpenVINO_DIR) {
+    $openvino = Get-AppxPackage -Name 'Intel.OpenVINOToolkit*' -ErrorAction SilentlyContinue |
+        Sort-Object Version -Descending | Select-Object -First 1
+    $openvinoCmake = if ($openvino) { Join-Path $openvino.InstallLocation 'runtime\cmake' }
+    if ($openvinoCmake -and (Test-Path (Join-Path $openvinoCmake 'OpenVINOConfig.cmake'))) {
+        $openvinoArgs = @("-DOpenVINO_DIR=$openvinoCmake")
+    }
+}
+
 $asioArgs = @()
 
 if ($Asio) {
@@ -112,7 +125,7 @@ if ($Clean -and (Test-Path $buildDir)) {
 }
 
 Write-Host "Configuring ($Config)..." -ForegroundColor Cyan
-& $cmake -S $repoRoot -B $buildDir @generatorArgs @asioArgs
+& $cmake -S $repoRoot -B $buildDir @generatorArgs @asioArgs @openvinoArgs
 if ($LASTEXITCODE -ne 0) { throw "Configure failed with exit code $LASTEXITCODE." }
 
 Write-Host 'Building...' -ForegroundColor Cyan
