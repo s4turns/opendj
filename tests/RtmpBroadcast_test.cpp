@@ -757,7 +757,11 @@ namespace
     which is the state the freeze needed. Stopping must still return promptly. */
 TEST_CASE ("stopping a broadcast returns even when ffmpeg has stopped reading", "[rtmp]")
 {
-    const auto script = juce::File::createTempFile (JUCE_WINDOWS ? ".bat" : ".sh");
+   #if JUCE_WINDOWS
+    const auto script = juce::File::createTempFile (".bat");
+   #else
+    const auto script = juce::File::createTempFile (".sh");
+   #endif
     const auto previous = juce::SystemStats::getEnvironmentVariable ("OPENDJ_RTMP_FFMPEG", {});
 
     struct Restore
