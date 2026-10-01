@@ -37,6 +37,7 @@ target_sources(opendj-tests PRIVATE
     AngleMath_test.cpp
     OverlayMath_test.cpp
     AutoMix_test.cpp
+    TempoMath_test.cpp
     WaveformMath_test.cpp
     StemDsp_test.cpp
     Library_test.cpp

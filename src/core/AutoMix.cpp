@@ -157,7 +157,7 @@ void AutoMix::beginFade (double nowSeconds, int outgoing, int incoming)
 {
     // Tempo and beat matched to what is playing, where both have a grid; a
     // track without one just fades in at its own speed.
-    engine.syncDeck (incoming, outgoing);
+    engine.syncDeck (incoming, outgoing, maxSyncStretch);
     engine.getDeck (incoming).play();
 
     const auto& out = engine.getDeck (outgoing);

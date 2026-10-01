@@ -5,6 +5,8 @@
 
 #include "core/AudioEngine.h"
 
+#include "core/TempoMath.h"
+
 #include <algorithm>
 
 #include <cmath>
@@ -431,7 +433,7 @@ int AudioEngine::findSyncLeader (int followerIndex) const
     return best;
 }
 
-bool AudioEngine::syncDeck (int followerIndex, int leaderIndex)
+bool AudioEngine::syncDeck (int followerIndex, int leaderIndex, double maxStretch)
 {
     if (! juce::isPositiveAndBelow (followerIndex, numDecks)
         || ! juce::isPositiveAndBelow (leaderIndex, numDecks)
@@ -449,7 +451,12 @@ bool AudioEngine::syncDeck (int followerIndex, int leaderIndex)
         return false;
 
     const auto leaderBpm = leaderAnalysis->bpm * leader.getTempoRatio();
-    follower.setTempoRatio (leaderBpm / followerAnalysis->bpm);
+    const auto ratio = tempo::matchRatio (leaderBpm, followerAnalysis->bpm);
+
+    if (! tempo::isGentle (ratio, maxStretch))
+        return false;
+
+    follower.setTempoRatio (ratio);
 
     // Match phase as well as tempo: work out how far through its beat the leader
     // is, then put the follower the same distance through one of its own.

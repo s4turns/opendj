@@ -255,6 +255,11 @@ void Deck::publish (std::unique_ptr<Track> newTrack)
     loopEndSeconds.store (-1.0, std::memory_order_relaxed);
     loopBeats.store (0.0, std::memory_order_relaxed);
 
+    // A new track plays at its own speed. The tempo belonged to the last one:
+    // a deck matched to another and then loaded with something else kept the
+    // stretch, and the new track came up fast or slow until somebody noticed.
+    tempoRatio.store (1.0, std::memory_order_relaxed);
+
     lengthSeconds.store (seconds, std::memory_order_relaxed);
     cuePointSeconds.store (0.0, std::memory_order_relaxed);
     positionSeconds.store (0.0, std::memory_order_relaxed);

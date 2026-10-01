@@ -94,6 +94,9 @@ private:
     void finishFade (int outgoingDeck);
     void changed();
 
+    /** The most a track is stretched to match the one it is mixed into. */
+    static constexpr double maxSyncStretch = 0.12;
+
     static float sideOf (int deckIndex) noexcept { return deckIndex == 0 ? -1.0f : 1.0f; }
 
     AudioEngine& engine;

@@ -137,8 +137,14 @@ public:
 
     /** Matches one deck's tempo and beat phase to another. Returns false when
         either deck has no usable beat grid, which is the honest answer for
-        material the analyser could not read. */
-    bool syncDeck (int followerIndex, int leaderIndex);
+        material the analyser could not read.
+
+        Tempos are matched at the nearest half, whole or double time, since
+        beat detection often lands an octave out. With `maxStretch` above
+        zero, a match needing more than that fraction of stretch is refused
+        and nothing is changed; the auto crossfader uses it, so it never
+        plays a track far from its own speed to make a mix work. */
+    bool syncDeck (int followerIndex, int leaderIndex, double maxStretch = 0.0);
 
     /** The deck a sync should follow, or -1 when there is nothing to follow.
 

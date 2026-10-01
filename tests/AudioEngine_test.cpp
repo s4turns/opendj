@@ -450,3 +450,22 @@ TEST_CASE ("a deck playing on a mixer nobody has touched is audible, and named",
     REQUIRE (engine.getNowPlayingTitle() == engine.getDeck (0).getTrackTitle());
     REQUIRE (engine.getNowPlayingTitle().isNotEmpty());
 }
+
+TEST_CASE ("a track loaded onto a deck starts at its own tempo", "[engine][decks]")
+{
+    ScopedJuce scoped;
+    ToneFile first, second;
+    AudioEngine engine;
+
+    REQUIRE (engine.getDeck (0).loadFile (first.get()));
+    engine.getDeck (0).setTempoRatio (1.28);
+
+    // Matched to something else for the last track; the next one must not
+    // inherit the stretch.
+    REQUIRE (engine.getDeck (0).loadFile (second.get()));
+    REQUIRE_THAT (engine.getDeck (0).getTempoRatio(), WithinAbs (1.0, 1.0e-9));
+
+    engine.getDeck (0).setTempoRatio (0.9);
+    engine.getDeck (0).unload();
+    REQUIRE_THAT (engine.getDeck (0).getTempoRatio(), WithinAbs (1.0, 1.0e-9));
+}
