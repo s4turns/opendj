@@ -30,12 +30,12 @@ class NowPlayingOverlay
 public:
     explicit NowPlayingOverlay (const AudioEngine& engineToWatch) : engine (engineToWatch) {}
 
-    /** Empty means nothing is playing. A changed title restarts its
-        fade in; `audibility` and `playing` keep it up while its deck is in
-        the mix and let it go when the deck is faded out. */
-    void setNowPlaying (const juce::String& title, float audibility, bool playing);
+    /** Empty means nothing is playing. A changed title fades in, stays for
+        `overlay::holdSeconds` and fades away; the same text again does not
+        bring it back. */
+    void setNowPlaying (const juce::String& title);
 
-    /** The track waiting on another deck, or empty. */
+    /** The track waiting on another deck, or empty. Shown the same way. */
     void setComingUp (const juce::String& title);
 
     /** Draws onto a tightly packed RGB frame, top row first. */
@@ -57,8 +57,6 @@ private:
 
     std::mutex mutex;
     Line nowPlaying, comingUp;
-    float nowAudibility = 0.0f;
-    bool nowIsPlaying = false;
 
     juce::Image canvas;
 };

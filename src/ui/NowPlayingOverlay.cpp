@@ -24,7 +24,7 @@ namespace
     double nowSeconds() { return juce::Time::getMillisecondCounterHiRes() / 1000.0; }
 }
 
-void NowPlayingOverlay::setNowPlaying (const juce::String& title, float audibility, bool playing)
+void NowPlayingOverlay::setNowPlaying (const juce::String& title)
 {
     const std::lock_guard<std::mutex> lock (mutex);
 
@@ -34,8 +34,6 @@ void NowPlayingOverlay::setNowPlaying (const juce::String& title, float audibili
         nowPlaying.changedAtSeconds = nowSeconds();
     }
 
-    nowAudibility = audibility;
-    nowIsPlaying = playing;
 }
 
 void NowPlayingOverlay::setComingUp (const juce::String& title)
@@ -125,22 +123,18 @@ void NowPlayingOverlay::draw (unsigned char* rgb, int width, int height)
         return;
 
     Line now, next;
-    float audibility = 0.0f;
-    bool playing = false;
 
     {
         const std::lock_guard<std::mutex> lock (mutex);
         now = nowPlaying;
         next = comingUp;
-        audibility = nowAudibility;
-        playing = nowIsPlaying;
     }
 
     const auto t = nowSeconds();
     const auto nowOpacity = now.text.isEmpty()
-        ? 0.0f : overlay::nowPlayingOpacity (t - now.changedAtSeconds, audibility, playing);
+        ? 0.0f : overlay::timedOpacity (t - now.changedAtSeconds);
     const auto nextOpacity = next.text.isEmpty()
-        ? 0.0f : juce::jlimit (0.0f, 1.0f, (float) ((t - next.changedAtSeconds) / overlay::fadeSeconds));
+        ? 0.0f : overlay::timedOpacity (t - next.changedAtSeconds);
 
     // One corner for each deck: A top left, B top right, C bottom left, D
     // bottom right. A deck with nothing on it leaves its corner empty.

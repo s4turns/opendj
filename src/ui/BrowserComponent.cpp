@@ -70,7 +70,7 @@ BrowserComponent::BrowserComponent (Library& libraryToUse, LibraryScanner& scann
 
     table.setModel (this);
     table.setRowHeight (22);
-    table.setMultipleSelectionEnabled (false);
+    table.setMultipleSelectionEnabled (true);
     table.setColour (juce::ListBox::backgroundColourId, rowColour);
     addAndMakeVisible (table);
 
@@ -327,9 +327,22 @@ void BrowserComponent::cellClicked (int row, int, const juce::MouseEvent& e)
     if (! e.mods.isPopupMenu() || ! juce::isPositiveAndBelow (row, (int) rows.size()))
         return;
 
-    // The row under the pointer is what the menu is about, selected or not.
-    table.selectRow (row);
-    const auto file = rows[(size_t) row].file;
+    // Right-clicking inside a selection is about the whole selection; outside
+    // it, about the row under the pointer alone, which becomes the selection.
+    if (! table.isRowSelected (row))
+        table.selectRow (row);
+
+    std::vector<juce::File> chosenFiles;
+    const auto selected = table.getSelectedRows();
+
+    for (int i = 0; i < selected.size(); ++i)
+        if (const auto r = selected[i]; juce::isPositiveAndBelow (r, (int) rows.size()))
+            chosenFiles.push_back (rows[(size_t) r].file);
+
+    if (chosenFiles.empty())
+        return;
+
+    const auto count = (int) chosenFiles.size();
 
     // Item ids are the playlist's id plus one, so zero stays "nothing chosen".
     juce::PopupMenu playlists;
@@ -342,27 +355,32 @@ void BrowserComponent::cellClicked (int row, int, const juce::MouseEvent& e)
         playlists.addItem (-1, "No playlists yet: make one in the Playlists tab", false, false);
 
     // Straight onto a chosen deck, numbered the way the mixer labels them.
+    // A deck takes one track, so this is only there for a single selection.
     juce::PopupMenu decks;
 
     for (int deck = 0; deck < 4; ++deck)
         decks.addItem ("Deck " + juce::String (deck + 1),
-                       [safe = juce::Component::SafePointer<BrowserComponent> (this), file, deck]
+                       [safe = juce::Component::SafePointer<BrowserComponent> (this), file = chosenFiles.front(), deck]
                        {
                            if (safe != nullptr && safe->onLoad != nullptr)
                                safe->onLoad (file, deck);
                        });
 
     juce::PopupMenu menu;
-    menu.addSubMenu ("Load to deck", decks);
-    menu.addSubMenu ("Add to playlist", playlists);
+
+    if (count == 1)
+        menu.addSubMenu ("Load to deck", decks);
+
+    menu.addSubMenu (count == 1 ? juce::String ("Add to playlist")
+                                : "Add " + juce::String (count) + " tracks to playlist", playlists);
 
     menu.showMenuAsync (juce::PopupMenu::Options(),
-        [safe = juce::Component::SafePointer<BrowserComponent> (this), file] (int chosen)
+        [safe = juce::Component::SafePointer<BrowserComponent> (this), chosenFiles] (int chosen)
         {
             if (safe == nullptr || chosen <= 0)
                 return;
 
-            safe->library.addToPlaylist ((juce::int64) chosen - 1, { file });
+            safe->library.addToPlaylist ((juce::int64) chosen - 1, chosenFiles);
 
             if (safe->onPlaylistsChanged != nullptr)
                 safe->onPlaylistsChanged();
@@ -380,11 +398,18 @@ juce::var BrowserComponent::getDragSourceDescription (const juce::SparseSet<int>
     if (selectedRows.isEmpty())
         return {};
 
-    const auto row = selectedRows[0];
+    // One track is a plain path, which decks and the playlist both take. Several
+    // are a list of paths, which only the playlist takes: a deck holds one.
+    juce::Array<juce::var> paths;
 
-    return juce::isPositiveAndBelow (row, (int) rows.size())
-        ? juce::var (rows[(size_t) row].file.getFullPathName())
-        : juce::var();
+    for (int i = 0; i < selectedRows.size(); ++i)
+        if (const auto r = selectedRows[i]; juce::isPositiveAndBelow (r, (int) rows.size()))
+            paths.add (rows[(size_t) r].file.getFullPathName());
+
+    if (paths.isEmpty())
+        return {};
+
+    return paths.size() == 1 ? paths[0] : juce::var (paths);
 }
 
 //==============================================================================

@@ -401,9 +401,7 @@ void MainComponent::timerCallback()
     autoMix.tick (juce::Time::getMillisecondCounterHiRes() / 1000.0);
 
     {
-        const auto playingDeck = engine.findNowPlayingDeck();
-        const auto status = engine.getDeckStatus (playingDeck);
-        nowPlaying.setNowPlaying (engine.getNowPlayingTitle(), status.audibility, status.playing);
+        nowPlaying.setNowPlaying (engine.getNowPlayingTitle());
         nowPlaying.setComingUp (engine.getComingUpTitle());
     }
 

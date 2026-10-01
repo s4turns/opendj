@@ -220,13 +220,21 @@ void PlaylistComponent::play (int fromRow)
 
 bool PlaylistComponent::isInterestedInDragSource (const SourceDetails& details)
 {
-    return playlistBox.getSelectedId() > 0 && details.description.isString();
+    return playlistBox.getSelectedId() > 0
+        && (details.description.isString() || details.description.isArray());
 }
 
 void PlaylistComponent::itemDropped (const SourceDetails& details)
 {
+    std::vector<juce::File> dropped;
+
     if (details.description.isString())
-        addFiles ({ juce::File (details.description.toString()) });
+        dropped.emplace_back (details.description.toString());
+    else if (const auto* list = details.description.getArray())
+        for (const auto& path : *list)
+            dropped.emplace_back (path.toString());
+
+    addFiles (dropped);
 }
 
 void PlaylistComponent::listBoxItemDoubleClicked (int row, const juce::MouseEvent&)

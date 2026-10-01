@@ -18,17 +18,3 @@ TEST_CASE ("a title fades in, holds, and fades out on the timer alone", "[overla
     REQUIRE_THAT (timedOpacity (holdSeconds + fadeSeconds / 2), WithinAbs (0.5, 1e-6));
     REQUIRE (timedOpacity (holdSeconds + fadeSeconds + 1.0) == 0.0f);
 }
-
-TEST_CASE ("the now-playing title stays while its deck is in the mix and leaves with it", "[overlay]")
-{
-    const auto late = holdSeconds + 30.0;
-
-    // Long after the timer has run out, a deck at full level still shows it.
-    REQUIRE_THAT (nowPlayingOpacity (late, 1.0f, true), WithinAbs (1.0, 1e-6));
-    // Fading the deck down fades the name.
-    REQUIRE_THAT (nowPlayingOpacity (late, 0.4f, true), WithinAbs (0.4, 1e-6));
-    // A stopped deck's name goes once the timer is done.
-    REQUIRE (nowPlayingOpacity (late, 1.0f, false) == 0.0f);
-    // Just after a change it is held in full whatever the fader says.
-    REQUIRE_THAT (nowPlayingOpacity (3.0, 0.0f, true), WithinAbs (1.0, 1e-6));
-}
