@@ -59,8 +59,13 @@ endif()
 # scratch file and minutes of waiting after the stop button. Compiling the
 # library in costs one dependency and removes both. LGPL 2.1 or later, so
 # licence compatible.
+# SourceForge is the upstream host and goes down for hours at a time, which
+# fails every build at configure. The hash is pinned, so the mirrors below it,
+# which carry the identical tarball, are tried in order and cost nothing in trust.
 FetchContent_Declare(lame
     URL      https://downloads.sourceforge.net/project/lame/lame/3.100/lame-3.100.tar.gz
+             https://deb.debian.org/debian/pool/main/l/lame/lame_3.100.orig.tar.gz
+             https://ftp.osuosl.org/pub/blfs/conglomeration/lame/lame-3.100.tar.gz
     URL_HASH SHA256=ddfe36cab873794038ae2c1210557ad34857a4b6bdc515785d1da9e175b1da1e)
 FetchContent_MakeAvailable(lame)
 
