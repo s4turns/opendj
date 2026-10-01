@@ -341,7 +341,19 @@ void BrowserComponent::cellClicked (int row, int, const juce::MouseEvent& e)
     if (lists.empty())
         playlists.addItem (-1, "No playlists yet: make one in the Playlists tab", false, false);
 
+    // Straight onto a chosen deck, numbered the way the mixer labels them.
+    juce::PopupMenu decks;
+
+    for (int deck = 0; deck < 4; ++deck)
+        decks.addItem ("Deck " + juce::String (deck + 1),
+                       [safe = juce::Component::SafePointer<BrowserComponent> (this), file, deck]
+                       {
+                           if (safe != nullptr && safe->onLoad != nullptr)
+                               safe->onLoad (file, deck);
+                       });
+
     juce::PopupMenu menu;
+    menu.addSubMenu ("Load to deck", decks);
     menu.addSubMenu ("Add to playlist", playlists);
 
     menu.showMenuAsync (juce::PopupMenu::Options(),
