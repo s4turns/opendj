@@ -60,6 +60,9 @@ MainComponent::MainComponent()
             // any other, and the interface has to show it moved.
             if (safe->mixerView != nullptr)
                 safe->mixerView->refresh();
+
+            if (safe->masterFxView != nullptr)
+                safe->masterFxView->refresh();
         });
     };
 
@@ -151,6 +154,14 @@ MainComponent::MainComponent()
         });
     };
 
+    masterFxView = std::make_unique<MasterFxComponent> (engine.getMixer().getMasterEffects(), pluginHost);
+    masterFxView->onMessage = [this] (const juce::String& message)
+    {
+        pluginNotice = message;
+        pluginNoticeUntil = juce::Time::getMillisecondCounter() + 8000;
+    };
+    addAndMakeVisible (*masterFxView);
+
     samplerView = std::make_unique<SamplerComponent> (engine);
     samplerView->onMessage = [this] (const juce::String& message)
     {
@@ -169,7 +180,18 @@ MainComponent::MainComponent()
 
     browser = std::make_unique<BrowserComponent> (library, scanner);
     browser->onLoad = [this] (const juce::File& file, int deckIndex) { loadOntoDeck (file, deckIndex); };
-    addAndMakeVisible (*browser);
+
+    playlistView = std::make_unique<PlaylistComponent> (library, autoMix,
+                                                        [this] { return browser->getSelectedFile(); });
+
+    browser->onPlaylistsChanged = [this] { playlistView->refresh(); };
+
+    browserTabs = std::make_unique<juce::TabbedComponent> (juce::TabbedButtonBar::TabsAtTop);
+    browserTabs->setTabBarDepth (26);
+    browserTabs->setOutline (0);
+    browserTabs->addTab ("Library", juce::Colour (0xff15151a), browser.get(), false);
+    browserTabs->addTab ("Playlists", juce::Colour (0xff15151a), playlistView.get(), false);
+    addAndMakeVisible (*browserTabs);
 
     // The controller's browse encoder and load buttons reach the browser through
     // the dispatcher, the same way every other input does.
@@ -232,6 +254,13 @@ MainComponent::MainComponent()
     addKeyListener (this);
     setWantsKeyboardFocus (true);
 
+    // The track name over the visuals, for the window and the broadcast. Set
+    // before the visuals can start, and taken off again in the destructor.
+    engine.getVisualizer().setFrameOverlay ([this] (unsigned char* rgb, int width, int height)
+    {
+        nowPlaying.draw (rgb, width, height);
+    });
+
     startTimerHz (refreshRateHz);
     setSize (1280, 960);
 }
@@ -248,7 +277,9 @@ MainComponent::~MainComponent()
     // timer, and the visualiser is the engine's.
     visualsWindow.reset();
 
+    autoMix.stop();
     engine.stop();
+    engine.getVisualizer().setFrameOverlay ({});
 
     stopTimer();
     dispatcher.onStateChanged = nullptr;
@@ -367,6 +398,13 @@ void MainComponent::loadInitialTracks (const juce::StringArray& paths)
 
 void MainComponent::timerCallback()
 {
+    autoMix.tick (juce::Time::getMillisecondCounterHiRes() / 1000.0);
+
+    {
+        nowPlaying.setNowPlaying (engine.getNowPlayingTitle());
+        nowPlaying.setComingUp (engine.getComingUpTitle());
+    }
+
     // Noted while the window is alive and healthy, never asked for on the way
     // out: by the time this component is destroyed the window that owns it is
     // already half gone, and asking it anything then is an access violation.
@@ -379,6 +417,7 @@ void MainComponent::timerCallback()
 
     beatStrip->refresh();
     mixerView->refresh();
+    masterFxView->refresh();
 
     auto status = startupError.isNotEmpty() ? "Audio error: " + startupError
                                             : engine.getDeviceDescription();
@@ -481,6 +520,9 @@ void MainComponent::timerCallback()
 
     if (const auto visualsStatus = visualizer.getStatusMessage(); visualsStatus.isNotEmpty())
         status << "  |  " << visualsStatus;
+
+    if (pluginNotice.isNotEmpty() && juce::Time::getMillisecondCounter() < pluginNoticeUntil)
+        status << "  |  " << pluginNotice;
 
     statusLabel.setText (status, juce::dontSendNotification);
 }
@@ -599,6 +641,27 @@ void MainComponent::restoreSettings()
 
         if (file.existsAsFile())
             engine.loadSampleAsync (slot, file);
+    }
+
+    // Plugins last, and never the one the previous run died loading: a plugin
+    // that crashes on start-up would otherwise crash every start-up after it.
+    const auto crashed = pluginHost.takeCrashedPluginName();
+
+    for (int slot = 0; slot < MasterEffects::numSlots; ++slot)
+    {
+        const auto& saved = settings.masterFx[(size_t) slot];
+
+        if (saved.pluginId.isEmpty())
+            continue;
+
+        if (crashed.isNotEmpty() && saved.pluginName == crashed)
+        {
+            masterFxView->onMessage ("OpenDJ closed while loading " + crashed
+                                     + " last time, so it has been left out of FX " + juce::String (slot + 1));
+            continue;
+        }
+
+        masterFxView->restorePlugin (slot, saved.pluginId, saved.pluginName, saved.pluginState);
     }
 }
 
@@ -1568,7 +1631,12 @@ void MainComponent::resized()
     samplerView->setBounds (samplerRow);
     area.removeFromBottom (8);
 
-    juce::Component* rows[] = { &deckRow, resizerBar.get(), browser.get() };
+    // The effects on the whole mix get a row of their own above the pads, on
+    // the same bargain: fixed height, taken from the browser.
+    masterFxView->setBounds (area.removeFromBottom (58));
+    area.removeFromBottom (8);
+
+    juce::Component* rows[] = { &deckRow, resizerBar.get(), browserTabs.get() };
     verticalLayout.layOutComponents (rows, 3, area.getX(), area.getY(), area.getWidth(), area.getHeight(),
                                      true, true);
 }

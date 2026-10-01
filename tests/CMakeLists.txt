@@ -19,6 +19,9 @@ target_sources(opendj-tests PRIVATE
     RtmpBroadcast_test.cpp
     Visualizer_test.cpp
     Mixer_test.cpp
+    MasterEffects_test.cpp
+    PluginHost_test.cpp
+    PluginSlot_test.cpp
     OutputRouter_test.cpp
     Deck_test.cpp
     Loop_test.cpp
@@ -32,6 +35,9 @@ target_sources(opendj-tests PRIVATE
     KeyDetector_test.cpp
     MidiMapping_test.cpp
     AngleMath_test.cpp
+    OverlayMath_test.cpp
+    AutoMix_test.cpp
+    TempoMath_test.cpp
     WaveformMath_test.cpp
     StemDsp_test.cpp
     Library_test.cpp
@@ -44,7 +50,9 @@ target_compile_definitions(opendj-tests PRIVATE
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0
     JUCE_USE_MP3AUDIOFORMAT=1
-    JUCE_STANDALONE_APPLICATION=1)
+    JUCE_PLUGINHOST_VST3=1
+    JUCE_STANDALONE_APPLICATION=1
+    JUCE_MODAL_LOOPS_PERMITTED=1)
 
 if(OpenVINO_FOUND)
     target_compile_definitions(opendj-tests PRIVATE OPENDJ_HAVE_OPENVINO=1)
@@ -71,6 +79,7 @@ target_link_libraries(opendj-tests PRIVATE
     Catch2::Catch2WithMain
     juce::juce_audio_devices
     juce::juce_audio_formats
+    juce::juce_audio_processors
     juce::juce_dsp
     opendj_rubberband
     opendj_sqlite3

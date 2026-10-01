@@ -5,6 +5,8 @@
 
 #include "app/Settings.h"
 
+#include <juce_audio_processors/juce_audio_processors.h>
+
 namespace opendj
 {
 
@@ -64,6 +66,20 @@ namespace
         if (name == "mp3")  return RecordingFormat::mp3;
 
         return RecordingFormat::wav;
+    }
+
+    juce::String effectName (MasterEffects::Type type)
+    {
+        return MasterEffects::getTypeName (type).toLowerCase();
+    }
+
+    MasterEffects::Type effectFromName (const juce::String& name, MasterEffects::Type fallback)
+    {
+        for (int t = 0; t < MasterEffects::numTypes; ++t)
+            if (name == effectName ((MasterEffects::Type) t))
+                return (MasterEffects::Type) t;
+
+        return fallback;
     }
 
     juce::String routingName (MicInput::Routing routing)
@@ -128,6 +144,30 @@ namespace
 
 //==============================================================================
 
+std::array<SessionState::MasterFxSlotState, MasterEffects::numSlots> SessionState::defaultMasterFx()
+{
+    // Read off a fresh unit, so the defaults live in one place.
+    const MasterEffects fresh;
+    std::array<MasterFxSlotState, MasterEffects::numSlots> slots;
+
+    for (int s = 0; s < MasterEffects::numSlots; ++s)
+    {
+        auto& slot = slots[(size_t) s];
+        slot.type = fresh.getType (s);
+
+        for (int t = 0; t < MasterEffects::numTypes; ++t)
+        {
+            const auto type = (MasterEffects::Type) t;
+            slot.wet[(size_t) t] = fresh.getWetFor (s, type);
+
+            for (int p = 0; p < MasterEffects::numParams; ++p)
+                slot.params[(size_t) t][(size_t) p] = fresh.getParamFor (s, type, p);
+        }
+    }
+
+    return slots;
+}
+
 void SessionState::captureFrom (const Mixer& mixer, const Sampler& sampler)
 {
     masterGain = mixer.getMasterGain();
@@ -137,6 +177,42 @@ void SessionState::captureFrom (const Mixer& mixer, const Sampler& sampler)
 
     for (int c = 0; c < Mixer::numChannels; ++c)
         crossfaderAssigns[(size_t) c] = mixer.getChannelCrossfaderAssign (c);
+
+    const auto& effects = mixer.getMasterEffects();
+
+    for (int s = 0; s < MasterEffects::numSlots; ++s)
+    {
+        auto& slot = masterFx[(size_t) s];
+        slot.type = effects.getType (s);
+
+        for (int t = 0; t < MasterEffects::numTypes; ++t)
+        {
+            slot.wet[(size_t) t] = effects.getWetFor (s, (MasterEffects::Type) t);
+
+            for (int p = 0; p < MasterEffects::numParams; ++p)
+                slot.params[(size_t) t][(size_t) p] = effects.getParamFor (s, (MasterEffects::Type) t, p);
+        }
+
+        for (int p = 0; p < MasterEffects::numParams; ++p)
+            slot.pluginParamIndex[(size_t) p] = effects.getPluginParamIndex (s, p);
+
+        slot.pluginId = {};
+        slot.pluginName = {};
+        slot.pluginState = {};
+
+        // Only a real plugin can be found again by name; anything else put in
+        // a slot, such as a test's stand-in, is not saved.
+        if (auto* plugin = dynamic_cast<juce::AudioPluginInstance*> (effects.getPlugin (s)))
+        {
+            const auto description = plugin->getPluginDescription();
+            slot.pluginId = description.createIdentifierString();
+            slot.pluginName = description.name;
+
+            juce::MemoryBlock state;
+            plugin->getStateInformation (state);
+            slot.pluginState = state.toBase64Encoding();
+        }
+    }
 
     samplerGain = sampler.getGain();
     samplerCue = sampler.isCueEnabled();
@@ -158,6 +234,25 @@ void SessionState::applyTo (Mixer& mixer, Sampler& sampler) const
 
     for (int c = 0; c < Mixer::numChannels; ++c)
         mixer.setChannelCrossfaderAssign (c, crossfaderAssigns[(size_t) c]);
+
+    auto& effects = mixer.getMasterEffects();
+
+    for (int s = 0; s < MasterEffects::numSlots; ++s)
+    {
+        const auto& slot = masterFx[(size_t) s];
+        effects.setType (s, slot.type);
+
+        for (int t = 0; t < MasterEffects::numTypes; ++t)
+        {
+            effects.setWetFor (s, (MasterEffects::Type) t, slot.wet[(size_t) t]);
+
+            for (int p = 0; p < MasterEffects::numParams; ++p)
+                effects.setParamFor (s, (MasterEffects::Type) t, p, slot.params[(size_t) t][(size_t) p]);
+        }
+
+        for (int p = 0; p < MasterEffects::numParams; ++p)
+            effects.setPluginParamIndex (s, p, slot.pluginParamIndex[(size_t) p]);
+    }
 
     sampler.setGain (samplerGain);
     sampler.setCueEnabled (samplerCue);
@@ -250,6 +345,42 @@ juce::var SessionState::toVar() const
     rtmpServer->setProperty ("audio_bitrate_kbps", rtmp.audioBitrateKbps);
     rtmpServer->setProperty ("fps", rtmp.fps);
     root->setProperty ("rtmp", juce::var (rtmpServer));
+
+    juce::Array<juce::var> fxSlots;
+
+    for (const auto& slot : masterFx)
+    {
+        auto* unit = new juce::DynamicObject();
+        unit->setProperty ("type", effectName (slot.type));
+
+        for (int t = 0; t < MasterEffects::numTypes; ++t)
+        {
+            auto* settingsForType = new juce::DynamicObject();
+            settingsForType->setProperty ("wet", slot.wet[(size_t) t]);
+
+            juce::Array<juce::var> params;
+
+            for (const auto value : slot.params[(size_t) t])
+                params.add (value);
+
+            settingsForType->setProperty ("params", params);
+            unit->setProperty (effectName ((MasterEffects::Type) t), juce::var (settingsForType));
+        }
+
+        if (slot.pluginId.isNotEmpty())
+        {
+            auto* plugin = new juce::DynamicObject();
+            plugin->setProperty ("id", slot.pluginId);
+            plugin->setProperty ("name", slot.pluginName);
+            plugin->setProperty ("state", slot.pluginState);
+            plugin->setProperty ("knob_params", juce::Array<juce::var> { slot.pluginParamIndex[0], slot.pluginParamIndex[1] });
+            unit->setProperty ("vst3", juce::var (plugin));
+        }
+
+        fxSlots.add (juce::var (unit));
+    }
+
+    root->setProperty ("master_fx", fxSlots);
 
     root->setProperty ("sampler_gain", samplerGain);
     root->setProperty ("sampler_cue", samplerCue);
@@ -358,6 +489,46 @@ SessionState SessionState::fromVar (const juce::var& source)
         r.videoBitrateKbps = (int) number (rtmpServer, "video_bitrate_kbps", r.videoBitrateKbps, 200.0, 20000.0);
         r.audioBitrateKbps = (int) number (rtmpServer, "audio_bitrate_kbps", r.audioBitrateKbps, 64.0, 320.0);
         r.fps = (int) number (rtmpServer, "fps", r.fps, 1.0, 60.0);
+    }
+
+    // Slot by slot and field by field, so a file from before master effects,
+    // or with only some of them, loads with the rest at their defaults.
+    const auto fxSlots = arrayOf (source, "master_fx");
+
+    for (int slotIndex = 0; slotIndex < MasterEffects::numSlots; ++slotIndex)
+    {
+        const auto unit = element (fxSlots, slotIndex);
+
+        if (unit.getDynamicObject() == nullptr)
+            continue;
+
+        auto& slot = state.masterFx[(size_t) slotIndex];
+        slot.type = effectFromName (text (unit, "type"), slot.type);
+
+        for (int t = 0; t < MasterEffects::numTypes; ++t)
+        {
+            const auto settingsForType = arrayOf (unit, effectName ((MasterEffects::Type) t).toRawUTF8());
+            slot.wet[(size_t) t] = (float) number (settingsForType, "wet", slot.wet[(size_t) t], 0.0, 1.0);
+
+            const auto params = arrayOf (settingsForType, "params");
+
+            for (int p = 0; p < MasterEffects::numParams; ++p)
+                if (const auto value = element (params, p); value.isDouble() || value.isInt())
+                    slot.params[(size_t) t][(size_t) p] = (float) juce::jlimit (0.0, 1.0, (double) value);
+        }
+
+        if (const auto plugin = arrayOf (unit, "vst3"); plugin.getDynamicObject() != nullptr)
+        {
+            slot.pluginId = text (plugin, "id");
+            slot.pluginName = text (plugin, "name");
+            slot.pluginState = text (plugin, "state");
+
+            const auto knobs = arrayOf (plugin, "knob_params");
+
+            for (int p = 0; p < MasterEffects::numParams; ++p)
+                if (const auto value = element (knobs, p); value.isInt() || value.isDouble())
+                    slot.pluginParamIndex[(size_t) p] = juce::jmax (0, (int) value);
+        }
     }
 
     state.samplerGain = (float) number (source, "sampler_gain", state.samplerGain, 0.0, 1.0);

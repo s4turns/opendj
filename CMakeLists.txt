@@ -211,8 +211,11 @@ endif()
 set(OPENDJ_ENGINE_SOURCES
     ${CMAKE_SOURCE_DIR}/src/core/AudioEngine.cpp
     ${CMAKE_SOURCE_DIR}/src/core/Deck.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/AutoMix.cpp
     ${CMAKE_SOURCE_DIR}/src/core/MicInput.cpp
     ${CMAKE_SOURCE_DIR}/src/core/Mixer.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/MasterEffects.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/PluginHost.cpp
     ${CMAKE_SOURCE_DIR}/src/core/OutputRouter.cpp
     ${CMAKE_SOURCE_DIR}/src/stream/Broadcaster.cpp
     ${CMAKE_SOURCE_DIR}/src/stream/IcecastConnection.cpp
@@ -267,9 +270,12 @@ target_sources(OpenDJ PRIVATE
     src/ui/PlatterComponent.cpp
     src/ui/WaveformComponent.cpp
     src/ui/MixerComponent.cpp
+    src/ui/MasterFxComponent.cpp
     src/ui/SamplerComponent.cpp
     src/ui/MicComponent.cpp
-    src/ui/VisualizerComponent.cpp)
+    src/ui/VisualizerComponent.cpp
+    src/ui/NowPlayingOverlay.cpp
+    src/ui/PlaylistComponent.cpp)
 
 target_include_directories(OpenDJ PRIVATE src)
 
@@ -277,6 +283,9 @@ target_compile_definitions(OpenDJ PRIVATE
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0
     JUCE_STRICT_REFCOUNTEDPOINTER=1
+    # VST3 effects in the master FX slots. JUCE carries the VST3 SDK itself,
+    # so this needs nothing installed.
+    JUCE_PLUGINHOST_VST3=1
     # MP3 is what most record collections are made of, and JUCE leaves its
     # decoder off by default. The patents it was guarding against expired in
     # 2017.

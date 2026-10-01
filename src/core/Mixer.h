@@ -5,6 +5,8 @@
 
 #pragma once
 
+#include "core/MasterEffects.h"
+
 #include <juce_dsp/juce_dsp.h>
 
 #include <array>
@@ -103,6 +105,11 @@ public:
     void setCueMix (float normalised);                             // 0 cue only, 1 master only
 
     float getMasterPeak (int channel) const noexcept;
+
+    /** The two effect slots on the whole mix, applied after the channels are
+        summed and before the master gain. */
+    MasterEffects& getMasterEffects() noexcept { return masterFx; }
+    const MasterEffects& getMasterEffects() const noexcept { return masterFx; }
 
     //==========================================================================
     // Where every control is, so that the interface can follow a controller.
@@ -203,6 +210,8 @@ private:
     std::atomic<float> targetCueMix { 0.0f };
 
     std::atomic<float> masterPeak[2] { { 0.0f }, { 0.0f } };
+
+    MasterEffects masterFx;
 
     double currentSampleRate = 44100.0;
 

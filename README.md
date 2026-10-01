@@ -264,8 +264,14 @@ rather than shipped: see [ROADMAP.md](ROADMAP.md) for why.
 
 ### Windows
 
-Visual Studio 2022 Build Tools with the C++ workload provides everything. Its bundled CMake
-and Ninja are found and used automatically, so nothing else has to be installed.
+A fresh machine needs Visual Studio 2022 Build Tools (C++ workload) and git. Its bundled CMake
+and Ninja are found and used automatically. `build.ps1` offers to install whatever is missing
+through winget, or you can do it up front. The same script installs ffmpeg (with libx264), which
+RTMP broadcasting needs at runtime; OpenDJ finds winget's install without a restart of the shell:
+
+```
+pwsh scripts/setup-windows.ps1   # install requirements (-Check only looks)
+```
 
 ```
 pwsh scripts/build.ps1         # configure and build

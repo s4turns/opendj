@@ -5,6 +5,8 @@
 
 #include "core/AudioEngine.h"
 
+#include "core/TempoMath.h"
+
 #include <algorithm>
 
 #include <cmath>
@@ -431,7 +433,7 @@ int AudioEngine::findSyncLeader (int followerIndex) const
     return best;
 }
 
-bool AudioEngine::syncDeck (int followerIndex, int leaderIndex)
+bool AudioEngine::syncDeck (int followerIndex, int leaderIndex, double maxStretch)
 {
     if (! juce::isPositiveAndBelow (followerIndex, numDecks)
         || ! juce::isPositiveAndBelow (leaderIndex, numDecks)
@@ -449,7 +451,12 @@ bool AudioEngine::syncDeck (int followerIndex, int leaderIndex)
         return false;
 
     const auto leaderBpm = leaderAnalysis->bpm * leader.getTempoRatio();
-    follower.setTempoRatio (leaderBpm / followerAnalysis->bpm);
+    const auto ratio = tempo::matchRatio (leaderBpm, followerAnalysis->bpm);
+
+    if (! tempo::isGentle (ratio, maxStretch))
+        return false;
+
+    follower.setTempoRatio (ratio);
 
     // Match phase as well as tempo: work out how far through its beat the leader
     // is, then put the follower the same distance through one of its own.
@@ -726,6 +733,96 @@ void AudioEngine::updateEchoTimes()
 
         mixer.setChannelEchoTime (i, beatSeconds * echoBeats[(size_t) i].load (std::memory_order_relaxed));
     }
+
+    const auto tempoDeck = findMasterTempoDeck();
+    mixer.getMasterEffects().setBeatSeconds (tempoDeck >= 0 ? 60.0 / getEffectiveBpm (tempoDeck) : 0.5);
+}
+
+int AudioEngine::findMasterTempoDeck() const
+{
+    return findLoudestPlayingDeck (true);
+}
+
+juce::String AudioEngine::getNowPlayingTitle() const
+{
+    const auto deck = findLoudestPlayingDeck (false);
+    return deck >= 0 ? decks[(size_t) deck]->getTrackTitle() : juce::String();
+}
+
+float AudioEngine::getDeckAudibility (int deckIndex) const
+{
+    // Where the crossfader leaves each side, on a straight line. The real curve
+    // does not matter here: only which deck is loudest does.
+    const auto x = (mixer.getCrossfaderPosition() + 1.0f) * 0.5f;
+    const auto assign = mixer.getChannelCrossfaderAssign (deckIndex);
+    const auto side = assign == Mixer::CrossfaderAssign::a ? 1.0f - x
+                    : assign == Mixer::CrossfaderAssign::b ? x
+                                                           : 1.0f;
+
+    return mixer.getChannelFader (deckIndex) * side;
+}
+
+AudioEngine::DeckStatus AudioEngine::getDeckStatus (int deckIndex) const
+{
+    if (! juce::isPositiveAndBelow (deckIndex, numDecks))
+        return {};
+
+    const auto& deck = *decks[(size_t) deckIndex];
+    return { deck.isLoaded(), deck.isPlaying(), getDeckAudibility (deckIndex), deck.getPositionSeconds() };
+}
+
+int AudioEngine::findNextUpDeck() const
+{
+    const auto onAir = findLoudestPlayingDeck (false);
+
+    if (onAir < 0)
+        return -1;
+
+    auto best = -1;
+    juce::uint64 bestSerial = 0;
+
+    for (int i = 0; i < numDecks; ++i)
+    {
+        const auto& deck = *decks[(size_t) i];
+
+        if (i == onAir || ! deck.isLoaded() || deck.isPlaying())
+            continue;
+
+        if (deck.getLoadSerial() > bestSerial)
+        {
+            bestSerial = deck.getLoadSerial();
+            best = i;
+        }
+    }
+
+    return best;
+}
+
+juce::String AudioEngine::getComingUpTitle() const
+{
+    const auto deck = findNextUpDeck();
+    return deck >= 0 ? decks[(size_t) deck]->getTrackTitle() : juce::String();
+}
+
+int AudioEngine::findLoudestPlayingDeck (bool requireBeatGrid) const
+{
+    auto best = -1;
+    auto bestLevel = 0.0f;
+
+    for (int i = 0; i < numDecks; ++i)
+    {
+        if (! decks[(size_t) i]->isPlaying() || (requireBeatGrid && getEffectiveBpm (i) <= 0.0))
+            continue;
+
+        // Ties go to the lower deck, as they do for sync.
+        if (const auto level = getDeckAudibility (i); level > bestLevel)
+        {
+            bestLevel = level;
+            best = i;
+        }
+    }
+
+    return best;
 }
 
 void AudioEngine::timerCallback()
@@ -734,6 +831,7 @@ void AudioEngine::timerCallback()
         deck->cleanUp();
 
     sampler.cleanUp();
+    mixer.getMasterEffects().collectGarbage();
 
     // The tempo fader moves, tracks change, and the echo has to follow both.
     updateEchoTimes();

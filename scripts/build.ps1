@@ -3,7 +3,11 @@
     Visual Studio Build Tools, so nothing extra has to be installed.
 
     Usage:  pwsh scripts/build.ps1 [-Config RelWithDebInfo] [-Clean] [-Test] [-Run [files]]
-                                   [-Asio [path to the Steinberg ASIO SDK]]
+                                   [-Setup] [-Asio [path to the Steinberg ASIO SDK]]
+
+    A machine missing Visual Studio Build Tools or git is offered the install
+    through scripts/setup-windows.ps1 before building. -Setup does only that
+    and exits, like build.sh --deps.
 
     -Asio needs Steinberg's SDK, which is the headers and cannot be shipped with
     anything. It is not the same thing as an ASIO driver: ASIO4ALL, FL Studio
@@ -19,6 +23,7 @@ param(
     [switch]$Clean,
     [switch]$Test,
     [switch]$Run,
+    [switch]$Setup,
     [switch]$Asio,
     [string]$AsioSdkPath = '',
     [Parameter(ValueFromRemainingArguments = $true)]
@@ -56,15 +61,25 @@ if ($Asio) {
 }
 
 $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
-if (-not (Test-Path $vswhere)) {
-    throw 'vswhere.exe not found. Install Visual Studio 2022 Build Tools with the C++ workload.'
+
+function Get-VsPath {
+    if (-not (Test-Path $vswhere)) { return $null }
+    & $vswhere -latest -products * `
+        -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+        -property installationPath
 }
 
-$vsPath = & $vswhere -latest -products * `
-    -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
-    -property installationPath
+$vsPath = Get-VsPath
+$needsSetup = $Setup -or -not $vsPath -or -not (Get-Command git -ErrorAction SilentlyContinue)
+
+if ($needsSetup) {
+    & (Join-Path $PSScriptRoot 'setup-windows.ps1')
+    if ($Setup) { return }
+    $vsPath = Get-VsPath
+}
+
 if (-not $vsPath) {
-    throw 'No Visual Studio installation with the MSVC x64 toolset was found.'
+    throw 'No Visual Studio installation with the MSVC x64 toolset was found. Run scripts/setup-windows.ps1.'
 }
 
 # Prefer the CMake and Ninja bundled with Visual Studio over anything on PATH,

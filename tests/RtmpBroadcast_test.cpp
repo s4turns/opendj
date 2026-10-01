@@ -37,6 +37,17 @@ namespace
         return opendj::RtmpConnection::findFfmpeg (diagnostic);
     }
 
+    /** ffprobe lives next to the ffmpeg that was found, which may be a full path
+        that is not on PATH; a bare "ffprobe" would miss it the same way. */
+    juce::String siblingFfprobe (const juce::String& ffmpegPath)
+    {
+        if (! ffmpegPath.containsChar (juce::File::getSeparatorChar()))
+            return "ffprobe";
+
+        const auto sibling = juce::File (ffmpegPath).getSiblingFile ("ffprobe" + juce::File (ffmpegPath).getFileExtension());
+        return sibling.existsAsFile() ? sibling.getFullPathName() : juce::String ("ffprobe");
+    }
+
     /** Waits for something to become true, rather than sleeping and hoping.
         The same helper `Broadcast_test.cpp` uses. */
     bool waitFor (std::function<bool()> condition, int timeoutMs = 5000)
@@ -279,7 +290,9 @@ TEST_CASE ("ffmpeg that cannot be reached fails with a reason, not a hang", "[rt
 {
     juce::String diagnostic;
 
-    if (findCapableFfmpeg (diagnostic).isEmpty())
+    const auto ffmpegPath = findCapableFfmpeg (diagnostic);
+
+    if (ffmpegPath.isEmpty())
     {
         WARN (diagnostic);
         return;
@@ -312,7 +325,9 @@ TEST_CASE ("a broadcast reaches ffmpeg's own receiver with a video track and an 
 {
     juce::String diagnostic;
 
-    if (findCapableFfmpeg (diagnostic).isEmpty())
+    const auto ffmpegPath = findCapableFfmpeg (diagnostic);
+
+    if (ffmpegPath.isEmpty())
     {
         WARN (diagnostic);
         return;
@@ -331,7 +346,7 @@ TEST_CASE ("a broadcast reaches ffmpeg's own receiver with a video track and an 
     outFile.deleteFile();
 
     juce::ChildProcess receiver;
-    const juce::StringArray receiverArgs { "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+    const juce::StringArray receiverArgs { ffmpegPath, "-hide_banner", "-loglevel", "error", "-y",
                                            "-listen", "1", "-f", "flv", "-i", url,
                                            "-c", "copy", outFile.getFullPathName() };
     REQUIRE (receiver.start (receiverArgs));
@@ -442,7 +457,7 @@ TEST_CASE ("a broadcast reaches ffmpeg's own receiver with a video track and an 
     // AAC, which is exactly what the README says YouTube, Twitch and
     // Mixcloud require and Ogg over Icecast cannot provide.
     juce::ChildProcess probe;
-    const juce::StringArray probeArgs { "ffprobe", "-v", "error", "-show_entries",
+    const juce::StringArray probeArgs { siblingFfprobe (ffmpegPath), "-v", "error", "-show_entries",
                                         "stream=codec_type,codec_name", "-of", "csv=p=0",
                                         outFile.getFullPathName() };
     REQUIRE (probe.start (probeArgs));
@@ -473,7 +488,9 @@ TEST_CASE ("live frames pushed in reach the receiver as a moving video track",
 {
     juce::String diagnostic;
 
-    if (findCapableFfmpeg (diagnostic).isEmpty())
+    const auto ffmpegPath = findCapableFfmpeg (diagnostic);
+
+    if (ffmpegPath.isEmpty())
     {
         WARN (diagnostic);
         return;
@@ -489,7 +506,7 @@ TEST_CASE ("live frames pushed in reach the receiver as a moving video track",
     outFile.deleteFile();
 
     juce::ChildProcess receiver;
-    const juce::StringArray receiverArgs { "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+    const juce::StringArray receiverArgs { ffmpegPath, "-hide_banner", "-loglevel", "error", "-y",
                                            "-listen", "1", "-f", "flv", "-i", url,
                                            "-c", "copy", outFile.getFullPathName() };
     REQUIRE (receiver.start (receiverArgs));
@@ -587,7 +604,7 @@ TEST_CASE ("live frames pushed in reach the receiver as a moving video track",
     // video clock was starving, which is the one thing the feeder exists to
     // prevent.
     juce::ChildProcess probe;
-    const juce::StringArray probeArgs { "ffprobe", "-v", "error", "-select_streams", "v:0",
+    const juce::StringArray probeArgs { siblingFfprobe (ffmpegPath), "-v", "error", "-select_streams", "v:0",
                                         "-count_frames", "-show_entries",
                                         "stream=codec_name,width,height,nb_read_frames",
                                         "-of", "csv=p=0", outFile.getFullPathName() };
@@ -608,7 +625,7 @@ TEST_CASE ("live frames pushed in reach the receiver as a moving video track",
     juce::ChildProcess decodeEarly, decodeLate;
     const auto decode = [&] (double atSeconds, juce::ChildProcess& process)
     {
-        const juce::StringArray args { "ffmpeg", "-v", "error", "-ss", juce::String (atSeconds),
+        const juce::StringArray args { ffmpegPath, "-v", "error", "-ss", juce::String (atSeconds),
                                        "-i", outFile.getFullPathName(), "-frames:v", "1",
                                        "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1" };
         REQUIRE (process.start (args, juce::ChildProcess::wantStdOut));
@@ -710,4 +727,99 @@ TEST_CASE ("a real RTMP target accepts the broadcast", "[.live]")
     REQUIRE (broadcaster.getDroppedSamples() == 0);
 
     broadcaster.stop();
+}
+
+//==============================================================================
+// Stopping a stream whose ffmpeg has stopped listening.
+
+namespace
+{
+    void setFfmpegOverride (const juce::String& value)
+    {
+       #if JUCE_WINDOWS
+        _putenv_s ("OPENDJ_RTMP_FFMPEG", value.toRawUTF8());
+       #else
+        if (value.isNotEmpty())
+            ::setenv ("OPENDJ_RTMP_FFMPEG", value.toRawUTF8(), 1);
+        else
+            ::unsetenv ("OPENDJ_RTMP_FFMPEG");
+       #endif
+    }
+}
+
+/** Ending a broadcast from the window froze the application when ffmpeg had
+    stalled: the audio writer was stuck in a write ffmpeg would never read,
+    and `stop` joined that writer before touching ffmpeg. Windows recorded it
+    as an application hang, twice.
+
+    The stand-in answers the capability checks, confirms the connection, and
+    then never reads its input again, so the pipe fills and the writer blocks,
+    which is the state the freeze needed. Stopping must still return promptly. */
+TEST_CASE ("stopping a broadcast returns even when ffmpeg has stopped reading", "[rtmp]")
+{
+   #if JUCE_WINDOWS
+    const auto script = juce::File::createTempFile (".bat");
+   #else
+    const auto script = juce::File::createTempFile (".sh");
+   #endif
+    const auto previous = juce::SystemStats::getEnvironmentVariable ("OPENDJ_RTMP_FFMPEG", {});
+
+    struct Restore
+    {
+        juce::File file;
+        juce::String previous;
+        ~Restore() { setFfmpegOverride (previous); file.deleteFile(); }
+    } restore { script, previous };
+
+   #if JUCE_WINDOWS
+    REQUIRE (script.replaceWithText (
+        "@echo off\r\n"
+        "echo %* | findstr /C:\"-encoders\" >nul && (echo  V....D libx264 stand-in& exit /b 0)\r\n"
+        "echo %* | findstr /C:\"-version\" >nul && (echo ffmpeg version stand-in& exit /b 0)\r\n"
+        "echo Output #0, flv, to 'rtmp://stand-in': 1>&2\r\n"
+        // One process, no children: a child such as ping would inherit the pipe
+        // and keep it open after this one was killed, unlike a real ffmpeg.
+        "for /L %%i in (1,1,60000000) do @rem\r\n", false, false, "\r\n"));
+   #else
+    REQUIRE (script.replaceWithText (
+        "#!/bin/sh\n"
+        "case \"$*\" in\n"
+        "  *-encoders*) echo ' V....D libx264              stand-in'; exit 0 ;;\n"
+        "  *-version*)  echo 'ffmpeg version stand-in'; exit 0 ;;\n"
+        "esac\n"
+        "echo \"Output #0, flv, to 'rtmp://stand-in':\" >&2\n"
+        "exec sleep 60\n", false, false, "\n"));
+    REQUIRE (script.setExecutePermission (true));
+   #endif
+
+    setFfmpegOverride (script.getFullPathName());
+
+    juce::String diagnostic;
+    REQUIRE (opendj::RtmpConnection::findFfmpeg (diagnostic) == script.getFullPathName());
+
+    RtmpBroadcaster broadcaster;
+    juce::String error;
+    REQUIRE (broadcaster.start (usable(), 48000.0, error));
+
+    // Several seconds of audio, well past what the pipe and the writer's
+    // FIFO hold, so something is certainly blocked in a write.
+    juce::AudioBuffer<float> block (2, 4800);
+
+    for (int ch = 0; ch < 2; ++ch)
+        for (int i = 0; i < block.getNumSamples(); ++i)
+            block.setSample (ch, i, (float) std::sin (i * 0.05) * 0.5f);
+
+    for (int i = 0; i < 100; ++i)
+    {
+        broadcaster.write (block, block.getNumSamples());
+        juce::Thread::sleep (5);
+    }
+
+    const auto started = juce::Time::getMillisecondCounter();
+    broadcaster.stop();
+    const auto took = juce::Time::getMillisecondCounter() - started;
+
+    INFO ("stop took " << took << " ms");
+    REQUIRE (took < 6000);
+    REQUIRE (broadcaster.getState() == RtmpBroadcaster::State::offline);
 }

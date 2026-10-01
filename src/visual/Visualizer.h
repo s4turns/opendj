@@ -124,6 +124,13 @@ public:
     using FrameSink = std::function<void (const unsigned char* rgb, int numBytes)>;
     void setFrameSink (FrameSink sink) { frameSink = std::move (sink); }
 
+    /** Called on the render thread with each finished frame before it is
+        published, free to draw on it: the track name goes here, so the panel
+        and the broadcast both show it. Tightly packed RGB, top row first.
+        Set before `start`; not read after. */
+    using FrameOverlay = std::function<void (unsigned char* rgb, int width, int height)>;
+    void setFrameOverlay (FrameOverlay overlay) { frameOverlay = std::move (overlay); }
+
     /** The preset being drawn, or empty before the first one loads. */
     juce::String getCurrentPresetName() const;
 
@@ -153,6 +160,7 @@ private:
     int frameWidth = 0;
     int frameHeight = 0;
     FrameSink frameSink;
+    FrameOverlay frameOverlay;
 
     juce::String failureReason;
     mutable juce::CriticalSection failureLock;

@@ -208,3 +208,72 @@ TEST_CASE ("an unreadable file leaves the queue and stays out", "[library]")
     REQUIRE (fixture.library.removeTrack (fixture.first));
     REQUIRE (fixture.library.countTracks() == 0);
 }
+
+TEST_CASE ("playlists keep their order and survive a reopen", "[library][playlist]")
+{
+    Fixture f;
+    const auto a = f.folder.getChildFile ("a.mp3");
+    const auto b = f.folder.getChildFile ("b.mp3");
+    const auto c = f.folder.getChildFile ("c.mp3");
+
+    const auto id = f.library.createPlaylist ("  Friday stream ");
+    REQUIRE (id != 0);
+
+    // A name is unique without regard to case, and never empty.
+    REQUIRE (f.library.createPlaylist ("friday STREAM") == 0);
+    REQUIRE (f.library.createPlaylist ("   ") == 0);
+
+    REQUIRE (f.library.addToPlaylist (id, { a, b }));
+    REQUIRE (f.library.addToPlaylist (id, { c }));
+    REQUIRE (f.library.getPlaylistFiles (id) == std::vector<juce::File> { a, b, c });
+
+    const auto lists = f.library.getPlaylists();
+    REQUIRE (lists.size() == 1);
+    REQUIRE (lists[0].name == "Friday stream");
+    REQUIRE (lists[0].numTracks == 3);
+
+    f.library.close();
+    REQUIRE (f.library.open (f.folder.getChildFile ("library.sqlite")).wasOk());
+    REQUIRE (f.library.getPlaylistFiles (id) == std::vector<juce::File> { a, b, c });
+}
+
+TEST_CASE ("playlist tracks can be moved and removed", "[library][playlist]")
+{
+    Fixture f;
+    const std::vector<juce::File> files {
+        f.folder.getChildFile ("a.mp3"), f.folder.getChildFile ("b.mp3"),
+        f.folder.getChildFile ("c.mp3"), f.folder.getChildFile ("d.mp3") };
+
+    const auto id = f.library.createPlaylist ("set");
+    REQUIRE (f.library.addToPlaylist (id, files));
+
+    REQUIRE (f.library.movePlaylistTrack (id, 0, 2));
+    REQUIRE (f.library.getPlaylistFiles (id) == std::vector<juce::File> { files[1], files[2], files[0], files[3] });
+
+    REQUIRE (f.library.movePlaylistTrack (id, 3, 0));
+    REQUIRE (f.library.getPlaylistFiles (id) == std::vector<juce::File> { files[3], files[1], files[2], files[0] });
+
+    REQUIRE (f.library.removeFromPlaylist (id, 1));
+    REQUIRE (f.library.getPlaylistFiles (id) == std::vector<juce::File> { files[3], files[2], files[0] });
+
+    REQUIRE_FALSE (f.library.removeFromPlaylist (id, 7));
+    REQUIRE_FALSE (f.library.movePlaylistTrack (id, 0, 9));
+    REQUIRE_FALSE (f.library.addToPlaylist (id + 99, files));
+}
+
+TEST_CASE ("deleting a playlist removes its entries and renaming keeps them", "[library][playlist]")
+{
+    Fixture f;
+    const auto file = f.folder.getChildFile ("a.mp3");
+
+    const auto id = f.library.createPlaylist ("old name");
+    REQUIRE (f.library.addToPlaylist (id, { file }));
+
+    REQUIRE (f.library.renamePlaylist (id, "new name"));
+    REQUIRE (f.library.getPlaylists()[0].name == "new name");
+    REQUIRE (f.library.getPlaylistFiles (id).size() == 1);
+
+    REQUIRE (f.library.deletePlaylist (id));
+    REQUIRE (f.library.getPlaylists().empty());
+    REQUIRE (f.library.getPlaylistFiles (id).empty());
+}

@@ -317,14 +317,31 @@ juce::StringArray buildFfmpegArguments (const RtmpSettings& settings, double sam
         // every frame.
         args.add ("-tune"); args.add ("stillimage");
 
-        // A key frame every 50 frames of a 2 fps source is one every 25
-        // seconds, comfortably under what a player waits before it gives up
-        // looking for one, without paying the cost of a key frame for a
-        // picture that never changes.
-        args.add ("-g"); args.add ("50");
+        // A key frame every two seconds of the 2 fps source, four frames.
+        // The old fifty frames was twenty-five seconds, and YouTube rejects
+        // anything over four ("Please use a keyframe frequency of four
+        // seconds or less") and warns viewers of buffering. A still picture
+        // makes the extra key frames nearly free.
+        args.add ("-g"); args.add ("4");
     }
 
+    // Key frames by timestamp as well as by count, so the interval YouTube
+    // measures stays at two seconds even if frames arrive slower than the
+    // nominal rate and a frame-counted GOP would stretch to many more.
+    args.add ("-force_key_frames"); args.add ("expr:gte(t,n_forced*2)");
+
     args.add ("-b:v"); args.add (juce::String (settings.videoBitrateKbps) + "k");
+
+    // Without a cap and a buffer, bitrate mode averages over the whole stream
+    // and lets a burst of visualiser motion overshoot what the ingest wants,
+    // while the quiet stretches starve; `zerolatency` has no lookahead to
+    // smooth that. A buffer of two seconds at the target rate is constant
+    // bitrate in the sense YouTube asks for, and gives the encoder room to
+    // spend bits on the frames that need them. High profile is the one
+    // every ingest decodes and it compresses better than the default.
+    args.add ("-maxrate"); args.add (juce::String (settings.videoBitrateKbps) + "k");
+    args.add ("-bufsize"); args.add (juce::String (settings.videoBitrateKbps * 2) + "k");
+    args.add ("-profile:v"); args.add ("high");
 
     args.add ("-c:a"); args.add ("aac");
     args.add ("-b:a"); args.add (juce::String (settings.audioBitrateKbps) + "k");
@@ -567,6 +584,18 @@ public:
 
     bool hasVideoPipe() const noexcept { return videoHandle != nullptr; }
 
+    /** Ends ffmpeg now and returns at once, without closing anything. Every
+        write to it then fails, which is what frees a thread stuck in one:
+        a stalled ffmpeg stops reading its stdin, and a blocked WriteFile has
+        no other way out. Safe from any thread. */
+    void terminate()
+    {
+        const std::lock_guard<std::mutex> lock (processMutex);
+
+        if (processHandle != nullptr)
+            TerminateProcess (processHandle, 1);
+    }
+
     void stop()
     {
         if (videoHandle != nullptr)
@@ -609,17 +638,26 @@ public:
             stderrHandle = nullptr;
         }
 
-        if (processHandle != nullptr)
+        // Taken out from under the lock, so `terminate` either gets there
+        // first or finds nothing, and never a handle that is being closed.
+        HANDLE process = nullptr;
+
         {
-            WaitForSingleObject (processHandle, (DWORD) stopGraceMs);
+            const std::lock_guard<std::mutex> lock (processMutex);
+            process = processHandle;
+            processHandle = nullptr;
+        }
+
+        if (process != nullptr)
+        {
+            WaitForSingleObject (process, (DWORD) stopGraceMs);
 
             DWORD exitCode = 0;
 
-            if (GetExitCodeProcess (processHandle, &exitCode) != 0 && exitCode == STILL_ACTIVE)
-                TerminateProcess (processHandle, 1);
+            if (GetExitCodeProcess (process, &exitCode) != 0 && exitCode == STILL_ACTIVE)
+                TerminateProcess (process, 1);
 
-            CloseHandle (processHandle);
-            processHandle = nullptr;
+            CloseHandle (process);
         }
     }
 
@@ -769,6 +807,7 @@ private:
     static constexpr DWORD videoPipeBytes = 8 * 1024 * 1024;
 
     HANDLE processHandle = nullptr;
+    std::mutex processMutex;
     HANDLE stdinHandle = nullptr;
     HANDLE stderrHandle = nullptr;
     HANDLE videoHandle = nullptr;
@@ -946,6 +985,18 @@ public:
     bool writeVideo (const void* data, size_t numBytes) { return writeTo (videoFd, data, numBytes); }
 
     bool hasVideoPipe() const noexcept { return videoFd >= 0; }
+
+    /** Asks ffmpeg to end and returns at once; see the Windows half. Its
+        exit closes the pipes, which fails any write a thread is stuck in. */
+    void terminate()
+    {
+        // Copied first: `stop` sets it to -1, and kill(-1) signals everything
+        // this user owns.
+        const auto target = pid;
+
+        if (target > 0)
+            ::kill (target, SIGTERM);
+    }
 
 private:
     /** One routine for both pipes, because the discipline it follows -- a
@@ -1180,6 +1231,33 @@ juce::String RtmpConnection::findFfmpeg (juce::String& diagnostic)
 
    #if JUCE_WINDOWS
     candidates.add ("ffmpeg.exe");
+
+    // Where installers put it, for when this process started before the
+    // install and its PATH has not caught up: winget's shim and package
+    // folder, then the usual manual, Chocolatey and Scoop spots.
+    const auto env = [] (const char* name) { return juce::SystemStats::getEnvironmentVariable (name, {}); };
+
+    if (const auto localAppData = env ("LOCALAPPDATA"); localAppData.isNotEmpty())
+    {
+        const juce::File winget (localAppData);
+        candidates.add (winget.getChildFile ("Microsoft\\WinGet\\Links\\ffmpeg.exe").getFullPathName());
+
+        for (const auto& found : winget.getChildFile ("Microsoft\\WinGet\\Packages")
+                                     .findChildFiles (juce::File::findFiles, true, "ffmpeg.exe"))
+            if (found.getFullPathName().containsIgnoreCase ("FFmpeg"))
+                candidates.add (found.getFullPathName());
+    }
+
+    if (const auto programFiles = env ("ProgramFiles"); programFiles.isNotEmpty())
+        candidates.add (juce::File (programFiles).getChildFile ("ffmpeg\\bin\\ffmpeg.exe").getFullPathName());
+
+    candidates.add ("C:\\ffmpeg\\bin\\ffmpeg.exe");
+
+    if (const auto programData = env ("ProgramData"); programData.isNotEmpty())
+        candidates.add (juce::File (programData).getChildFile ("chocolatey\\bin\\ffmpeg.exe").getFullPathName());
+
+    if (const auto profile = env ("USERPROFILE"); profile.isNotEmpty())
+        candidates.add (juce::File (profile).getChildFile ("scoop\\shims\\ffmpeg.exe").getFullPathName());
    #else
     candidates.add ("/usr/local/bin/ffmpeg");
     candidates.add ("/opt/homebrew/bin/ffmpeg");
@@ -1215,8 +1293,8 @@ juce::String RtmpConnection::findFfmpeg (juce::String& diagnostic)
         ? juce::String ("Found ffmpeg, but none of it can encode H.264 (no libx264 in any "
                         "copy on PATH or the usual install locations). Install a build that "
                         "can, or set OPENDJ_RTMP_FFMPEG to one that does.")
-        : juce::String ("Could not find ffmpeg anywhere. Install it, or set OPENDJ_RTMP_FFMPEG "
-                        "to its full path.");
+        : juce::String ("Could not find ffmpeg anywhere. Install it (scripts/setup-windows.ps1 does) "
+                        "and restart OpenDJ, or set OPENDJ_RTMP_FFMPEG to its full path.");
     return {};
 }
 
@@ -1232,7 +1310,10 @@ bool RtmpConnection::launch (const RtmpSettings& settings, double sampleRate, ju
     if (ffmpegPath.isEmpty())
         return false;
 
-    process = std::make_unique<Process>();
+    {
+        const std::lock_guard<std::mutex> lock (processMutex);
+        process = std::make_unique<Process>();
+    }
 
     // Where ffmpeg is told to read frames from has to be settled before the
     // arguments are built, because it goes into them, and only the platform
@@ -1241,7 +1322,7 @@ bool RtmpConnection::launch (const RtmpSettings& settings, double sampleRate, ju
 
     if (settings.liveVideo && ! process->createVideoPipe (videoSource, error))
     {
-        process.reset();
+        disconnect();
         return false;
     }
 
@@ -1249,7 +1330,7 @@ bool RtmpConnection::launch (const RtmpSettings& settings, double sampleRate, ju
 
     if (! process->start (ffmpegPath, args, settings.liveVideo, error))
     {
-        process.reset();
+        disconnect();
         return false;
     }
 
@@ -1293,10 +1374,30 @@ bool RtmpConnection::waitForConfirmation (juce::String& error)
     return false;
 }
 
+void RtmpConnection::abort()
+{
+    connected.store (false, std::memory_order_relaxed);
+
+    const std::lock_guard<std::mutex> lock (processMutex);
+
+    if (process != nullptr)
+        process->terminate();
+}
+
 void RtmpConnection::disconnect()
 {
     connected.store (false, std::memory_order_relaxed);
-    process.reset();
+
+    // Moved out under the lock and destroyed outside it: stopping ffmpeg can
+    // take seconds, and `abort` must never wait that long for the lock.
+    std::unique_ptr<Process> finished;
+
+    {
+        const std::lock_guard<std::mutex> lock (processMutex);
+        finished = std::move (process);
+    }
+
+    finished.reset();
 }
 
 bool RtmpConnection::send (const void* data, int numBytes)

@@ -311,3 +311,161 @@ TEST_CASE ("a mic on an input that shares memory with an output is still heard",
     // arrive.
     REQUIRE_THAT (h.renderWithInput (0, h.storage[0], 0.25f), WithinAbs (0.25f, 1.0e-3f));
 }
+
+TEST_CASE ("nothing is named as now playing when no deck is playing", "[engine][decks]")
+{
+    AudioEngine engine;
+    REQUIRE (engine.getNowPlayingTitle().isEmpty());
+}
+
+TEST_CASE ("a track loaded while another plays is named as coming up next", "[engine][decks]")
+{
+    ScopedJuce scoped;
+    ToneFile first, second;
+    Harness h;
+
+    // Nothing on air, so nothing is "next" yet.
+    REQUIRE (h.engine.findNextUpDeck() == -1);
+    REQUIRE (h.engine.getComingUpTitle().isEmpty());
+
+    h.loadAndPlay (0, first.get());
+    REQUIRE (h.engine.findNextUpDeck() == -1);
+
+    REQUIRE (h.engine.getDeck (1).loadFile (second.get()));
+    REQUIRE (h.engine.findNextUpDeck() == 1);
+    REQUIRE (h.engine.getComingUpTitle() == h.engine.getDeck (1).getTrackTitle());
+
+    // Once it plays it is no longer waiting.
+    h.engine.getDeck (1).play();
+    REQUIRE (h.engine.findNextUpDeck() == -1);
+
+    // The newest load wins when two are waiting.
+    h.engine.getDeck (1).pause();
+    REQUIRE (h.engine.getDeck (2).loadFile (second.get()));
+    REQUIRE (h.engine.findNextUpDeck() == 2);
+
+    h.engine.getDeck (2).unload();
+    REQUIRE (h.engine.findNextUpDeck() == 1);
+}
+
+TEST_CASE ("a deck's audibility follows its fader and its side of the crossfader", "[engine][mixer]")
+{
+    AudioEngine engine;
+    auto& mixer = engine.getMixer();
+
+    mixer.setChannelFader (0, 0.5f);
+    mixer.setChannelCrossfaderAssign (0, Mixer::CrossfaderAssign::thru);
+    REQUIRE_THAT (engine.getDeckAudibility (0), WithinAbs (0.5f, 1.0e-4f));
+
+    mixer.setChannelFader (0, 1.0f);
+    mixer.setChannelCrossfaderAssign (0, Mixer::CrossfaderAssign::a);
+    mixer.setCrossfaderPosition (-1.0f);
+    REQUIRE_THAT (engine.getDeckAudibility (0), WithinAbs (1.0f, 1.0e-4f));
+    mixer.setCrossfaderPosition (1.0f);
+    REQUIRE_THAT (engine.getDeckAudibility (0), WithinAbs (0.0f, 1.0e-4f));
+}
+
+#include "core/AutoMix.h"
+
+TEST_CASE ("the auto crossfader carries a playlist from one track to the next", "[engine][automix]")
+{
+    ScopedJuce scoped;
+    ToneFile a (6.0, 330.0), b (6.0, 440.0), c (6.0, 550.0);
+    Harness h;
+
+    opendj::AutoMix automix (h.engine);
+    automix.setQueue ({ a.get(), b.get(), c.get() });
+    automix.setFadeSeconds (2.0);
+    automix.setLoop (false);
+
+    // A block at a time: the audio advances by real block lengths, the
+    // clock handed to the mixer is the same simulated time, and the message
+    // loop is pumped so loader callbacks land.
+    auto now = 0.0;
+    const auto step = [&]
+    {
+        h.engine.renderNextBlock (h.outputs.data(), (int) h.outputs.size(), blockSize);
+        now += blockSize / sampleRate;
+        automix.tick (now);
+        juce::MessageManager::getInstance()->runDispatchLoopUntil (1);
+    };
+
+    const auto runUntil = [&] (std::function<bool()> done, double limitSeconds)
+    {
+        const auto end = now + limitSeconds;
+
+        while (! done() && now < end)
+            step();
+
+        return done();
+    };
+
+    automix.start (0);
+    REQUIRE (runUntil ([&] { return automix.getCurrentIndex() == 0; }, 5.0));
+    REQUIRE (h.engine.getDeck (0).isPlaying());
+    REQUIRE (h.engine.getMixer().getCrossfaderPosition() == -1.0f);
+
+    // The second track is loaded ahead and waits on the idle deck.
+    REQUIRE (runUntil ([&] { return automix.getNextIndex() == 1 && h.engine.getDeck (1).isLoaded(); }, 5.0));
+    REQUIRE_FALSE (h.engine.getDeck (1).isPlaying());
+
+    // Then the fade: the crossfader leaves deck A and deck B starts.
+    REQUIRE (runUntil ([&] { return automix.isFading(); }, 8.0));
+    REQUIRE (h.engine.getDeck (1).isPlaying());
+    REQUIRE (automix.getCurrentIndex() == 1);
+
+    REQUIRE (runUntil ([&] { return ! automix.isFading(); }, 4.0));
+    REQUIRE (h.engine.getMixer().getCrossfaderPosition() == 1.0f);
+    REQUIRE_FALSE (h.engine.getDeck (0).isLoaded());   // cleared for the next one
+    REQUIRE (h.engine.getDeck (1).isPlaying());
+
+    // And on to the third, back on deck A.
+    REQUIRE (runUntil ([&] { return automix.isFading(); }, 8.0));
+    REQUIRE (automix.getCurrentIndex() == 2);
+    REQUIRE (runUntil ([&] { return ! automix.isFading(); }, 4.0));
+    REQUIRE (h.engine.getMixer().getCrossfaderPosition() == -1.0f);
+    REQUIRE (h.engine.getDeck (0).isPlaying());
+
+    // Nothing follows the last track, and it plays out and stops the run.
+    REQUIRE (automix.getNextIndex() == -1);
+    REQUIRE (runUntil ([&] { return ! automix.isRunning(); }, 10.0));
+}
+
+TEST_CASE ("a deck playing on a mixer nobody has touched is audible, and named", "[engine][mixer]")
+{
+    ScopedJuce scoped;
+    ToneFile tone;
+
+    // No Harness: it sets every fader itself, which is exactly what hid this.
+    // A fresh mixer had its gain at 0.8 but its reported fader position at 0,
+    // so the deck was heard and yet counted as silent.
+    AudioEngine engine;
+    REQUIRE_THAT (engine.getMixer().getChannelFader (0), WithinAbs (0.8f, 1.0e-4f));
+
+    REQUIRE (engine.getDeck (0).loadFile (tone.get()));
+    engine.getDeck (0).play();
+
+    REQUIRE (engine.getDeckAudibility (0) > 0.0f);
+    REQUIRE (engine.findNowPlayingDeck() == 0);
+    REQUIRE (engine.getNowPlayingTitle() == engine.getDeck (0).getTrackTitle());
+    REQUIRE (engine.getNowPlayingTitle().isNotEmpty());
+}
+
+TEST_CASE ("a track loaded onto a deck starts at its own tempo", "[engine][decks]")
+{
+    ScopedJuce scoped;
+    ToneFile first, second;
+    AudioEngine engine;
+
+    REQUIRE (engine.getDeck (0).loadFile (first.get()));
+    engine.getDeck (0).setTempoRatio (1.28);
+
+    // Matched to something else for the last track; the next one must not
+    // inherit the stretch.
+    REQUIRE (engine.getDeck (0).loadFile (second.get()));
+    REQUIRE_THAT (engine.getDeck (0).getTempoRatio(), WithinAbs (1.0, 1.0e-9));
+
+    engine.getDeck (0).setTempoRatio (0.9);
+    engine.getDeck (0).unload();
+    REQUIRE_THAT (engine.getDeck (0).getTempoRatio(), WithinAbs (1.0, 1.0e-9));
+}

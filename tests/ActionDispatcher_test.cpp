@@ -212,3 +212,42 @@ TEST_CASE ("a zoom action with nobody listening is harmless", "[control][wavefor
 
     dispatcher.dispatch ({ Action::deckWaveformZoom, 0, 0, 1.0f });
 }
+
+TEST_CASE ("master effect actions work the unit the deck number names", "[control][masterfx]")
+{
+    AudioEngine engine;
+    ActionDispatcher dispatcher (engine);
+    auto& fx = engine.getMixer().getMasterEffects();
+
+    dispatcher.dispatch ({ Action::masterFxToggle, 1, 0, 1.0f });
+    REQUIRE (fx.isEnabled (1));
+    REQUIRE_FALSE (fx.isEnabled (0));
+
+    // A release is not a second press.
+    dispatcher.dispatch ({ Action::masterFxToggle, 1, 0, 0.0f });
+    REQUIRE (fx.isEnabled (1));
+
+    dispatcher.dispatch ({ Action::masterFxOn, 0, 0, 1.0f });
+    REQUIRE (fx.isEnabled (0));
+    dispatcher.dispatch ({ Action::masterFxOn, 0, 0, 0.0f });
+    REQUIRE_FALSE (fx.isEnabled (0));
+
+    dispatcher.dispatch ({ Action::masterFxType, 0, 2, 1.0f });
+    REQUIRE (fx.getType (0) == MasterEffects::Type::filter);
+
+    dispatcher.dispatch ({ Action::masterFxWet, 0, 0, 0.3f });
+    dispatcher.dispatch ({ Action::masterFxParam, 0, 1, 0.9f });
+    REQUIRE_THAT (fx.getWetFor (0, MasterEffects::Type::filter), Catch::Matchers::WithinAbs (0.3, 0.0001));
+    REQUIRE_THAT (fx.getParamFor (0, MasterEffects::Type::filter, 1), Catch::Matchers::WithinAbs (0.9, 0.0001));
+
+    dispatcher.dispatch ({ Action::masterFxNextType, 0, 0, 1.0f });
+    REQUIRE (fx.getType (0) == MasterEffects::Type::echo);
+
+    // A third unit does not exist, and must not fall through to the second.
+    dispatcher.dispatch ({ Action::masterFxToggle, 2, 0, 1.0f });
+    REQUIRE (fx.isEnabled (1));
+
+    REQUIRE (actionFromString ("master_fx.param") == Action::masterFxParam);
+    REQUIRE (isContinuous (Action::masterFxWet));
+    REQUIRE_FALSE (isContinuous (Action::masterFxToggle));
+}

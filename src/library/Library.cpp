@@ -208,6 +208,16 @@ juce::Result Library::createSchema()
         "  added_at INTEGER NOT NULL DEFAULT 0,"
         "  last_played_at INTEGER NOT NULL DEFAULT 0);"
 
+        "CREATE TABLE IF NOT EXISTS playlists ("
+        "  id INTEGER PRIMARY KEY,"
+        "  name TEXT NOT NULL UNIQUE COLLATE NOCASE);"
+
+        "CREATE TABLE IF NOT EXISTS playlist_tracks ("
+        "  playlist_id INTEGER NOT NULL REFERENCES playlists (id) ON DELETE CASCADE,"
+        "  position INTEGER NOT NULL,"
+        "  path TEXT NOT NULL,"
+        "  PRIMARY KEY (playlist_id, position));"
+
         "CREATE INDEX IF NOT EXISTS tracks_by_title ON tracks (title COLLATE NOCASE);"
         "CREATE INDEX IF NOT EXISTS tracks_by_artist ON tracks (artist COLLATE NOCASE);"
         "CREATE INDEX IF NOT EXISTS tracks_pending ON tracks (analysis_version);");
@@ -482,6 +492,197 @@ std::vector<TrackRecord> Library::query (const LibraryQuery& query) const
         results.push_back (recordFromRow (select));
 
     return results;
+}
+
+//==============================================================================
+// Playlists
+//==============================================================================
+
+juce::int64 Library::createPlaylist (const juce::String& name)
+{
+    const auto trimmed = name.trim();
+
+    if (trimmed.isEmpty())
+        return 0;
+
+    juce::int64 id = 0;
+
+    {
+        std::lock_guard<std::mutex> lock (mutex);
+        Statement insert (database, "INSERT INTO playlists (name) VALUES (?)");
+
+        if (insert.bind (1, trimmed).run())
+            id = sqlite3_last_insert_rowid (database);
+    }
+
+    if (id != 0)
+        changed();
+
+    return id;
+}
+
+bool Library::renamePlaylist (juce::int64 id, const juce::String& name)
+{
+    const auto trimmed = name.trim();
+
+    if (trimmed.isEmpty())
+        return false;
+
+    bool ok = false;
+
+    {
+        std::lock_guard<std::mutex> lock (mutex);
+        Statement update (database, "UPDATE playlists SET name = ? WHERE id = ?");
+        ok = update.bind (1, trimmed).bind (2, id).run() && sqlite3_changes (database) > 0;
+    }
+
+    if (ok)
+        changed();
+
+    return ok;
+}
+
+bool Library::deletePlaylist (juce::int64 id)
+{
+    bool ok = false;
+
+    {
+        std::lock_guard<std::mutex> lock (mutex);
+
+        // Both deleted by hand: foreign keys are off unless asked for, and a
+        // playlist's rows must not outlive it and reappear under a reused id.
+        Statement entries (database, "DELETE FROM playlist_tracks WHERE playlist_id = ?");
+        entries.bind (1, id).run();
+
+        Statement remove (database, "DELETE FROM playlists WHERE id = ?");
+        ok = remove.bind (1, id).run() && sqlite3_changes (database) > 0;
+    }
+
+    if (ok)
+        changed();
+
+    return ok;
+}
+
+std::vector<PlaylistInfo> Library::getPlaylists() const
+{
+    std::lock_guard<std::mutex> lock (mutex);
+    std::vector<PlaylistInfo> playlists;
+
+    Statement select (database,
+        "SELECT p.id, p.name, COUNT(t.position) FROM playlists p "
+        "LEFT JOIN playlist_tracks t ON t.playlist_id = p.id "
+        "GROUP BY p.id ORDER BY p.name COLLATE NOCASE");
+
+    while (select.step())
+        playlists.push_back ({ select.getInt64 (0), select.getText (1), select.getInt (2) });
+
+    return playlists;
+}
+
+std::vector<juce::File> Library::readPlaylistFiles (juce::int64 id) const
+{
+    std::vector<juce::File> files;
+
+    Statement select (database, "SELECT path FROM playlist_tracks WHERE playlist_id = ? ORDER BY position");
+    select.bind (1, id);
+
+    while (select.step())
+        files.emplace_back (select.getText (0));
+
+    return files;
+}
+
+bool Library::writePlaylistFiles (juce::int64 id, const std::vector<juce::File>& files)
+{
+    if (! execute ("BEGIN"))
+        return false;
+
+    Statement clear (database, "DELETE FROM playlist_tracks WHERE playlist_id = ?");
+    auto ok = clear.bind (1, id).run();
+
+    for (size_t i = 0; ok && i < files.size(); ++i)
+    {
+        Statement insert (database, "INSERT INTO playlist_tracks (playlist_id, position, path) VALUES (?, ?, ?)");
+        ok = insert.bind (1, id).bind (2, (int) i).bind (3, pathOf (files[i])).run();
+    }
+
+    execute (ok ? "COMMIT" : "ROLLBACK");
+    return ok;
+}
+
+std::vector<juce::File> Library::getPlaylistFiles (juce::int64 id) const
+{
+    std::lock_guard<std::mutex> lock (mutex);
+    return readPlaylistFiles (id);
+}
+
+bool Library::addToPlaylist (juce::int64 id, const std::vector<juce::File>& additions)
+{
+    bool ok = false;
+
+    {
+        std::lock_guard<std::mutex> lock (mutex);
+
+        Statement exists (database, "SELECT 1 FROM playlists WHERE id = ?");
+
+        if (! exists.bind (1, id).step())
+            return false;
+
+        auto files = readPlaylistFiles (id);
+        files.insert (files.end(), additions.begin(), additions.end());
+        ok = writePlaylistFiles (id, files);
+    }
+
+    if (ok)
+        changed();
+
+    return ok;
+}
+
+bool Library::removeFromPlaylist (juce::int64 id, int position)
+{
+    bool ok = false;
+
+    {
+        std::lock_guard<std::mutex> lock (mutex);
+        auto files = readPlaylistFiles (id);
+
+        if (! juce::isPositiveAndBelow (position, (int) files.size()))
+            return false;
+
+        files.erase (files.begin() + position);
+        ok = writePlaylistFiles (id, files);
+    }
+
+    if (ok)
+        changed();
+
+    return ok;
+}
+
+bool Library::movePlaylistTrack (juce::int64 id, int from, int to)
+{
+    bool ok = false;
+
+    {
+        std::lock_guard<std::mutex> lock (mutex);
+        auto files = readPlaylistFiles (id);
+        const auto size = (int) files.size();
+
+        if (! juce::isPositiveAndBelow (from, size) || ! juce::isPositiveAndBelow (to, size))
+            return false;
+
+        const auto moved = files[(size_t) from];
+        files.erase (files.begin() + from);
+        files.insert (files.begin() + to, moved);
+        ok = writePlaylistFiles (id, files);
+    }
+
+    if (ok)
+        changed();
+
+    return ok;
 }
 
 std::vector<juce::File> Library::tracksNeedingAnalysis (int limit) const

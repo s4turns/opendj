@@ -21,10 +21,14 @@
 #include "ui/BeatMatchComponent.h"
 #include "ui/BrowserComponent.h"
 #include "ui/DeckComponent.h"
+#include "ui/MasterFxComponent.h"
 #include "ui/MixerComponent.h"
 #include "app/Settings.h"
 #include "ui/SamplerComponent.h"
 #include "ui/MicComponent.h"
+#include "ui/NowPlayingOverlay.h"
+#include "ui/PlaylistComponent.h"
+#include "core/AutoMix.h"
 #include "ui/VisualizerComponent.h"
 
 #include <array>
@@ -166,8 +170,14 @@ private:
     juce::String libraryError;
 
     AudioEngine engine;
+    NowPlayingOverlay nowPlaying { engine };
+    AutoMix autoMix { engine };
     ActionDispatcher dispatcher { engine };
     MidiControlSurface midi { engine, dispatcher };
+
+    // Before the views, so the effects panel never outlives the host its
+    // plugins came from.
+    PluginHost pluginHost;
 
     /** The decks and mixer as one component, so the shell can split the window
         between them and the browser with a draggable bar. */
@@ -188,6 +198,12 @@ private:
     /** The two decks' beats on one axis, across the top of the window. */
     std::unique_ptr<BeatMatchComponent> beatStrip;
     std::unique_ptr<BrowserComponent> browser;
+    std::unique_ptr<PlaylistComponent> playlistView;
+
+    /** The library and the playlists as two tabs in the browser's place.
+        Declared after what it shows, so it is gone first. */
+    std::unique_ptr<juce::TabbedComponent> browserTabs;
+    std::unique_ptr<MasterFxComponent> masterFxView;
     std::unique_ptr<SamplerComponent> samplerView;
     std::unique_ptr<MicComponent> micView;
 
@@ -207,6 +223,11 @@ private:
     class VisualsWindow;
     std::unique_ptr<VisualsWindow> visualsWindow;
     juce::Label statusLabel;
+
+    // A line about plugins, shown in the status bar for a while and then gone,
+    // since the bar is rebuilt from the engine on every tick.
+    juce::String pluginNotice;
+    juce::uint32 pluginNoticeUntil = 0;
     juce::String startupError;
 
     /** Read before the device is opened, written when the window closes. */

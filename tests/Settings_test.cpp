@@ -8,6 +8,7 @@
 #include "app/Settings.h"
 
 using Catch::Matchers::WithinAbs;
+using opendj::MasterEffects;
 using opendj::MicInput;
 using opendj::RecordingFormat;
 using opendj::Mixer;
@@ -56,6 +57,22 @@ namespace
         state.rtmp.videoBitrateKbps = 4500;
         state.rtmp.audioBitrateKbps = 128;
         state.rtmp.fps = 25;
+
+        state.masterFx[0].type = MasterEffects::Type::filter;
+        state.masterFx[1].type = MasterEffects::Type::plugin;
+        state.masterFx[1].pluginId = "VST3-Room-1a2b3c4d-5e6f7a8b";
+        state.masterFx[1].pluginName = "Room";
+        state.masterFx[1].pluginState = juce::MemoryBlock ("opaque state", 12).toBase64Encoding();
+        state.masterFx[1].pluginParamIndex = { 7, 3 };
+
+        for (size_t fx = 0; fx < MasterEffects::numSlots; ++fx)
+            for (size_t t = 0; t < MasterEffects::numTypes; ++t)
+            {
+                state.masterFx[fx].wet[t] = 0.11f + 0.1f * (float) (fx * 3 + t);
+
+                for (size_t p = 0; p < MasterEffects::numParams; ++p)
+                    state.masterFx[fx].params[t][p] = 0.07f + 0.05f * (float) (fx * 6 + t * 2 + p);
+            }
 
         for (int slot = 0; slot < Sampler::numSlots; ++slot)
         {
@@ -106,6 +123,23 @@ namespace
 
         for (size_t slot = 0; slot < Sampler::numSlots; ++slot)
             REQUIRE_THAT (a.samplerGains[slot], WithinAbs (b.samplerGains[slot], 1.0e-4f));
+
+        for (size_t fx = 0; fx < MasterEffects::numSlots; ++fx)
+        {
+            REQUIRE (a.masterFx[fx].type == b.masterFx[fx].type);
+            REQUIRE (a.masterFx[fx].pluginId == b.masterFx[fx].pluginId);
+            REQUIRE (a.masterFx[fx].pluginName == b.masterFx[fx].pluginName);
+            REQUIRE (a.masterFx[fx].pluginState == b.masterFx[fx].pluginState);
+            REQUIRE (a.masterFx[fx].pluginParamIndex == b.masterFx[fx].pluginParamIndex);
+
+            for (size_t t = 0; t < MasterEffects::numTypes; ++t)
+            {
+                REQUIRE_THAT (a.masterFx[fx].wet[t], WithinAbs (b.masterFx[fx].wet[t], 1.0e-4f));
+
+                for (size_t p = 0; p < MasterEffects::numParams; ++p)
+                    REQUIRE_THAT (a.masterFx[fx].params[t][p], WithinAbs (b.masterFx[fx].params[t][p], 1.0e-4f));
+            }
+        }
     }
 
     /** A scratch file that takes itself away again. */
@@ -356,4 +390,65 @@ TEST_CASE ("a nonsense recording format falls back to WAV", "[settings][recorder
     // 320 is the top of what MPEG-1 layer III carries, so a larger number in
     // the file is clamped rather than handed to LAME.
     REQUIRE (state.recording.mp3Bitrate == 320);
+}
+
+TEST_CASE ("master effects reach the mixer, and never come back switched on", "[settings][masterfx]")
+{
+    Mixer mixer;
+    Sampler sampler;
+
+    mixer.getMasterEffects().setEnabled (0, true);
+
+    SessionState captured;
+    captured.captureFrom (mixer, sampler);
+
+    const auto state = populated();
+    Mixer restored;
+    restored.getMasterEffects().setType (0, MasterEffects::Type::reverb);
+    state.applyTo (restored, sampler);
+
+    const auto& fx = restored.getMasterEffects();
+
+    for (int slot = 0; slot < MasterEffects::numSlots; ++slot)
+    {
+        REQUIRE (fx.getType (slot) == state.masterFx[(size_t) slot].type);
+        REQUIRE_FALSE (fx.isEnabled (slot));
+
+        for (int t = 0; t < MasterEffects::numTypes; ++t)
+        {
+            const auto type = (MasterEffects::Type) t;
+            REQUIRE_THAT (fx.getWetFor (slot, type), WithinAbs (state.masterFx[(size_t) slot].wet[(size_t) t], 1.0e-4f));
+
+            for (int p = 0; p < MasterEffects::numParams; ++p)
+                REQUIRE_THAT (fx.getParamFor (slot, type, p),
+                              WithinAbs (state.masterFx[(size_t) slot].params[(size_t) t][(size_t) p], 1.0e-4f));
+        }
+    }
+
+    // Nor does the JSON say anything about it.
+    REQUIRE_FALSE (juce::JSON::toString (captured.toVar()).contains ("enabled"));
+}
+
+TEST_CASE ("a settings file from before master effects loads their defaults", "[settings][masterfx]")
+{
+    const auto older = juce::JSON::parse (R"({ "master_gain": 0.5 })");
+    const auto state = SessionState::fromVar (older);
+    const auto defaults = SessionState::defaultMasterFx();
+
+    for (size_t slot = 0; slot < MasterEffects::numSlots; ++slot)
+    {
+        REQUIRE (state.masterFx[slot].type == defaults[slot].type);
+        REQUIRE (state.masterFx[slot].wet == defaults[slot].wet);
+        REQUIRE (state.masterFx[slot].params == defaults[slot].params);
+    }
+
+    // And a half-written one keeps what it has and defaults the rest.
+    const auto partial = juce::JSON::parse (
+        R"({ "master_fx": [ { "type": "filter", "filter": { "wet": 0.25 } }, { "type": "nonsense" } ] })");
+    const auto patched = SessionState::fromVar (partial);
+
+    REQUIRE (patched.masterFx[0].type == MasterEffects::Type::filter);
+    REQUIRE_THAT (patched.masterFx[0].wet[2], WithinAbs (0.25f, 1.0e-6f));
+    REQUIRE (patched.masterFx[0].params[2] == defaults[0].params[2]);
+    REQUIRE (patched.masterFx[1].type == defaults[1].type);
 }

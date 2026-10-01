@@ -137,8 +137,14 @@ public:
 
     /** Matches one deck's tempo and beat phase to another. Returns false when
         either deck has no usable beat grid, which is the honest answer for
-        material the analyser could not read. */
-    bool syncDeck (int followerIndex, int leaderIndex);
+        material the analyser could not read.
+
+        Tempos are matched at the nearest half, whole or double time, since
+        beat detection often lands an octave out. With `maxStretch` above
+        zero, a match needing more than that fraction of stretch is refused
+        and nothing is changed; the auto crossfader uses it, so it never
+        plays a track far from its own speed to make a mix work. */
+    bool syncDeck (int followerIndex, int leaderIndex, double maxStretch = 0.0);
 
     /** The deck a sync should follow, or -1 when there is nothing to follow.
 
@@ -149,6 +155,45 @@ public:
 
     /** The deck's analysed tempo scaled by its tempo fader, or 0 with no grid. */
     double getEffectiveBpm (int deckIndex) const;
+
+    /** The deck whose tempo the master effects follow, or -1 with none.
+
+        The one the room is hearing: playing, with a grid, and loudest by its
+        fader and the crossfader. Whoever is playing into the mix is who a
+        master echo is meant to lock to, not whichever deck was touched last. */
+    int findMasterTempoDeck() const;
+
+    /** What the room is hearing, for the visuals to name: the loudest playing
+        deck by its fader and the crossfader, with or without a beat grid.
+        Empty when nothing is playing. */
+    juce::String getNowPlayingTitle() const;
+
+    /** The deck `getNowPlayingTitle` names, or -1. */
+    int findNowPlayingDeck() const { return findLoudestPlayingDeck (false); }
+
+    /** How much of a deck reaches the room: its fader times its side of the
+        crossfader, 0 to 1, whether or not it is playing. */
+    float getDeckAudibility (int deckIndex) const;
+
+    /** What the visuals need of a deck, from atomics only, so the render
+        thread can ask thirty times a second. */
+    struct DeckStatus
+    {
+        bool loaded = false;
+        bool playing = false;
+        float audibility = 0.0f;
+        double positionSeconds = 0.0;
+    };
+
+    DeckStatus getDeckStatus (int deckIndex) const;
+
+    /** The deck most recently loaded that is waiting its turn while another
+        is on air: loaded, not playing, and not the one the room hears. -1
+        when nothing is on air or nothing is waiting. */
+    int findNextUpDeck() const;
+
+    /** Title of `findNextUpDeck`, or empty. */
+    juce::String getComingUpTitle() const;
 
     bool isDeckLoading (int deckIndex) const noexcept
     {
@@ -298,6 +343,9 @@ private:
         the timer rather than per block: a tempo fader does not move fast enough
         for a fiftieth of a second to matter. */
     void updateEchoTimes();
+
+    /** The playing deck the room hears most, or -1. */
+    int findLoudestPlayingDeck (bool requireBeatGrid) const;
 
     /** Asks the open device for a buffer size a DJ can play on, if it is
         sitting on something far larger. Some backends open at a quarter of a
