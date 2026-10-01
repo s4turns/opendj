@@ -2,7 +2,7 @@
     Install what OpenDJ needs to build on Windows, so a fresh machine can go
     from nothing to a working build with one command.
 
-    Usage:  pwsh scripts/setup-windows.ps1 [-Check] [-Yes] [-DryRun]
+    Usage:  pwsh scripts/setup-windows.ps1 [-Check] [-Yes] [-DryRun] [-SkipStems]
 
     What a build needs:
       * Visual Studio 2022 Build Tools with the C++ workload: the MSVC x64
@@ -12,6 +12,11 @@
       * git, because CMake clones JUCE at configure time.
     And to run RTMP broadcasts rather than build:
       * ffmpeg with libx264 (Gyan.FFmpeg), which the broadcaster launches.
+    And for stem separation, which a build without them simply goes without:
+      * Intel's OpenVINO runtime (winget), which runs the model. build.ps1 finds
+        it and copies its DLLs next to OpenDJ.exe, so it needs no PATH entry.
+      * The htdemucs model, about 105 MB from Intel/demucs-openvino on Hugging
+        Face (MIT licence), into ~/.local/share/opendj/models.
     Everything else is fetched by CMake during the build.
 
     Not installed here: Steinberg's ASIO SDK. Its licence forbids
@@ -21,18 +26,29 @@
         -Check    Report what is present and what is missing; install nothing.
         -Yes      Do not ask before installing. The Build Tools are several GB.
         -DryRun   Print the install commands instead of running them.
-        -ForceMissing  Treat these as missing ('git', 'msvc', 'ffmpeg'); for testing.
+        -SkipStems  Leave out OpenVINO and the model: neither is checked nor installed.
+        -ForceMissing  Treat these as missing ('git', 'msvc', 'ffmpeg', 'openvino',
+                       'stemmodel'); for testing.
 #>
 [CmdletBinding()]
 param(
     [switch]$Check,
     [switch]$Yes,
     [switch]$DryRun,
-    [ValidateSet('git', 'msvc', 'ffmpeg')]
+    [switch]$SkipStems,
     [string[]]$ForceMissing = @()
 )
 
 $ErrorActionPreference = 'Stop'
+
+# `pwsh -File` hands a comma list over as one string, so it is split here, and
+# checked here for the same reason: a ValidateSet would reject the whole list.
+$ForceMissing = @($ForceMissing | ForEach-Object { $_ -split ',' } | Where-Object { $_ })
+foreach ($name in $ForceMissing) {
+    if ($name -notin 'git', 'msvc', 'ffmpeg', 'openvino', 'stemmodel') {
+        throw "Unknown -ForceMissing value '$name'. Use git, msvc, ffmpeg, openvino or stemmodel."
+    }
+}
 
 function Test-Git { Get-Command git -ErrorAction SilentlyContinue }
 
@@ -44,6 +60,55 @@ function Test-Ffmpeg {
     if (Test-Path (Join-Path $winget 'Linksfmpeg.exe')) { return $true }
     [bool](Get-ChildItem (Join-Path $winget 'Packages') -Filter 'Gyan.FFmpeg*' -ErrorAction SilentlyContinue |
         Get-ChildItem -Recurse -Filter ffmpeg.exe -ErrorAction SilentlyContinue | Select-Object -First 1)
+}
+
+# The OpenVINO package from winget is an MSIX, so it is found by asking Windows
+# for the package rather than by looking on PATH.
+function Test-OpenVino {
+    [bool](Get-AppxPackage -Name 'Intel.OpenVINOToolkit*' -ErrorAction SilentlyContinue)
+}
+
+# The folder and the file names are the ones StemModel looks for, and the sizes
+# are the published ones, so a download that stopped halfway is not mistaken
+# for a model.
+$modelFolder = Join-Path $HOME '.local\share\opendj\models'
+$modelBase = 'https://huggingface.co/Intel/demucs-openvino/resolve/main/htdemucs_v4'
+$modelFiles = @(
+    @{ Name = 'htdemucs_v4.xml'; Remote = 'htdemucs_fwd.xml'; Bytes = 1477599 },
+    @{ Name = 'htdemucs_v4.bin'; Remote = 'htdemucs_fwd.bin'; Bytes = 104552746 }
+)
+
+function Test-StemModel {
+    foreach ($f in $modelFiles) {
+        $path = Join-Path $modelFolder $f.Name
+        if (-not (Test-Path $path) -or (Get-Item $path).Length -ne $f.Bytes) { return $false }
+    }
+    $true
+}
+
+function Install-StemModel {
+    New-Item -ItemType Directory -Force $modelFolder | Out-Null
+
+    # The progress bar makes a download of this size several times slower.
+    $previous = $ProgressPreference
+    $ProgressPreference = 'SilentlyContinue'
+
+    try {
+        foreach ($f in $modelFiles) {
+            $path = Join-Path $modelFolder $f.Name
+            Write-Host "Downloading $($f.Name) ($([math]::Round($f.Bytes / 1e6, 1)) MB)" -ForegroundColor Cyan
+            Invoke-WebRequest -Uri "$modelBase/$($f.Remote)" -OutFile "$path.part" -UseBasicParsing
+
+            if ((Get-Item "$path.part").Length -ne $f.Bytes) {
+                Remove-Item "$path.part"
+                throw "$($f.Name) came down the wrong size. Run this again."
+            }
+
+            Move-Item -Force "$path.part" $path
+        }
+    } finally {
+        $ProgressPreference = $previous
+    }
 }
 
 function Get-VsInstall {
@@ -69,8 +134,17 @@ if ($ForceMissing -contains 'msvc' -or -not (Get-VsInstall)) {
     $missing['msvc'] = 'Visual Studio 2022 Build Tools (C++ workload, CMake, Ninja, Windows SDK)'
 }
 
-Write-Host 'Build requirements:' -ForegroundColor Cyan
-foreach ($item in @(@('git', 'git'), @('msvc', 'Visual Studio 2022 Build Tools (C++ workload)'), @('ffmpeg', 'ffmpeg (RTMP broadcast)'))) {
+$items = @(@('git', 'git'), @('msvc', 'Visual Studio 2022 Build Tools (C++ workload)'), @('ffmpeg', 'ffmpeg (RTMP broadcast)'))
+
+if (-not $SkipStems) {
+    if ($ForceMissing -contains 'openvino' -or -not (Test-OpenVino)) { $missing['openvino'] = 'OpenVINO' }
+    if ($ForceMissing -contains 'stemmodel' -or -not (Test-StemModel)) { $missing['stemmodel'] = 'stem model' }
+    $items += , @('openvino', 'OpenVINO runtime (stem separation)')
+    $items += , @('stemmodel', 'htdemucs model (stem separation)')
+}
+
+Write-Host 'Requirements:' -ForegroundColor Cyan
+foreach ($item in $items) {
     if ($missing.Contains($item[0])) {
         Write-Host "  [missing] $($item[1])" -ForegroundColor Yellow
     } else {
@@ -101,6 +175,9 @@ if ($missing.Contains('git')) {
 if ($missing.Contains('ffmpeg')) {
     $commands += , (@('install', '--id', 'Gyan.FFmpeg') + $common)
 }
+if ($missing.Contains('openvino')) {
+    $commands += , (@('install', '--id', 'Intel.OpenVINOToolkit.2026.3.0') + $common)
+}
 if ($missing.Contains('msvc')) {
     $commands += , (@('install', '--id', 'Microsoft.VisualStudio.2022.BuildTools') + $common +
                     @('--override', $vsArgs))
@@ -108,6 +185,9 @@ if ($missing.Contains('msvc')) {
 
 if ($DryRun) {
     foreach ($c in $commands) { Write-Host "winget $($c -join ' ')" }
+    if ($missing.Contains('stemmodel')) {
+        foreach ($f in $modelFiles) { Write-Host "download $modelBase/$($f.Remote) -> $(Join-Path $modelFolder $f.Name)" }
+    }
     return
 }
 
@@ -122,18 +202,21 @@ if (-not $Yes) {
     if ([Console]::IsInputRedirected) {
         throw 'Missing requirements and no terminal to ask on. Re-run with -Yes to install them.'
     }
-    $answer = Read-Host 'Install the missing requirements with winget? The Build Tools are several GB. [Y/n]'
+    $answer = Read-Host 'Install the missing requirements? The Build Tools are several GB, the stem model 105 MB. [Y/n]'
     if ($answer -and $answer -notmatch '^(y|yes)$') { throw 'Cancelled.' }
 }
 
 # The Visual Studio installer needs administrator rights. Ask once, here, rather
 # than letting it fail halfway through with an error about the workload.
 $principal = [Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
-if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+$needsAdmin = $missing.Contains('git') -or $missing.Contains('msvc') -or $missing.Contains('ffmpeg')
+if ($needsAdmin -and -not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     Write-Host 'Administrator rights are needed; accept the UAC prompt.' -ForegroundColor Yellow
     $shell = (Get-Process -Id $PID).Path
     $relaunch = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath, '-Yes')
-    foreach ($m in $ForceMissing) { $relaunch += @('-ForceMissing', $m) }
+    # One parameter with a comma list: a parameter given twice is an error.
+    if ($ForceMissing.Count -gt 0) { $relaunch += @('-ForceMissing', ($ForceMissing -join ',')) }
+    if ($SkipStems) { $relaunch += '-SkipStems' }
     $proc = Start-Process -FilePath $shell -ArgumentList $relaunch -Verb RunAs -Wait -PassThru
     Update-SessionPath
     if ($proc.ExitCode -ne 0) { throw "The elevated installer exited with code $($proc.ExitCode)." }
@@ -167,9 +250,15 @@ if ($missing.Contains('msvc') -and -not (Get-VsInstall)) {
 
 Update-SessionPath
 
+if ($missing.Contains('stemmodel')) { Install-StemModel }
+
 $stillMissing = @()
 if (-not (Test-Git)) { $stillMissing += 'git' }
 if (-not (Test-Ffmpeg)) { $stillMissing += 'ffmpeg' }
+if (-not $SkipStems) {
+    if (-not (Test-OpenVino)) { $stillMissing += 'OpenVINO' }
+    if (-not (Test-StemModel)) { $stillMissing += 'the stem model' }
+}
 if (-not (Get-VsInstall)) { $stillMissing += 'Visual Studio Build Tools (C++ workload)' }
 
 if ($stillMissing.Count -gt 0) {
