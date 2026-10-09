@@ -452,7 +452,9 @@ void MasterFxComponent::closeEditor (int slot)
 
 void MasterFxComponent::setPluginDirectory (const juce::String& directory)
 {
-    vstPluginDirectory = directory;
+    // A plugin picked by mistake for its folder, here or in older settings.
+    vstPluginDirectory = directory.isNotEmpty() ? PluginHost::folderToScanFor (juce::File (directory)).getFullPathName()
+                                                : juce::String();
 }
 
 void MasterFxComponent::choosePluginFolder()
@@ -461,7 +463,7 @@ void MasterFxComponent::choosePluginFolder()
                                 ? juce::File (vstPluginDirectory)
                                 : juce::File::getSpecialLocation (juce::File::userHomeDirectory));
 
-    folderChooser = std::make_unique<juce::FileChooser> ("Choose VST plugin directory", start);
+    folderChooser = std::make_unique<juce::FileChooser> ("Choose the folder your VST3 plugins are in", start);
 
     folderChooser->launchAsync (juce::FileBrowserComponent::openMode
                                     | juce::FileBrowserComponent::canSelectDirectories,
@@ -474,7 +476,7 @@ void MasterFxComponent::choosePluginFolder()
             setPluginDirectory (picked.getFullPathName());
 
             if (onPluginDirectoryChanged != nullptr)
-                onPluginDirectoryChanged (picked.getFullPathName());
+                onPluginDirectoryChanged (vstPluginDirectory);
 
             host.clearList();
             scanForPlugins();

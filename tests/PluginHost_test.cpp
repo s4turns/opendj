@@ -142,3 +142,24 @@ TEST_CASE ("Scanning a given directory does not scan default folders", "[plugin]
     CHECK (host.scan (juce::FileSearchPath (custom.getFullPathName())) == 0);
     CHECK (host.getEffects().isEmpty());
 }
+
+TEST_CASE ("Picking a plugin instead of its folder scans the folder it is in", "[plugin][host]")
+{
+    ScratchFolder scratch;
+
+    const auto vst3 = scratch.folder.getChildFile ("vst3");
+    const auto bundle = vst3.getChildFile ("Room.vst3");
+    const auto inner = bundle.getChildFile ("Contents").getChildFile ("x86_64-win");
+    REQUIRE (inner.createDirectory());
+    REQUIRE (inner.getChildFile ("Room.vst3").create());
+    REQUIRE (vst3.getChildFile ("Echo.vst3").create());
+
+    // The folder holding the plugins is taken as it is.
+    CHECK (opendj::PluginHost::folderToScanFor (vst3) == vst3);
+
+    // A bundle, anything inside one, or a single-file plugin means its folder.
+    CHECK (opendj::PluginHost::folderToScanFor (bundle) == vst3);
+    CHECK (opendj::PluginHost::folderToScanFor (inner) == vst3);
+    CHECK (opendj::PluginHost::folderToScanFor (inner.getChildFile ("Room.vst3")) == vst3);
+    CHECK (opendj::PluginHost::folderToScanFor (vst3.getChildFile ("Echo.vst3")) == vst3);
+}
