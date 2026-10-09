@@ -55,6 +55,22 @@ void PluginHost::saveList() const
         xml->writeTo (listFile());
 }
 
+juce::File PluginHost::folderToScanFor (const juce::File& picked)
+{
+    // The outermost .vst3 wins: on Windows a bundle holds another .vst3 file
+    // in Contents/x86_64-win, and its folder would hold only that one plugin.
+    juce::File plugin;
+
+    for (auto f = picked; f != f.getParentDirectory(); f = f.getParentDirectory())
+        if (f.hasFileExtension (".vst3"))
+            plugin = f;
+
+    if (plugin != juce::File())
+        return plugin.getParentDirectory();
+
+    return picked.isDirectory() ? picked : picked.getParentDirectory();
+}
+
 void PluginHost::clearList()
 {
     knownPlugins.clear();

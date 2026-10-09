@@ -41,6 +41,13 @@ public:
     /** Every effect found so far, instruments left out, sorted by maker and name. */
     juce::Array<juce::PluginDescription> getEffects() const;
 
+    /** The folder to scan when somebody picks this one. A VST3 is often a
+        folder itself (`Room.vst3/Contents/...`), and choosing it is the obvious
+        thing to do, but the scan only looks inside a folder and the files in a
+        bundle are not named .vst3 on Linux or macOS. So a pick that is, or is
+        inside, a .vst3 means the folder holding that plugin. */
+    static juce::File folderToScanFor (const juce::File& picked);
+
     /** Clears the list of known plugins and writes the empty list to disk. */
     void clearList();
 
