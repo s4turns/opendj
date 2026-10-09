@@ -35,6 +35,12 @@ public:
     bool restorePlugin (int slot, const juce::String& identifier, const juce::String& name,
                         const juce::String& base64State);
 
+    void setPluginDirectory (const juce::String& directory);
+    juce::String getPluginDirectory() const noexcept { return vstPluginDirectory; }
+
+    /** Called when the user chooses a VST plugin folder from the UI. */
+    std::function<void (const juce::String&)> onPluginDirectoryChanged;
+
     /** Something worth a line in the status bar. */
     std::function<void (const juce::String&)> onMessage;
 
@@ -66,11 +72,14 @@ private:
     void removePlugin (int slot);
     void openEditor (int slot);
     void closeEditor (int slot);
+    void choosePluginFolder();
     void scanForPlugins();
     void say (const juce::String& message);
 
     MasterEffects& effects;
     PluginHost& host;
+    juce::String vstPluginDirectory;
+    std::unique_ptr<juce::FileChooser> folderChooser;
     std::array<Unit, MasterEffects::numSlots> units;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MasterFxComponent)

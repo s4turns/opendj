@@ -97,6 +97,9 @@ struct SessionState
         effect running that nobody can see was left on. */
     std::array<MasterFxSlotState, MasterEffects::numSlots> masterFx = defaultMasterFx();
 
+    /** Where to look for VST3 plugins. When empty, no plugins are scanned. */
+    juce::String vstPluginDirectory;
+
     /** The mic's level, talkover and where it is heard. Whether it is on is
         deliberately not kept: an open mic in front of the speakers howls, and
         nobody should get that from opening the application. */

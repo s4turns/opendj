@@ -104,3 +104,41 @@ TEST_CASE ("A plugin that killed the last start-up is named once", "[plugin][hos
     CHECK (next.takeCrashedPluginName() == "Bad Delay");
     CHECK (next.takeCrashedPluginName().isEmpty());
 }
+
+TEST_CASE ("Clearing the plugin list removes known plugins and saves the change", "[plugin][host]")
+{
+    ScratchFolder scratch;
+
+    juce::KnownPluginList list;
+    juce::PluginDescription effect;
+    effect.name = "Room";
+    effect.manufacturerName = "Acme";
+    effect.pluginFormatName = "VST3";
+    effect.fileOrIdentifier = "C:/nowhere/Room.vst3";
+    effect.uniqueId = 1234;
+    list.addType (effect);
+    REQUIRE (list.createXml()->writeTo (scratch.folder.getChildFile ("plugins.xml")));
+
+    {
+        opendj::PluginHost host (scratch.folder);
+        REQUIRE (host.getEffects().size() == 1);
+
+        host.clearList();
+        CHECK (host.getEffects().isEmpty());
+    }
+
+    opendj::PluginHost next (scratch.folder);
+    CHECK (next.getEffects().isEmpty());
+}
+
+TEST_CASE ("Scanning a given directory does not scan default folders", "[plugin][host]")
+{
+    ScratchFolder scratch;
+    opendj::PluginHost host (scratch.folder);
+
+    const auto custom = scratch.folder.getChildFile ("custom_vst");
+    custom.createDirectory();
+
+    CHECK (host.scan (juce::FileSearchPath (custom.getFullPathName())) == 0);
+    CHECK (host.getEffects().isEmpty());
+}

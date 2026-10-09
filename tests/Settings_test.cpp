@@ -48,6 +48,7 @@ namespace
         state.recording.format = RecordingFormat::flac;
         state.recording.mp3Bitrate = 192;
         state.recording.folder = "/music/sets";
+        state.vstPluginDirectory = "/music/vst3";
 
         state.rtmp.server = "rtmp://live.twitch.tv/app";
         state.rtmp.streamKey = "live_123_abc";
@@ -106,6 +107,7 @@ namespace
         REQUIRE (a.recording.format == b.recording.format);
         REQUIRE (a.recording.mp3Bitrate == b.recording.mp3Bitrate);
         REQUIRE (a.recording.folder == b.recording.folder);
+        REQUIRE (a.vstPluginDirectory == b.vstPluginDirectory);
 
         REQUIRE (a.rtmp.server == b.rtmp.server);
         REQUIRE (a.rtmp.streamKey == b.rtmp.streamKey);
