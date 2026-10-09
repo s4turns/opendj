@@ -41,15 +41,21 @@ public:
     /** Every effect found so far, instruments left out, sorted by maker and name. */
     juce::Array<juce::PluginDescription> getEffects() const;
 
+    /** Clears the list of known plugins and writes the empty list to disk. */
+    void clearList();
+
     /** Looks for plugins in the given folders, and in the usual VST3 folders
         when told to. Blocks until done or until shouldStop is set; adds what it
         finds to the list and saves the list. Returns the number found. */
-    int scan (const juce::FileSearchPath& folders, bool includeDefaultFolders,
+    int scan (const juce::FileSearchPath& folders, bool includeDefaultFolders = false,
               const std::atomic<bool>* shouldStop = nullptr);
 
     /** The same on a thread of its own, reporting to the message thread with
         how many effects are known and which files failed. Ignored while a scan
         is already running. */
+    void scanAsync (const juce::FileSearchPath& folders,
+                    std::function<void (int effectsKnown, juce::StringArray failedFiles)> onDone,
+                    bool includeDefaultFolders = false);
     void scanAsync (std::function<void (int effectsKnown, juce::StringArray failedFiles)> onDone);
     bool isScanning() const noexcept { return scanning.load(); }
 

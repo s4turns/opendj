@@ -382,6 +382,9 @@ juce::var SessionState::toVar() const
 
     root->setProperty ("master_fx", fxSlots);
 
+    if (vstPluginDirectory.isNotEmpty())
+        root->setProperty ("vst_plugin_directory", vstPluginDirectory);
+
     root->setProperty ("sampler_gain", samplerGain);
     root->setProperty ("sampler_cue", samplerCue);
     root->setProperty ("sampler_files", files);
@@ -530,6 +533,8 @@ SessionState SessionState::fromVar (const juce::var& source)
                     slot.pluginParamIndex[(size_t) p] = juce::jmax (0, (int) value);
         }
     }
+
+    state.vstPluginDirectory = text (source, "vst_plugin_directory");
 
     state.samplerGain = (float) number (source, "sampler_gain", state.samplerGain, 0.0, 1.0);
     state.samplerCue = flag (source, "sampler_cue", state.samplerCue);

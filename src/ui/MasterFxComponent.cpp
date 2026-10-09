@@ -211,7 +211,7 @@ void MasterFxComponent::showPluginMenu (int slot)
     auto* plugin = effects.getPlugin (slot);
     juce::PopupMenu menu;
 
-    constexpr int openEditorId = 1, scanId = 2, removeId = 3;
+    constexpr int openEditorId = 1, scanId = 2, removeId = 3, chooseFolderId = 4;
     constexpr int knobBase = 1000;     // + knob * 10000 + parameter
     constexpr int pluginBase = 100000; // + index into the effect list
 
@@ -265,11 +265,25 @@ void MasterFxComponent::showPluginMenu (int slot)
     flush();
 
     if (effectsFound.isEmpty())
-        menu.addItem (-1, host.isScanning() ? "Scanning for plugins..." : "No plugins found yet", false);
+    {
+        if (host.isScanning())
+            menu.addItem (-1, "Scanning for plugins...", false);
+        else if (vstPluginDirectory.isEmpty())
+            menu.addItem (-1, "No VST folder chosen", false);
+        else
+            menu.addItem (-1, "No plugins found in folder", false);
+    }
     else
+    {
         menu.addSubMenu (plugin != nullptr ? "Change plugin" : "Choose a plugin", choose);
+    }
 
-    menu.addItem (scanId, "Scan for plugins", ! host.isScanning());
+    menu.addItem (chooseFolderId,
+                  vstPluginDirectory.isEmpty() ? "Choose VST folder..." : "Change VST folder...",
+                  ! host.isScanning());
+
+    if (vstPluginDirectory.isNotEmpty())
+        menu.addItem (scanId, "Rescan VST folder", ! host.isScanning());
 
     if (plugin != nullptr)
         menu.addItem (removeId, "Remove plugin");
@@ -291,6 +305,8 @@ void MasterFxComponent::showPluginMenu (int slot)
             self.openEditor (slot);
         else if (result == scanId)
             self.scanForPlugins();
+        else if (result == chooseFolderId)
+            self.choosePluginFolder();
         else if (result == removeId)
             self.removePlugin (slot);
         else if (result >= pluginBase && result - pluginBase < effectsFound.size())
@@ -434,11 +450,50 @@ void MasterFxComponent::closeEditor (int slot)
     units[(size_t) slot].editorWindow.reset();
 }
 
+void MasterFxComponent::setPluginDirectory (const juce::String& directory)
+{
+    vstPluginDirectory = directory;
+}
+
+void MasterFxComponent::choosePluginFolder()
+{
+    const juce::File start (vstPluginDirectory.isNotEmpty()
+                                ? juce::File (vstPluginDirectory)
+                                : juce::File::getSpecialLocation (juce::File::userHomeDirectory));
+
+    folderChooser = std::make_unique<juce::FileChooser> ("Choose VST plugin directory", start);
+
+    folderChooser->launchAsync (juce::FileBrowserComponent::openMode
+                                    | juce::FileBrowserComponent::canSelectDirectories,
+                                [this] (const juce::FileChooser& fc)
+    {
+        const auto picked = fc.getResult();
+
+        if (picked.isDirectory())
+        {
+            setPluginDirectory (picked.getFullPathName());
+
+            if (onPluginDirectoryChanged != nullptr)
+                onPluginDirectoryChanged (picked.getFullPathName());
+
+            host.clearList();
+            scanForPlugins();
+        }
+    });
+}
+
 void MasterFxComponent::scanForPlugins()
 {
-    say ("Scanning for VST3 plugins...");
+    if (vstPluginDirectory.isEmpty())
+    {
+        choosePluginFolder();
+        return;
+    }
 
-    host.scanAsync ([safe = juce::Component::SafePointer<MasterFxComponent> (this)] (int count, juce::StringArray failed)
+    say ("Scanning for VST3 plugins in " + vstPluginDirectory + "...");
+
+    host.scanAsync (juce::FileSearchPath (vstPluginDirectory),
+                    [safe = juce::Component::SafePointer<MasterFxComponent> (this)] (int count, juce::StringArray failed)
     {
         if (safe == nullptr)
             return;
@@ -449,7 +504,8 @@ void MasterFxComponent::scanForPlugins()
             message << ", " << failed.size() << " left out after failing to load";
 
         safe->say (message);
-    });
+    },
+    false);
 }
 
 void MasterFxComponent::refresh()

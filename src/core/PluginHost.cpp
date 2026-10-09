@@ -55,6 +55,12 @@ void PluginHost::saveList() const
         xml->writeTo (listFile());
 }
 
+void PluginHost::clearList()
+{
+    knownPlugins.clear();
+    saveList();
+}
+
 int PluginHost::scan (const juce::FileSearchPath& folders, bool includeDefaultFolders,
                       const std::atomic<bool>* shouldStop)
 {
@@ -84,7 +90,9 @@ int PluginHost::scan (const juce::FileSearchPath& folders, bool includeDefaultFo
     return knownPlugins.getNumTypes() - before;
 }
 
-void PluginHost::scanAsync (std::function<void (int, juce::StringArray)> onDone)
+void PluginHost::scanAsync (const juce::FileSearchPath& folders,
+                            std::function<void (int, juce::StringArray)> onDone,
+                            bool includeDefaultFolders)
 {
     if (scanning.exchange (true))
         return;
@@ -94,9 +102,9 @@ void PluginHost::scanAsync (std::function<void (int, juce::StringArray)> onDone)
 
     stopScan = false;
 
-    scanThread = std::thread ([this, onDone = std::move (onDone)]
+    scanThread = std::thread ([this, folders, includeDefaultFolders, onDone = std::move (onDone)]
     {
-        scan ({}, true, &stopScan);
+        scan (folders, includeDefaultFolders, &stopScan);
 
         // A file that crashed a scan stays in the pedal file's blacklist; the
         // rest of the failures are worth telling somebody about.
@@ -110,6 +118,11 @@ void PluginHost::scanAsync (std::function<void (int, juce::StringArray)> onDone)
                 onDone (count, failed);
         });
     });
+}
+
+void PluginHost::scanAsync (std::function<void (int, juce::StringArray)> onDone)
+{
+    scanAsync ({}, std::move (onDone), false);
 }
 
 std::unique_ptr<juce::AudioPluginInstance> PluginHost::createInstance (const juce::PluginDescription& description,
