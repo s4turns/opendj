@@ -96,9 +96,27 @@ MasterEffects::~MasterEffects()
     // By now the audio callback has stopped, so every holder is ours.
     for (auto& slot : slots)
     {
-        delete slot.incoming.exchange (nullptr);
-        delete slot.outgoing.exchange (nullptr);
-        delete slot.active;
+        if (auto* incoming = slot.incoming.exchange (nullptr))
+        {
+            if (incoming->processor != nullptr)
+                incoming->processor->releaseResources();
+            delete incoming;
+        }
+
+        if (auto* outgoing = slot.outgoing.exchange (nullptr))
+        {
+            if (outgoing->processor != nullptr)
+                outgoing->processor->releaseResources();
+            delete outgoing;
+        }
+
+        if (slot.active != nullptr)
+        {
+            if (slot.active->processor != nullptr)
+                slot.active->processor->releaseResources();
+            delete slot.active;
+            slot.active = nullptr;
+        }
     }
 }
 
@@ -171,8 +189,13 @@ float MasterEffects::getParamFor (int slot, Type type, int param) const noexcept
     // the plugin's own window is not undone by the knob the next time.
     if (type == Type::plugin && isValidSlot (slot) && isValidParam (param))
         if (auto* processor = getPlugin (slot))
-            if (auto* parameter = processor->getParameters()[getPluginParamIndex (slot, param)])
-                return parameter->getValue();
+        {
+            const auto& parameters = processor->getParameters();
+            const auto index = getPluginParamIndex (slot, param);
+            if (juce::isPositiveAndBelow (index, parameters.size()))
+                if (auto* parameter = parameters[index])
+                    return parameter->getValue();
+        }
 
     return isValidSlot (slot) && isValidParam (param)
         ? slots[(size_t) slot].params[indexOf (type)][param].load (std::memory_order_relaxed)
@@ -229,7 +252,12 @@ bool MasterEffects::setPlugin (int slot, std::unique_ptr<juce::AudioProcessor> p
     }
 
     // One the audio thread never picked up is still ours to delete.
-    delete s.incoming.exchange (holder, std::memory_order_acq_rel);
+    if (auto* unpicked = s.incoming.exchange (holder, std::memory_order_acq_rel))
+    {
+        if (unpicked->processor != nullptr)
+            unpicked->processor->releaseResources();
+        delete unpicked;
+    }
     return true;
 }
 
@@ -261,8 +289,13 @@ juce::String MasterEffects::getParamLabel (int slot, int param) const
 
     if (type == Type::plugin)
         if (auto* processor = getPlugin (slot))
-            if (auto* parameter = processor->getParameters()[getPluginParamIndex (slot, param)])
-                return parameter->getName (16);
+        {
+            const auto& parameters = processor->getParameters();
+            const auto index = getPluginParamIndex (slot, param);
+            if (juce::isPositiveAndBelow (index, parameters.size()))
+                if (auto* parameter = parameters[index])
+                    return parameter->getName (16);
+        }
 
     return getParamName (type, param);
 }
@@ -270,7 +303,12 @@ juce::String MasterEffects::getParamLabel (int slot, int param) const
 void MasterEffects::collectGarbage()
 {
     for (auto& slot : slots)
-        delete slot.outgoing.exchange (nullptr, std::memory_order_acq_rel);
+        if (auto* old = slot.outgoing.exchange (nullptr, std::memory_order_acq_rel))
+        {
+            if (old->processor != nullptr)
+                old->processor->releaseResources();
+            delete old;
+        }
 }
 
 //==============================================================================
@@ -591,8 +629,10 @@ void MasterEffects::processSlot (Slot& slot, juce::AudioBuffer<float>& buffer, i
 
                 if (value != slot.lastSentParam[p])
                 {
-                    if (auto* parameter = parameters[slot.pluginParamIndex[p].load (std::memory_order_relaxed)])
-                        parameter->setValue (value);
+                    const auto index = slot.pluginParamIndex[p].load (std::memory_order_relaxed);
+                    if (juce::isPositiveAndBelow (index, parameters.size()))
+                        if (auto* parameter = parameters[index])
+                            parameter->setValue (value);
 
                     slot.lastSentParam[p] = value;
                 }

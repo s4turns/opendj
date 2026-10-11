@@ -138,7 +138,7 @@ void PluginHost::scanAsync (const juce::FileSearchPath& folders,
 
 void PluginHost::scanAsync (std::function<void (int, juce::StringArray)> onDone)
 {
-    scanAsync ({}, std::move (onDone), false);
+    scanAsync ({}, std::move (onDone), true);
 }
 
 std::unique_ptr<juce::AudioPluginInstance> PluginHost::createInstance (const juce::PluginDescription& description,
@@ -159,14 +159,30 @@ std::unique_ptr<juce::AudioPluginInstance> PluginHost::createInstance (const juc
     // like are switched off rather than fed with nothing.
     instance->disableNonMainBuses();
 
-    juce::AudioProcessor::BusesLayout stereo;
-    stereo.inputBuses.add (juce::AudioChannelSet::stereo());
-    stereo.outputBuses.add (juce::AudioChannelSet::stereo());
+    auto layout = instance->getBusesLayout();
 
-    if (! instance->setBusesLayout (stereo))
+    if (layout.inputBuses.isEmpty() || layout.outputBuses.isEmpty())
     {
-        error = description.name + " is not a stereo effect";
+        error = description.name + " is not an audio effect";
         return nullptr;
+    }
+
+    if (layout.getNumChannels (true, 0) != 2 || layout.getNumChannels (false, 0) != 2)
+    {
+        layout.inputBuses.getReference (0) = juce::AudioChannelSet::stereo();
+        layout.outputBuses.getReference (0) = juce::AudioChannelSet::stereo();
+
+        for (int i = 1; i < layout.inputBuses.size(); ++i)
+            layout.inputBuses.getReference (i) = juce::AudioChannelSet::disabled();
+
+        for (int i = 1; i < layout.outputBuses.size(); ++i)
+            layout.outputBuses.getReference (i) = juce::AudioChannelSet::disabled();
+
+        if (! instance->setBusesLayout (layout))
+        {
+            error = description.name + " is not a stereo effect";
+            return nullptr;
+        }
     }
 
     return instance;
@@ -178,6 +194,13 @@ std::unique_ptr<juce::AudioPluginInstance> PluginHost::createInstance (const juc
 {
     if (auto description = knownPlugins.getTypeForIdentifierString (identifier))
         return createInstance (*description, sampleRate, blockSize, error);
+
+    for (const auto& desc : knownPlugins.getTypes())
+    {
+        const auto uidHex = juce::String::toHexString (desc.uniqueId);
+        if (identifier.endsWithIgnoreCase (uidHex) || identifier.containsIgnoreCase ("-" + desc.name + "-"))
+            return createInstance (desc, sampleRate, blockSize, error);
+    }
 
     error = "a plugin that is no longer installed";
     return nullptr;
