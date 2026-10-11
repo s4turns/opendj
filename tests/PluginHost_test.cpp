@@ -195,6 +195,16 @@ TEST_CASE ("Scanning dragonfly-reverb and creating instance", "[plugin][host][re
                 juce::AudioBuffer<float> buffer (2, 512);
                 buffer.clear();
                 masterEffects.process (buffer, 512);
+
+                auto* p = masterEffects.getPlugin (0);
+                auto* editor = p->createEditorAndMakeActive();
+                CHECK (editor != nullptr);
+                if (editor != nullptr)
+                {
+                    CHECK (editor->getWidth() > 0);
+                    CHECK (editor->getHeight() > 0);
+                    delete editor;
+                }
             }
         }
     }
