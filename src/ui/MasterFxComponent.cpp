@@ -50,7 +50,11 @@ namespace
             setUsingNativeTitleBar (true);
             setContentOwned (editor, true);
             setResizable (editor->isResizable(), false);
-            centreWithSize (getWidth(), getHeight());
+
+            const int w = juce::jmax (getWidth(), 400);
+            const int h = juce::jmax (getHeight(), 300);
+            setSize (w, h);
+            centreWithSize (w, h);
             setVisible (true);
         }
 
@@ -218,7 +222,7 @@ void MasterFxComponent::showPluginMenu (int slot)
     if (plugin != nullptr)
     {
         menu.addSectionHeader (plugin->getName());
-        menu.addItem (openEditorId, "Open its window");
+        menu.addItem (openEditorId, isEditorOpen (slot) ? "Bring window to front" : "Open plugin window");
 
         const auto& parameters = plugin->getParameters();
 
@@ -357,6 +361,7 @@ void MasterFxComponent::loadPlugin (int slot, const juce::PluginDescription& des
     unit.previousTypeId = pluginId;
     updateCaptions (slot);
     refresh();
+    openEditor (slot);
     say (description.name + " is in FX " + juce::String (slot + 1));
 }
 
@@ -423,8 +428,20 @@ void MasterFxComponent::removePlugin (int slot)
     refresh();
 }
 
+bool MasterFxComponent::isEditorOpen (int slot) const
+{
+    if (! juce::isPositiveAndBelow (slot, MasterEffects::numSlots))
+        return false;
+
+    const auto& window = units[(size_t) slot].editorWindow;
+    return window != nullptr && window->isVisible();
+}
+
 void MasterFxComponent::openEditor (int slot)
 {
+    if (! juce::isPositiveAndBelow (slot, MasterEffects::numSlots))
+        return;
+
     auto& unit = units[(size_t) slot];
     auto* plugin = effects.getPlugin (slot);
 
@@ -433,6 +450,7 @@ void MasterFxComponent::openEditor (int slot)
 
     if (unit.editorWindow != nullptr)
     {
+        unit.editorWindow->setVisible (true);
         unit.editorWindow->toFront (true);
         return;
     }
@@ -459,6 +477,9 @@ void MasterFxComponent::openEditor (int slot)
 
 void MasterFxComponent::closeEditor (int slot)
 {
+    if (! juce::isPositiveAndBelow (slot, MasterEffects::numSlots))
+        return;
+
     // The window owns the editor, and the editor tells its plugin as it goes.
     units[(size_t) slot].editorWindow.reset();
 }

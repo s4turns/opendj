@@ -44,6 +44,15 @@ public:
     /** Something worth a line in the status bar. */
     std::function<void (const juce::String&)> onMessage;
 
+    /** Opens the plugin's own window for the given slot, or brings it to the front. */
+    void openEditor (int slot);
+
+    /** Closes the plugin's window for the given slot. */
+    void closeEditor (int slot);
+
+    /** True when the plugin window for the given slot is currently open. */
+    bool isEditorOpen (int slot) const;
+
     void paint (juce::Graphics& g) override;
     void resized() override;
 
@@ -70,8 +79,6 @@ private:
     void showPluginMenu (int slot);
     void loadPlugin (int slot, const juce::PluginDescription& description);
     void removePlugin (int slot);
-    void openEditor (int slot);
-    void closeEditor (int slot);
     void choosePluginFolder();
     void scanForPlugins();
     void scanSystemPlugins();
