@@ -5,6 +5,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "core/PluginHost.h"
+#include "core/MasterEffects.h"
 
 namespace
 {
@@ -162,4 +163,39 @@ TEST_CASE ("Picking a plugin instead of its folder scans the folder it is in", "
     CHECK (opendj::PluginHost::folderToScanFor (inner) == vst3);
     CHECK (opendj::PluginHost::folderToScanFor (inner.getChildFile ("Room.vst3")) == vst3);
     CHECK (opendj::PluginHost::folderToScanFor (vst3.getChildFile ("Echo.vst3")) == vst3);
+}
+
+TEST_CASE ("Scanning dragonfly-reverb and creating instance", "[plugin][host][real]")
+{
+    ScratchFolder scratch;
+    opendj::PluginHost host (scratch.folder);
+    juce::File dragonflyFolder ("/home/myssy/work/opendj/dragonfly-reverb-3.2.10");
+    if (dragonflyFolder.isDirectory())
+    {
+        auto count = host.scan (juce::FileSearchPath (dragonflyFolder.getFullPathName()), false);
+        INFO ("Found: " << count);
+        auto effects = host.getEffects();
+        INFO ("Effects size: " << effects.size());
+        REQUIRE (! effects.isEmpty());
+        for (const auto& fx : effects)
+        {
+            INFO ("Effect name: " << fx.name.toStdString());
+            juce::String error;
+            auto instance = host.createInstance (fx, 48000.0, 512, error);
+            INFO ("Error: " << error.toStdString());
+            CHECK (instance != nullptr);
+            if (instance != nullptr)
+            {
+                opendj::MasterEffects masterEffects;
+                masterEffects.prepare ({ 48000.0, 512, 2 });
+                CHECK (masterEffects.setPlugin (0, std::move (instance)));
+                masterEffects.setType (0, opendj::MasterEffects::Type::plugin);
+                masterEffects.setEnabled (0, true);
+                masterEffects.setWet (0, 1.0f);
+                juce::AudioBuffer<float> buffer (2, 512);
+                buffer.clear();
+                masterEffects.process (buffer, 512);
+            }
+        }
+    }
 }

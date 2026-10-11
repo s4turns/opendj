@@ -124,6 +124,9 @@ public:
         then from the message thread; the engine's timer does. */
     void collectGarbage();
 
+    double getSampleRate() const noexcept { return sampleRate; }
+    int getBlockSize() const noexcept     { return preparedBlockSize; }
+
     //==========================================================================
     // Audio thread
     //==========================================================================

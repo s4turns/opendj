@@ -211,7 +211,7 @@ void MasterFxComponent::showPluginMenu (int slot)
     auto* plugin = effects.getPlugin (slot);
     juce::PopupMenu menu;
 
-    constexpr int openEditorId = 1, scanId = 2, removeId = 3, chooseFolderId = 4;
+    constexpr int openEditorId = 1, scanId = 2, removeId = 3, chooseFolderId = 4, scanDefaultsId = 5;
     constexpr int knobBase = 1000;     // + knob * 10000 + parameter
     constexpr int pluginBase = 100000; // + index into the effect list
 
@@ -278,6 +278,8 @@ void MasterFxComponent::showPluginMenu (int slot)
         menu.addSubMenu (plugin != nullptr ? "Change plugin" : "Choose a plugin", choose);
     }
 
+    menu.addItem (scanDefaultsId, "Scan system VST3 folders", ! host.isScanning());
+
     menu.addItem (chooseFolderId,
                   vstPluginDirectory.isEmpty() ? "Choose VST folder..." : "Change VST folder...",
                   ! host.isScanning());
@@ -305,6 +307,8 @@ void MasterFxComponent::showPluginMenu (int slot)
             self.openEditor (slot);
         else if (result == scanId)
             self.scanForPlugins();
+        else if (result == scanDefaultsId)
+            self.scanSystemPlugins();
         else if (result == chooseFolderId)
             self.choosePluginFolder();
         else if (result == removeId)
@@ -328,7 +332,7 @@ void MasterFxComponent::showPluginMenu (int slot)
 void MasterFxComponent::loadPlugin (int slot, const juce::PluginDescription& description)
 {
     juce::String error;
-    auto instance = host.createInstance (description, 48000.0, 512, error);
+    auto instance = host.createInstance (description, effects.getSampleRate(), effects.getBlockSize(), error);
 
     if (instance == nullptr)
     {
@@ -366,7 +370,7 @@ bool MasterFxComponent::restorePlugin (int slot, const juce::String& identifier,
     host.beginRiskyLoad (name);
 
     juce::String error;
-    auto instance = host.createInstance (identifier, 48000.0, 512, error);
+    auto instance = host.createInstance (identifier, effects.getSampleRate(), effects.getBlockSize(), error);
 
     if (instance != nullptr && base64State.isNotEmpty())
     {
@@ -382,11 +386,20 @@ bool MasterFxComponent::restorePlugin (int slot, const juce::String& identifier,
     {
         say ("FX " + juce::String (slot + 1) + " held " + (name.isNotEmpty() ? name : juce::String ("a plugin"))
              + ", which could not be loaded: " + error);
+
+        if (effects.getType (slot) == MasterEffects::Type::plugin)
+            effects.setType (slot, MasterEffects::Type::echo);
+
         return false;
     }
 
     if (! effects.setPlugin (slot, std::move (instance)))
+    {
+        if (effects.getType (slot) == MasterEffects::Type::plugin)
+            effects.setType (slot, MasterEffects::Type::echo);
+
         return false;
+    }
 
     updateCaptions (slot);
     refresh();
@@ -424,7 +437,7 @@ void MasterFxComponent::openEditor (int slot)
         return;
     }
 
-    auto* editor = plugin->createEditorIfNeeded();
+    auto* editor = plugin->createEditorAndMakeActive();
 
     // Some plugins have no window of their own; a plain list of sliders will
     // do for those.
@@ -478,7 +491,6 @@ void MasterFxComponent::choosePluginFolder()
             if (onPluginDirectoryChanged != nullptr)
                 onPluginDirectoryChanged (vstPluginDirectory);
 
-            host.clearList();
             scanForPlugins();
         }
     });
@@ -508,6 +520,24 @@ void MasterFxComponent::scanForPlugins()
         safe->say (message);
     },
     false);
+}
+
+void MasterFxComponent::scanSystemPlugins()
+{
+    say ("Scanning for VST3 plugins in system folders...");
+
+    host.scanAsync ([safe = juce::Component::SafePointer<MasterFxComponent> (this)] (int count, juce::StringArray failed)
+    {
+        if (safe == nullptr)
+            return;
+
+        auto message = juce::String (count) + (count == 1 ? " plugin" : " plugins") + " found";
+
+        if (! failed.isEmpty())
+            message << ", " << failed.size() << " left out after failing to load";
+
+        safe->say (message);
+    });
 }
 
 void MasterFxComponent::refresh()

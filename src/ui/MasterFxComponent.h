@@ -74,6 +74,7 @@ private:
     void closeEditor (int slot);
     void choosePluginFolder();
     void scanForPlugins();
+    void scanSystemPlugins();
     void say (const juce::String& message);
 
     MasterEffects& effects;

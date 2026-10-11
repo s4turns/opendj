@@ -41,7 +41,7 @@ that was listed after it except video.
 | Key detection | ✅ | `src/analysis/KeyDetector.*`, in the browser's Key column |
 | Effects: filter, echo, reverb | ✅ | `src/core/Mixer.*`, one knob each per channel |
 | Master effects | ✅ | `src/core/MasterEffects.*`: two slots on the whole mix, each echo, reverb or filter with a wet level and two parameters |
-| VST3 effect plugins | 🚧 | `src/core/PluginHost.*`: scanned in the background, loaded into a master slot with its own window and two knobs mapped to its parameters. Tested with a stand-in processor; not yet with a real plugin |
+| VST3 effect plugins | ✅ | `src/core/PluginHost.*`: scanned in the background, loaded into a master slot with its own window and two knobs mapped to its parameters |
 | Sampler | ✅ | `src/core/Sampler.*`, eight pads |
 | Mic input | 🚧 | `src/core/MicInput.*`, `src/ui/MicComponent.*`, with talkover and a stream-only switch. Tested by measuring the output; not yet tried with a real mic |
 | Stem separation | ✅ | `src/analysis/StemSeparator.*`, `StemDsp.*`, a knob per stem |
