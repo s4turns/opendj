@@ -5,6 +5,7 @@
 
 #include "ui/WaveformComponent.h"
 
+#include "ui/HotCueColours.h"
 #include "ui/WaveformMath.h"
 
 #include <cmath>
@@ -95,6 +96,15 @@ void WaveformComponent::setCuePoint (double seconds)
     repaint();
 }
 
+void WaveformComponent::setHotCues (std::vector<double> positions)
+{
+    if (positions == hotCues)
+        return;
+
+    hotCues = std::move (positions);
+    repaint();
+}
+
 void WaveformComponent::setLoop (double startSeconds, double endSeconds, bool enabled)
 {
     if (juce::approximatelyEqual (startSeconds, loopStart)
@@ -171,6 +181,33 @@ void WaveformComponent::paintOverview (juce::Graphics& g)
 
         g.setColour (loopColour.withAlpha (loopEnabled ? 0.30f : 0.12f));
         g.fillRect (from, 0.0f, juce::jmax (1.0f, to - from), height);
+    }
+
+    // Hot cues as a line in their colour with a notch at the top, under the
+    // cue point and the playhead so neither is ever hidden.
+    if (trackLengthSeconds > 0.0)
+    {
+        for (int slot = 0; slot < (int) hotCues.size(); ++slot)
+        {
+            const auto seconds = hotCues[(size_t) slot];
+
+            if (seconds < 0.0)
+                continue;
+
+            const auto x = static_cast<float> (seconds / trackLengthSeconds) * width;
+
+            // A dark edge either side, or a red cue on a red waveform vanishes.
+            g.setColour (juce::Colours::black.withAlpha (0.7f));
+            g.fillRect (x - 1.5f, 0.0f, 3.0f, height);
+            g.setColour (hotCueColour (slot));
+            g.fillRect (x - 0.5f, 0.0f, 1.0f, height);
+
+            juce::Path notch;
+            notch.addTriangle (x - 4.5f, 0.0f, x + 4.5f, 0.0f, x, 7.0f);
+            g.fillPath (notch);
+            g.setColour (juce::Colours::black.withAlpha (0.7f));
+            g.strokePath (notch, juce::PathStrokeType (1.0f));
+        }
     }
 
     if (trackLengthSeconds > 0.0)
@@ -262,6 +299,30 @@ void WaveformComponent::paintScrolling (juce::Graphics& g)
 
         g.setColour (seconds <= positionSeconds ? asPlayed (colour) : colour);
         g.drawVerticalLine (x, top, juce::jmax (top + 1.0f, bottom));
+    }
+
+    // Hot cues over the waveform, each a line with its number on a tab, so a
+    // pad can be found by colour or by number.
+    for (int slot = 0; slot < (int) hotCues.size(); ++slot)
+    {
+        const auto seconds = hotCues[(size_t) slot];
+
+        if (seconds < startSeconds || seconds > startSeconds + spanSeconds)
+            continue;
+
+        const auto x = static_cast<float> ((seconds - startSeconds) / secondsPerPixel);
+        const auto colour = hotCueColour (slot);
+
+        g.setColour (juce::Colours::black.withAlpha (0.7f));
+        g.fillRect (x - 2.0f, 0.0f, 4.0f, height);
+        g.setColour (colour);
+        g.fillRect (x - 1.0f, 0.0f, 2.0f, height);
+
+        const juce::Rectangle<float> tab (x, 0.0f, 13.0f, 13.0f);
+        g.fillRect (tab);
+        g.setColour (colour.contrasting (0.8f));
+        g.setFont (juce::FontOptions (10.0f, juce::Font::bold));
+        g.drawText (juce::String (slot + 1), tab, juce::Justification::centred, false);
     }
 
     // The playhead is fixed in the middle; the track moves past it.

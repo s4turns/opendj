@@ -44,6 +44,33 @@ public:
     }
 };
 
+/** A performance pad: acts on press, as a pad on a controller does, and a
+    right-click (or Ctrl-click on a Mac) asks for it to be cleared instead. */
+class PadButton final : public juce::TextButton
+{
+public:
+    using juce::TextButton::TextButton;
+
+    std::function<void()> onPress;
+    std::function<void()> onClear;
+
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        if (e.mods.isPopupMenu())
+        {
+            if (onClear != nullptr)
+                onClear();
+
+            return;
+        }
+
+        juce::TextButton::mouseDown (e);
+
+        if (onPress != nullptr)
+            onPress();
+    }
+};
+
 /** One deck: the two waveform views, transport, tempo and sync. Also a drop
     target for rows dragged out of the browser. */
 class DeckComponent final : public juce::Component,
@@ -88,6 +115,7 @@ public:
 private:
     void loadButtonClicked();
     void refreshLoopControls();
+    void refreshHotCues();
     void applyTempoFromSlider();
     double rangePercent() const;
     void updateTempoReadout();
@@ -139,6 +167,10 @@ private:
 
     std::array<juce::uint32, numLoopButtons> loopButtonPressedAt {};
     std::array<bool, numLoopButtons> loopButtonRolling { };
+
+    // Hot cue pads, in the same colours as their markers on the waveforms.
+    std::array<PadButton, Deck::numHotCues> hotCueButtons;
+    std::array<double, Deck::numHotCues> shownHotCues {};
 
     WaveformComponent scrollingWave { WaveformComponent::Mode::scrolling };
     WaveformComponent overviewWave { WaveformComponent::Mode::overview };

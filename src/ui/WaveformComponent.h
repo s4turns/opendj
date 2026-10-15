@@ -11,6 +11,7 @@
 
 #include <functional>
 #include <memory>
+#include <vector>
 
 namespace opendj
 {
@@ -36,6 +37,10 @@ public:
         `enabled` distinguishes a loop that is running from one that is merely
         remembered, which is worth seeing at a glance. */
     void setLoop (double startSeconds, double endSeconds, bool enabled);
+
+    /** Where each hot cue slot is set, in seconds, negative for an empty one.
+        Drawn in the slot's colour from `HotCueColours.h`. */
+    void setHotCues (std::vector<double> positions);
 
     /** How many seconds the scrolling view shows either side of the playhead. */
     void setWindowSeconds (double seconds);
@@ -70,6 +75,7 @@ private:
     double loopStart = -1.0;
     double loopEnd = -1.0;
     bool loopEnabled = false;
+    std::vector<double> hotCues;
     double windowSeconds = waveform::defaultZoomSeconds;
 
     /** Wheel movement not yet worth a rung. A trackpad sends this in fractions

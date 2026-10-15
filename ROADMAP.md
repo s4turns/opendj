@@ -30,7 +30,7 @@ that was listed after it except video.
 | 8 | BPM detection and beat grid | ✅ | `src/analysis/TrackAnalyser.*` |
 | 9 | Sync: tempo and beat phase | ✅ | `AudioEngine::syncDeck` |
 | 10 | Turntable platters, mouse drivable | ✅ | `src/ui/PlatterComponent.*`, `src/ui/AngleMath.h` |
-| 11 | Hot cues | ✅ | `Deck::hotCuePressed` and friends |
+| 11 | Hot cues | ✅ | `Deck::hotCuePressed` and friends. Eight coloured pads per deck (click sets or jumps, right-click clears) and matching markers on both waveforms, `src/ui/HotCueColours.h` |
 | 12 | MIDI mapping engine, monitor, device picker | ✅ | `src/control/`, `src/ui/MidiSetupComponent.*` |
 | 13 | Roland DJ-202 mapping | ✅ | `mappings/roland-dj-202.json`, verified on hardware |
 | 14 | Track browser and library database | ✅ | `src/library/`, `src/ui/BrowserComponent.*` |
@@ -75,16 +75,15 @@ The goal is that a VirtualDJ user can sit down at OpenDJ and already know how to
 what they would still reach for and not find, checked against the code rather than assumed. The
 VirtualDJ column is a description of that product, not a measurement of it.
 
-Some of it is partly there already: pitch bend through the jog wheel's nudge, Camelot notation in
-`MusicalKey::toCamelot` that the browser does not yet show, and hot cues that a controller can
-set but nothing on screen shows or triggers.
+Some of it is partly there already: pitch bend through the jog wheel's nudge, and Camelot notation
+in `MusicalKey::toCamelot` that the browser does not yet show.
 
 ### Reached for in every set
 
 | Missing | What VirtualDJ has | Where OpenDJ is |
 | --- | --- | --- |
 | History and smart folders (#11) | Playlists, virtual and filter folders, an automatic history of played tracks, a side list for lining up the next few | Playlists are done. No history: `tracks.last_played_at` exists but nothing writes it. No filter folders |
-| Hot cues on screen (#12) | Pads per deck with colours and names, and markers on the waveform | Controller only, never drawn |
+| Named hot cues (#12) | Pads per deck with colours and names, and markers on the waveform | Pads and coloured markers are done; a cue cannot be named yet |
 | Beat jump and quantize (#13) | Jumps of 1 to 32 beats; cues and loops snap to the grid | None. Automatic loops already start on the beat |
 | Beat grid editing (#14) | Adjust the BPM, move the downbeat, tap tempo | Detection only, so a wrong grid cannot be corrected |
 | More effects (#15) | Dozens, including flanger, phaser, gate, bitcrusher, brake, backspin, echo out and stutter, plus reverse and censor buttons | Filter, echo and reverb per channel, and the same three in two master slots, which also take VST3 plugins |
