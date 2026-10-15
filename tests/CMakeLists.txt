@@ -42,6 +42,7 @@ target_sources(opendj-tests PRIVATE
     WaveformMath_test.cpp
     StemDsp_test.cpp
     Library_test.cpp
+    LibraryScanner_test.cpp
     TagReader_test.cpp
     ${OPENDJ_ENGINE_SOURCES})
 

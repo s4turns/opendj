@@ -9,6 +9,9 @@
 #include "analysis/TrackDecoder.h"
 #include "library/TagReader.h"
 
+#include <optional>
+#include <set>
+
 namespace opendj
 {
 
@@ -179,6 +182,13 @@ void LibraryScanner::pruneMissing()
     }
 }
 
+int LibraryScanner::analysisWorkerCount()
+{
+    // One core is left for the audio and the interface. Four at most, since
+    // each worker holds a whole decoded track, about 100 MB for five minutes.
+    return juce::jlimit (1, 4, juce::SystemStats::getNumCpus() - 1);
+}
+
 void LibraryScanner::analysePending()
 {
     {
@@ -188,43 +198,79 @@ void LibraryScanner::analysePending()
 
     report();
 
-    while (! threadShouldExit())
+    const auto workerCount = analysisWorkerCount();
+    std::mutex claimMutex;
+    std::set<juce::String> claimed;   // every track a worker has picked up this pass
+
+    // Hands out the next track nobody has claimed. A track still pending after
+    // it was analysed is never handed out twice, so a store that fails cannot
+    // loop for ever.
+    const auto claimNext = [&]() -> std::optional<juce::File>
     {
-        const auto pending = library.tracksNeedingAnalysis (1);
+        std::lock_guard<std::mutex> lock (claimMutex);
 
-        if (pending.empty())
-            break;
+        for (const auto& file : library.tracksNeedingAnalysis (workerCount + (int) claimed.size()))
+            if (claimed.insert (file.getFullPathName()).second)
+                return file;
 
-        const auto file = pending.front();
+        return std::nullopt;
+    };
 
+    const auto work = [this, &claimNext] (juce::AudioFormatManager& formats)
+    {
+        while (! threadShouldExit())
         {
-            std::lock_guard<std::mutex> lock (progressMutex);
-            progress.currentFile = file.getFileName();
+            const auto file = claimNext();
+
+            if (! file.has_value())
+                return;
+
+            {
+                std::lock_guard<std::mutex> lock (progressMutex);
+                progress.currentFile = file->getFileName();
+            }
+
+            report();
+
+            const auto decoded = TrackDecoder::decode (formats, *file);
+
+            if (decoded == nullptr)
+            {
+                library.markUnreadable (*file);
+            }
+            else
+            {
+                const auto analysis = TrackAnalyser::analyse (decoded->audio, decoded->sampleRate);
+
+                // Removed from the library while it was being analysed: store()
+                // would add it straight back.
+                if (library.findTrack (*file).has_value())
+                    library.store (*file, *analysis, decoded->lengthSeconds());
+            }
+
+            {
+                std::lock_guard<std::mutex> lock (progressMutex);
+                ++progress.tracksAnalysed;
+            }
         }
+    };
 
-        report();
+    // This thread is one of the workers; the rest get a thread each, at the
+    // same low priority.
+    std::vector<std::unique_ptr<AnalysisWorker>> workers;
 
-        const auto decoded = TrackDecoder::decode (formatManager, file);
-
-        if (decoded == nullptr)
-        {
-            library.markUnreadable (file);
-        }
-        else
-        {
-            const auto analysis = TrackAnalyser::analyse (decoded->audio, decoded->sampleRate);
-
-            // Removed from the library while it was being analysed: store()
-            // would add it straight back.
-            if (library.findTrack (file).has_value())
-                library.store (file, *analysis, decoded->lengthSeconds());
-        }
-
-        {
-            std::lock_guard<std::mutex> lock (progressMutex);
-            ++progress.tracksAnalysed;
-        }
+    for (int i = 1; i < workerCount; ++i)
+    {
+        workers.push_back (std::make_unique<AnalysisWorker> (work));
+        workers.back()->startThread (juce::Thread::Priority::low);
     }
+
+    work (formatManager);
+
+    for (auto& worker : workers)
+        worker->waitForThreadToExit (-1);
+
+    report();
 }
 
 } // namespace opendj

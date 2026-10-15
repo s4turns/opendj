@@ -580,7 +580,7 @@ would fail.
 | --- | --- |
 | SQLite schema | `src/library/Library.cpp`: folders, tracks, tags, tempo, and an analysis version, so a better analyser quietly invalidates old results |
 | Analyse once | `AnalysisCache`, asked before anything is decoded. `Deck::loadFile` takes a `KnownTrack` and skips the tempo pass |
-| Scanning | A quick tag pass so the browser fills in seconds, then analysis at low priority, written as it goes so it can be stopped and resumed |
+| Scanning | A quick tag pass so the browser fills in seconds, then analysis at low priority, written as it goes so it can be stopped and resumed. Up to four tracks are analysed at once, one per core with one core left over, since each worker holds a whole decoded track |
 | Tag reading | `TagReader.cpp` parses ID3v2.2 to 2.4 and ID3v1 directly, plus MP3 length from the Xing header. Opening a decoder for 13,000 files just to ask their length is far too slow |
 | Browser | Search, sortable columns, folder filter, double-click or drag onto a deck, and `browse.scroll` so the controller's encoder moves the selection. Removing a folder asks first, then drops the tracks no other watched folder holds |
 

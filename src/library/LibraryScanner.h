@@ -19,11 +19,11 @@ namespace opendj
 /** Keeps the library in step with the folders on disk, then analyses whatever
     has not been analysed.
 
-    Two passes on one background thread. The first walks the folders and reads
+    Two passes on a background thread. The first walks the folders and reads
     tags, which is fast, so the browser fills up in seconds. The second decodes
     each new track and runs the analyser, which is slow, so it runs at low
-    priority and can be stopped and picked up again later: every result is
-    written as it is found.
+    priority on several cores (see analysisWorkerCount()) and can be stopped
+    and picked up again later: every result is written as it is found.
 */
 class LibraryScanner final : private juce::Thread
 {
@@ -35,6 +35,9 @@ public:
     void start();
     void stop();
     bool isRunning() const { return isThreadRunning(); }
+
+    /** How many tracks are analysed at once. */
+    static int analysisWorkerCount();
 
     struct Progress
     {
@@ -53,6 +56,23 @@ public:
     std::function<void()> onProgress;
 
 private:
+    /** Runs the analysis loop with a format manager of its own. */
+    class AnalysisWorker final : public juce::Thread
+    {
+    public:
+        explicit AnalysisWorker (std::function<void (juce::AudioFormatManager&)> workToDo)
+            : juce::Thread ("Library analyser"), work (std::move (workToDo))
+        {
+            formats.registerBasicFormats();
+        }
+
+        void run() override { work (formats); }
+
+    private:
+        std::function<void (juce::AudioFormatManager&)> work;
+        juce::AudioFormatManager formats;
+    };
+
     void run() override;
     void scanFolders();
     void pruneMissing();
