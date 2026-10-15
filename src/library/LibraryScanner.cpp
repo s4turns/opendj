@@ -129,6 +129,10 @@ void LibraryScanner::scanFolders()
                 continue;
             }
 
+            // The folder may have been removed while this pass was walking it.
+            if (! library.isWatched (folder))
+                break;
+
             const auto tags = TagReader::read (formatManager, file);
 
             TrackRecord record;
@@ -209,7 +213,11 @@ void LibraryScanner::analysePending()
         else
         {
             const auto analysis = TrackAnalyser::analyse (decoded->audio, decoded->sampleRate);
-            library.store (file, *analysis, decoded->lengthSeconds());
+
+            // Removed from the library while it was being analysed: store()
+            // would add it straight back.
+            if (library.findTrack (file).has_value())
+                library.store (file, *analysis, decoded->lengthSeconds());
         }
 
         {

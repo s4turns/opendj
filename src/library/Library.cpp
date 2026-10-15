@@ -258,18 +258,59 @@ bool Library::addFolder (const juce::File& folder)
     return true;
 }
 
+namespace
+{
+    // Tracks under the folder in the first parameter that no other watched
+    // folder holds. substr() and length() both count characters, so a prefix
+    // with an å in it compares correctly.
+    constexpr const char* onlyInFolder =
+        " FROM tracks WHERE substr(path, 1, length(?1)) = ?1"
+        " AND NOT EXISTS (SELECT 1 FROM folders"
+        "                 WHERE folders.path <> ?2"
+        "                 AND substr(tracks.path, 1, length(folders.path) + 1) = folders.path || ?3)";
+}
+
 bool Library::removeFolder (const juce::File& folder)
 {
     {
         std::lock_guard<std::mutex> lock (mutex);
-        Statement remove (database, "DELETE FROM folders WHERE path = ?");
 
-        if (! remove.bind (1, pathOf (folder)).run() || sqlite3_changes (database) == 0)
+        if (! execute ("BEGIN"))
+            return false;
+
+        Statement remove (database, "DELETE FROM folders WHERE path = ?");
+        auto ok = remove.bind (1, pathOf (folder)).run() && sqlite3_changes (database) > 0;
+
+        if (ok)
+        {
+            Statement tracks (database, (juce::String ("DELETE") + onlyInFolder).toRawUTF8());
+            ok = tracks.bind (1, folderPrefix (folder)).bind (2, pathOf (folder))
+                       .bind (3, juce::File::getSeparatorString()).run();
+        }
+
+        execute (ok ? "COMMIT" : "ROLLBACK");
+
+        if (! ok)
             return false;
     }
 
     changed();
     return true;
+}
+
+bool Library::isWatched (const juce::File& folder) const
+{
+    std::lock_guard<std::mutex> lock (mutex);
+    Statement select (database, "SELECT 1 FROM folders WHERE path = ?");
+    return select.bind (1, pathOf (folder)).step();
+}
+
+int Library::countTracksOnlyIn (const juce::File& folder) const
+{
+    std::lock_guard<std::mutex> lock (mutex);
+    Statement count (database, (juce::String ("SELECT COUNT(*)") + onlyInFolder).toRawUTF8());
+    count.bind (1, folderPrefix (folder)).bind (2, pathOf (folder)).bind (3, juce::File::getSeparatorString());
+    return count.step() ? count.getInt (0) : 0;
 }
 
 std::vector<juce::File> Library::getFolders() const
@@ -436,7 +477,7 @@ std::vector<TrackRecord> Library::query (const LibraryQuery& query) const
     juce::StringArray terms;
 
     if (query.folder != juce::File())
-        sql << " AND substr(path, 1, ?) = ?";
+        sql << " AND substr(path, 1, length(?1)) = ?1";
 
     // Every word must match somewhere, which is how a search box is expected
     // to behave: "boys noize" finds the artist, "noize 2007" narrows it down.
@@ -474,8 +515,8 @@ std::vector<TrackRecord> Library::query (const LibraryQuery& query) const
 
     if (query.folder != juce::File())
     {
-        const auto prefix = folderPrefix (query.folder);
-        select.bind (index++, (int) prefix.getNumBytesAsUTF8()).bind (index++, prefix);
+        // Counted in characters, as substr() counts them.
+        select.bind (index++, folderPrefix (query.folder));
     }
 
     for (const auto& term : terms)
