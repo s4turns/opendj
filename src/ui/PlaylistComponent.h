@@ -62,6 +62,7 @@ private:
     void play (int fromRow);
     void pushQueue();
     void refreshButtons();
+    juce::String describeStatus() const;
 
     Library& library;
     AutoMix& autoMix;
@@ -72,7 +73,7 @@ private:
     juce::TextButton addButton { "Add selected" }, removeButton { "Remove" };
     juce::TextButton upButton { "Up" }, downButton { "Down" };
     juce::TextButton playButton { "Play" }, skipButton { "Next now" };
-    juce::ToggleButton loopButton { "Loop" };
+    juce::ToggleButton loopButton { "Loop" }, smartButton { "Smart" };
     juce::Label fadeLabel { {}, "Fade (s)" };
     juce::Slider fadeSlider;
     juce::Label statusLabel;

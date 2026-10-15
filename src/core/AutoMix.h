@@ -8,6 +8,7 @@
 #include <juce_core/juce_core.h>
 
 #include "core/AudioEngine.h"
+#include "core/MixPoints.h"
 
 #include <functional>
 #include <memory>
@@ -25,6 +26,11 @@ namespace opendj
     at the planned moment and sweeps the crossfader across over the fade
     length, then clears the old deck so it is ready for the track after.
     Tracks without a beat grid are faded without the tempo match.
+
+    In smart mode the planned moment comes from `MixPoints.h`: the outgoing
+    track's outro meets the incoming track's intro, phrase on phrase, the
+    fade lasts a whole number of bars, and the low EQ swaps halfway. Where
+    either track has no trustworthy grid it falls back to the fixed fade.
 
     Everything here is message thread, driven by `tick` from a timer. The
     decisions are in `AutoMixMath.h`, where they are tested; this class only
@@ -59,6 +65,15 @@ public:
     void setFadeSeconds (double seconds) noexcept { fadeSeconds = juce::jlimit (1.0, 60.0, seconds); }
     double getFadeSeconds() const noexcept { return fadeSeconds; }
 
+    /** Mix on phrases, from the outro into the intro, rather than a fixed
+        time before the end. On by default. */
+    void setSmart (bool shouldBeSmart);
+    bool isSmart() const noexcept { return smart; }
+
+    /** The plan for the next mix, `smart == false` when there is none or it
+        will be a plain timed fade. */
+    const automix::MixPlan& getPlan() const noexcept { return plan; }
+
     /** At the end, go back to the top instead of stopping. On by default: a
         stream is meant to keep going. */
     void setLoop (bool shouldLoop) noexcept { loop = shouldLoop; }
@@ -92,6 +107,8 @@ private:
     void loadNext (int deckIndex, int index, int attemptsLeft);
     void beginFade (double nowSeconds, int onAirDeck, int incomingDeck);
     void finishFade (int outgoingDeck);
+    void planNextMix();
+    void restoreLowEq();
     void changed();
 
     /** The most a track is stretched to match the one it is mixed into. */
@@ -105,6 +122,8 @@ private:
     Phase phase = Phase::idle;
     double fadeSeconds = 12.0;
     bool loop = true;
+    bool smart = true;
+    automix::MixPlan plan;
 
     int onAirDeck = -1;
     int currentIndex = -1;
@@ -119,6 +138,11 @@ private:
     float fadeFrom = 0.0f;
     float fadeTo = 0.0f;
     int fadeOutgoingDeck = -1;
+    int fadeIncomingDeck = -1;
+
+    /** The low EQ the user had on each side, while a smart fade swaps them. */
+    bool swappingLows = false;
+    float outgoingLow = 0.5f, incomingLow = 0.5f;
 
     /** Callbacks from the loader arrive later, on the message thread, and
         must not touch an object that has gone. */

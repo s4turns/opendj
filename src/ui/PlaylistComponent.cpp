@@ -54,6 +54,13 @@ PlaylistComponent::PlaylistComponent (Library& libraryToUse, AutoMix& autoMixToC
     loopButton.setToggleState (autoMix.isLooping(), juce::dontSendNotification);
     loopButton.onClick = [this] { autoMix.setLoop (loopButton.getToggleState()); };
 
+    smartButton.setToggleState (autoMix.isSmart(), juce::dontSendNotification);
+    smartButton.setTooltip ("Mix from each track's outro into the next one's intro, phrase on phrase, "
+                            "swapping the bass halfway. Off, or for tracks without a reliable beat grid, "
+                            "the fade starts the set number of seconds before the end.");
+    smartButton.onClick = [this] { autoMix.setSmart (smartButton.getToggleState()); };
+    fadeSlider.setTooltip ("Fade length for timed mixes: when Smart is off, or a track has no reliable beat grid");
+
     fadeSlider.setRange (2.0, 30.0, 1.0);
     fadeSlider.setValue (autoMix.getFadeSeconds(), juce::dontSendNotification);
     fadeSlider.setSliderStyle (juce::Slider::LinearHorizontal);
@@ -68,7 +75,7 @@ PlaylistComponent::PlaylistComponent (Library& libraryToUse, AutoMix& autoMixToC
 
     for (juce::Component* c : std::initializer_list<juce::Component*> {
              &newButton, &deleteButton, &addButton, &removeButton, &upButton, &downButton,
-             &playButton, &skipButton, &loopButton, &fadeLabel, &fadeSlider, &statusLabel, &list })
+             &playButton, &skipButton, &loopButton, &smartButton, &fadeLabel, &fadeSlider, &statusLabel, &list })
         addAndMakeVisible (c);
 
     reloadPlaylists();
@@ -267,6 +274,9 @@ void PlaylistComponent::timerCallback()
     const auto next = autoMix.isRunning() ? autoMix.getNextIndex() : -1;
     const auto running = autoMix.isRunning();
 
+    // Set every time: the status follows the mix, not just the list.
+    statusLabel.setText (describeStatus(), juce::dontSendNotification);
+
     if (current == shownCurrent && next == shownNext && running == shownRunning)
         return;
 
@@ -275,11 +285,25 @@ void PlaylistComponent::timerCallback()
     shownRunning = running;
     list.repaint();
     refreshButtons();
+}
 
-    statusLabel.setText (! running ? juce::String()
-                         : autoMix.isFading() ? "Mixing into the next track"
-                                              : "Auto crossfade is running",
-                         juce::dontSendNotification);
+juce::String PlaylistComponent::describeStatus() const
+{
+    if (! autoMix.isRunning())
+        return {};
+
+    if (autoMix.isFading())
+        return "Mixing into the next track";
+
+    // Shown so the choice can be checked against the waveform.
+    if (const auto& plan = autoMix.getPlan(); plan.smart)
+    {
+        const auto at = (int) plan.outSeconds;
+        return "Next mix at " + juce::String (at / 60) + ":" + juce::String (at % 60).paddedLeft ('0', 2)
+             + ", over " + juce::String (plan.fadeBeats) + " beats";
+    }
+
+    return "Auto crossfade is running";
 }
 
 void PlaylistComponent::paint (juce::Graphics& g)
@@ -313,6 +337,7 @@ void PlaylistComponent::resized()
     skipButton.setBounds (second.removeFromLeft (84));
     second.removeFromLeft (12);
     loopButton.setBounds (second.removeFromLeft (64));
+    smartButton.setBounds (second.removeFromLeft (70));
     fadeLabel.setBounds (second.removeFromLeft (64));
     fadeSlider.setBounds (second.removeFromLeft (200));
     second.removeFromLeft (8);

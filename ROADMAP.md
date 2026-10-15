@@ -1,7 +1,7 @@
 # OpenDJ roadmap
 
 Where the project is and what to pick up next. Anything ticked has tests or a verified manual
-check behind it, not just code that compiles. The suite is **357 tests** on Linux. Windows runs
+check behind it, not just code that compiles. The suite is **371 tests** on Linux. Windows runs
 one fewer, a stderr test whose stand-in for ffmpeg is a shell script. Anything touching audio is
 tested by measuring the output, not by checking that the code ran. Open work is also tracked as
 issues on [git.interdo.me](https://git.interdo.me/interdome/opendj/issues), and the numbers
@@ -46,7 +46,8 @@ that was listed after it except video.
 | VST3 effect plugins | ✅ | `src/core/PluginHost.*`: scanned in the background, loaded into a master slot with its own window and two knobs mapped to its parameters |
 | Sampler | ✅ | `src/core/Sampler.*`, eight pads |
 | Playlists | ✅ | `Library` playlist tables, `src/ui/PlaylistComponent.*`: built from the browser by selection or drag, reordered, renamed |
-| Automix | ✅ | `src/core/AutoMix.*`, `AutoMixMath.h`: plays a playlist on decks A and B, loading ahead, matching tempo and beat, sweeping the crossfader. The fade starts a fixed time before the end; phrase-aware transitions are #37 |
+| Automix | ✅ | `src/core/AutoMix.*`, `AutoMixMath.h`: plays a playlist on decks A and B, loading ahead, matching tempo and beat, sweeping the crossfader |
+| Smart crossfade | 🚧 | `src/core/MixPoints.*`: outro into intro, phrase on phrase, with a bass swap (#37). Checked against 20 real tracks' analyses, not yet listened to through a whole set. No vocal avoidance, which needs stems prepared ahead (#22) |
 | Mic input | 🚧 | `src/core/MicInput.*`, `src/ui/MicComponent.*`, with talkover and a stream-only switch. Tested by measuring the output; not yet tried with a real mic |
 | Stem separation | ✅ | `src/analysis/StemSeparator.*`, `StemDsp.*`, a knob per stem |
 | Record the master output | ✅ | `src/core/SetRecorder.*`: WAV, FLAC or MP3, with a tracklist |
@@ -89,7 +90,7 @@ set but nothing on screen shows or triggers.
 | More effects (#15) | Dozens, including flanger, phaser, gate, bitcrusher, brake, backspin, echo out and stutter, plus reverse and censor buttons | Filter, echo and reverb per channel, and the same three in two master slots, which also take VST3 plugins |
 | Key tools (#16) | Key shift in semitones, key match between decks, Camelot display, harmonic hints in the browser | Detection only |
 | Auto gain (#17) | Tracks levelled by measured loudness | A trim, with no analysis behind it |
-| Smarter automix (#37) | Transitions placed on phrase boundaries, avoiding clashing vocals | Automix is done, beat matched, but starts the fade a fixed time before the end |
+| Vocal-aware automix (#37) | Transitions that keep two vocals from overlapping | Mixes land outro on intro, phrase on phrase, but vocals are not detected |
 | MIDI learn and more controllers (#19, #4) | Hundreds of controllers mapped out of the box, and a mapper that learns a control from the hardware | One mapping, written by hand |
 
 ### Expected by regular users
@@ -588,6 +589,24 @@ would fail.
 | Tag reading | `TagReader.cpp` parses ID3v2.2 to 2.4 and ID3v1 directly, plus MP3 length from the Xing header. Opening a decoder for 13,000 files just to ask their length is far too slow |
 | Playlists | `playlists` and `playlist_tracks`, stored by path so a track removed from the library keeps its place. Right-click a track to load it onto any deck, or add a whole selection to a playlist |
 | Browser | Search, sortable columns, folder filter, double-click or drag onto a deck, and `browse.scroll` so the controller's encoder moves the selection. Removing a folder asks first, then drops the tracks no other watched folder holds |
+
+## Automix and the smart crossfade
+
+`AutoMix` is the thin part that drives the decks; the decisions are plain functions, tested
+without an engine: `AutoMixMath.h` for when to load and fade, `MixPoints.*` for where.
+
+| Piece | Notes |
+| --- | --- |
+| Bars | `barLevels` averages the 2 ms detail peaks over each bar of the beat grid, overall and in the mid and high bands |
+| Intro and outro | Found by what is missing from the mids and highs, not by loudness. A techno intro or outro is the drums alone, and the kick keeps the overall level within about a tenth of full, so a loudness threshold finds nothing. Thin means the mid and high levels, each against the track's 75th percentile, average under 0.7 |
+| Phrases | 16 beats, counted from the first bar with music. The outro starts on a phrase boundary, no earlier than halfway, so a breakdown is not taken for one |
+| The mix | Out at the start of the outro, but never more than 16 bars before the music ends; in at the incoming track's first bar with music. 32 beats when both sides have two phrases to spare, else 16 |
+| Bass swap | The incoming low EQ is killed for the first half of the fade, then the lows swap. Restored when the fade ends or automix stops |
+| Fallback | A grid with confidence under 0.3, or a plan whose moment has passed by the time the next track loads, gets the timed fade. "Next now" always does |
+
+Checked against the analysis of 20 tracks from a techno library before the thresholds were set:
+intros were found in 16. The constants are in `MixPoints.h`, named, so they can be retuned in one
+place once it has been heard through real sets.
 
 ## Recording a set
 
