@@ -232,15 +232,27 @@ void BrowserComponent::removeFolderClicked()
     if (folder == juce::File())
         return;
 
-    // The folder stops being watched; the tracks and their beat grids stay,
-    // since deleting a few thousand analyses over a misclick would be unkind.
-    if (library.removeFolder (folder))
+    const auto count = library.countTracksOnlyIn (folder);
+    const auto tracks = count == 1 ? juce::String ("1 track") : juce::String (count) + " tracks";
+
+    // The tracks go with the folder, and their analyses with them, so this asks first.
+    auto* window = new juce::AlertWindow ("Remove folder",
+                                          "Remove \"" + folder.getFileName() + "\" and its " + tracks
+                                              + " from the library?\n\nThe files stay on disk. Playlists keep their entries.",
+                                          juce::MessageBoxIconType::QuestionIcon);
+    window->addButton ("Remove", 1);
+    window->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+
+    window->enterModalState (true, juce::ModalCallbackFunction::create ([this, folder] (int result)
     {
+        if (result != 1 || ! library.removeFolder (folder))
+            return;
+
         refreshFolders();
         folderList.selectRow (0);
         query.folder = juce::File();
         requestRefresh();
-    }
+    }), true);
 }
 
 int BrowserComponent::FolderListModel::getNumRows()

@@ -41,15 +41,28 @@ public:
     /** Every effect found so far, instruments left out, sorted by maker and name. */
     juce::Array<juce::PluginDescription> getEffects() const;
 
+    /** The folder to scan when somebody picks this one. A VST3 is often a
+        folder itself (`Room.vst3/Contents/...`), and choosing it is the obvious
+        thing to do, but the scan only looks inside a folder and the files in a
+        bundle are not named .vst3 on Linux or macOS. So a pick that is, or is
+        inside, a .vst3 means the folder holding that plugin. */
+    static juce::File folderToScanFor (const juce::File& picked);
+
+    /** Clears the list of known plugins and writes the empty list to disk. */
+    void clearList();
+
     /** Looks for plugins in the given folders, and in the usual VST3 folders
         when told to. Blocks until done or until shouldStop is set; adds what it
         finds to the list and saves the list. Returns the number found. */
-    int scan (const juce::FileSearchPath& folders, bool includeDefaultFolders,
+    int scan (const juce::FileSearchPath& folders, bool includeDefaultFolders = false,
               const std::atomic<bool>* shouldStop = nullptr);
 
     /** The same on a thread of its own, reporting to the message thread with
         how many effects are known and which files failed. Ignored while a scan
         is already running. */
+    void scanAsync (const juce::FileSearchPath& folders,
+                    std::function<void (int effectsKnown, juce::StringArray failedFiles)> onDone,
+                    bool includeDefaultFolders = false);
     void scanAsync (std::function<void (int effectsKnown, juce::StringArray failedFiles)> onDone);
     bool isScanning() const noexcept { return scanning.load(); }
 

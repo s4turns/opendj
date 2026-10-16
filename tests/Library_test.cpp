@@ -79,6 +79,55 @@ TEST_CASE ("a library remembers its folders", "[library]")
     REQUIRE (fixture.library.getFolders().empty());
 }
 
+TEST_CASE ("removing a folder drops the tracks only it holds", "[library]")
+{
+    Fixture fixture;
+    auto& library = fixture.library;
+    const auto sub = fixture.second.getParentDirectory();
+    const auto outside = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("elsewhere.mp3");
+
+    REQUIRE (library.addFolder (fixture.folder));
+    REQUIRE (library.addFolder (sub));
+    library.upsertTrack (fixture.recordFor (fixture.first, "Yeah", "Boys Noize"));
+    library.upsertTrack (fixture.recordFor (fixture.second, "Spastik", "Plastikman"));
+    library.upsertTrack (fixture.recordFor (outside, "Elsewhere", "Nobody"));
+
+    // The sub folder's track is also under the outer folder, so it stays.
+    REQUIRE (library.countTracksOnlyIn (sub) == 0);
+    REQUIRE (library.removeFolder (sub));
+    REQUIRE (library.countTracks() == 3);
+
+    REQUIRE (library.isWatched (fixture.folder));
+    REQUIRE (library.countTracksOnlyIn (fixture.folder) == 2);
+    REQUIRE (library.removeFolder (fixture.folder));
+    REQUIRE_FALSE (library.isWatched (fixture.folder));
+
+    // A track remembered from outside every folder is left alone.
+    REQUIRE (library.countTracks() == 1);
+    REQUIRE (library.findTrack (outside).has_value());
+}
+
+TEST_CASE ("a folder with non-ASCII characters in its path filters its tracks", "[library]")
+{
+    Fixture fixture;
+    const auto folder = fixture.folder.getChildFile (juce::CharPointer_UTF8 ("L\xc3\xa5tar"));
+    REQUIRE (folder.createDirectory());
+    const auto file = folder.getChildFile ("Track.mp3");
+    REQUIRE (file.replaceWithText ("not really audio"));
+
+    REQUIRE (fixture.library.addFolder (folder));
+    fixture.library.upsertTrack (fixture.recordFor (file, "Track", "Someone"));
+    fixture.library.upsertTrack (fixture.recordFor (fixture.first, "Yeah", "Boys Noize"));
+
+    opendj::LibraryQuery inFolder;
+    inFolder.folder = folder;
+    const auto found = fixture.library.query (inFolder);
+    REQUIRE (found.size() == 1);
+    REQUIRE (found[0].file == file);
+
+    REQUIRE (fixture.library.countTracksOnlyIn (folder) == 1);
+}
+
 TEST_CASE ("tracks round trip through the database", "[library]")
 {
     Fixture fixture;

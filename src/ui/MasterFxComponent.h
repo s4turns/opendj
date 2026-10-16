@@ -35,8 +35,23 @@ public:
     bool restorePlugin (int slot, const juce::String& identifier, const juce::String& name,
                         const juce::String& base64State);
 
+    void setPluginDirectory (const juce::String& directory);
+    juce::String getPluginDirectory() const noexcept { return vstPluginDirectory; }
+
+    /** Called when the user chooses a VST plugin folder from the UI. */
+    std::function<void (const juce::String&)> onPluginDirectoryChanged;
+
     /** Something worth a line in the status bar. */
     std::function<void (const juce::String&)> onMessage;
+
+    /** Opens the plugin's own window for the given slot, or brings it to the front. */
+    void openEditor (int slot);
+
+    /** Closes the plugin's window for the given slot. */
+    void closeEditor (int slot);
+
+    /** True when the plugin window for the given slot is currently open. */
+    bool isEditorOpen (int slot) const;
 
     void paint (juce::Graphics& g) override;
     void resized() override;
@@ -64,13 +79,15 @@ private:
     void showPluginMenu (int slot);
     void loadPlugin (int slot, const juce::PluginDescription& description);
     void removePlugin (int slot);
-    void openEditor (int slot);
-    void closeEditor (int slot);
+    void choosePluginFolder();
     void scanForPlugins();
+    void scanSystemPlugins();
     void say (const juce::String& message);
 
     MasterEffects& effects;
     PluginHost& host;
+    juce::String vstPluginDirectory;
+    std::unique_ptr<juce::FileChooser> folderChooser;
     std::array<Unit, MasterEffects::numSlots> units;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MasterFxComponent)

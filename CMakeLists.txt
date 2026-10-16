@@ -244,6 +244,7 @@ set(OPENDJ_ENGINE_SOURCES
     ${CMAKE_SOURCE_DIR}/src/core/AudioEngine.cpp
     ${CMAKE_SOURCE_DIR}/src/core/Deck.cpp
     ${CMAKE_SOURCE_DIR}/src/core/AutoMix.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/MixPoints.cpp
     ${CMAKE_SOURCE_DIR}/src/core/MicInput.cpp
     ${CMAKE_SOURCE_DIR}/src/core/Mixer.cpp
     ${CMAKE_SOURCE_DIR}/src/core/MasterEffects.cpp

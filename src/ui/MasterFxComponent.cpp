@@ -50,7 +50,11 @@ namespace
             setUsingNativeTitleBar (true);
             setContentOwned (editor, true);
             setResizable (editor->isResizable(), false);
-            centreWithSize (getWidth(), getHeight());
+
+            const int w = juce::jmax (getWidth(), 400);
+            const int h = juce::jmax (getHeight(), 300);
+            setSize (w, h);
+            centreWithSize (w, h);
             setVisible (true);
         }
 
@@ -211,14 +215,14 @@ void MasterFxComponent::showPluginMenu (int slot)
     auto* plugin = effects.getPlugin (slot);
     juce::PopupMenu menu;
 
-    constexpr int openEditorId = 1, scanId = 2, removeId = 3;
+    constexpr int openEditorId = 1, scanId = 2, removeId = 3, chooseFolderId = 4, scanDefaultsId = 5;
     constexpr int knobBase = 1000;     // + knob * 10000 + parameter
     constexpr int pluginBase = 100000; // + index into the effect list
 
     if (plugin != nullptr)
     {
         menu.addSectionHeader (plugin->getName());
-        menu.addItem (openEditorId, "Open its window");
+        menu.addItem (openEditorId, isEditorOpen (slot) ? "Bring window to front" : "Open plugin window");
 
         const auto& parameters = plugin->getParameters();
 
@@ -265,11 +269,27 @@ void MasterFxComponent::showPluginMenu (int slot)
     flush();
 
     if (effectsFound.isEmpty())
-        menu.addItem (-1, host.isScanning() ? "Scanning for plugins..." : "No plugins found yet", false);
+    {
+        if (host.isScanning())
+            menu.addItem (-1, "Scanning for plugins...", false);
+        else if (vstPluginDirectory.isEmpty())
+            menu.addItem (-1, "No VST folder chosen", false);
+        else
+            menu.addItem (-1, "No plugins found in folder", false);
+    }
     else
+    {
         menu.addSubMenu (plugin != nullptr ? "Change plugin" : "Choose a plugin", choose);
+    }
 
-    menu.addItem (scanId, "Scan for plugins", ! host.isScanning());
+    menu.addItem (scanDefaultsId, "Scan system VST3 folders", ! host.isScanning());
+
+    menu.addItem (chooseFolderId,
+                  vstPluginDirectory.isEmpty() ? "Choose VST folder..." : "Change VST folder...",
+                  ! host.isScanning());
+
+    if (vstPluginDirectory.isNotEmpty())
+        menu.addItem (scanId, "Rescan VST folder", ! host.isScanning());
 
     if (plugin != nullptr)
         menu.addItem (removeId, "Remove plugin");
@@ -291,6 +311,10 @@ void MasterFxComponent::showPluginMenu (int slot)
             self.openEditor (slot);
         else if (result == scanId)
             self.scanForPlugins();
+        else if (result == scanDefaultsId)
+            self.scanSystemPlugins();
+        else if (result == chooseFolderId)
+            self.choosePluginFolder();
         else if (result == removeId)
             self.removePlugin (slot);
         else if (result >= pluginBase && result - pluginBase < effectsFound.size())
@@ -312,7 +336,7 @@ void MasterFxComponent::showPluginMenu (int slot)
 void MasterFxComponent::loadPlugin (int slot, const juce::PluginDescription& description)
 {
     juce::String error;
-    auto instance = host.createInstance (description, 48000.0, 512, error);
+    auto instance = host.createInstance (description, effects.getSampleRate(), effects.getBlockSize(), error);
 
     if (instance == nullptr)
     {
@@ -337,6 +361,7 @@ void MasterFxComponent::loadPlugin (int slot, const juce::PluginDescription& des
     unit.previousTypeId = pluginId;
     updateCaptions (slot);
     refresh();
+    openEditor (slot);
     say (description.name + " is in FX " + juce::String (slot + 1));
 }
 
@@ -350,7 +375,7 @@ bool MasterFxComponent::restorePlugin (int slot, const juce::String& identifier,
     host.beginRiskyLoad (name);
 
     juce::String error;
-    auto instance = host.createInstance (identifier, 48000.0, 512, error);
+    auto instance = host.createInstance (identifier, effects.getSampleRate(), effects.getBlockSize(), error);
 
     if (instance != nullptr && base64State.isNotEmpty())
     {
@@ -366,11 +391,20 @@ bool MasterFxComponent::restorePlugin (int slot, const juce::String& identifier,
     {
         say ("FX " + juce::String (slot + 1) + " held " + (name.isNotEmpty() ? name : juce::String ("a plugin"))
              + ", which could not be loaded: " + error);
+
+        if (effects.getType (slot) == MasterEffects::Type::plugin)
+            effects.setType (slot, MasterEffects::Type::echo);
+
         return false;
     }
 
     if (! effects.setPlugin (slot, std::move (instance)))
+    {
+        if (effects.getType (slot) == MasterEffects::Type::plugin)
+            effects.setType (slot, MasterEffects::Type::echo);
+
         return false;
+    }
 
     updateCaptions (slot);
     refresh();
@@ -394,8 +428,20 @@ void MasterFxComponent::removePlugin (int slot)
     refresh();
 }
 
+bool MasterFxComponent::isEditorOpen (int slot) const
+{
+    if (! juce::isPositiveAndBelow (slot, MasterEffects::numSlots))
+        return false;
+
+    const auto& window = units[(size_t) slot].editorWindow;
+    return window != nullptr && window->isVisible();
+}
+
 void MasterFxComponent::openEditor (int slot)
 {
+    if (! juce::isPositiveAndBelow (slot, MasterEffects::numSlots))
+        return;
+
     auto& unit = units[(size_t) slot];
     auto* plugin = effects.getPlugin (slot);
 
@@ -404,11 +450,12 @@ void MasterFxComponent::openEditor (int slot)
 
     if (unit.editorWindow != nullptr)
     {
+        unit.editorWindow->setVisible (true);
         unit.editorWindow->toFront (true);
         return;
     }
 
-    auto* editor = plugin->createEditorIfNeeded();
+    auto* editor = plugin->createEditorAndMakeActive();
 
     // Some plugins have no window of their own; a plain list of sliders will
     // do for those.
@@ -430,13 +477,75 @@ void MasterFxComponent::openEditor (int slot)
 
 void MasterFxComponent::closeEditor (int slot)
 {
+    if (! juce::isPositiveAndBelow (slot, MasterEffects::numSlots))
+        return;
+
     // The window owns the editor, and the editor tells its plugin as it goes.
     units[(size_t) slot].editorWindow.reset();
 }
 
+void MasterFxComponent::setPluginDirectory (const juce::String& directory)
+{
+    // A plugin picked by mistake for its folder, here or in older settings.
+    vstPluginDirectory = directory.isNotEmpty() ? PluginHost::folderToScanFor (juce::File (directory)).getFullPathName()
+                                                : juce::String();
+}
+
+void MasterFxComponent::choosePluginFolder()
+{
+    const juce::File start (vstPluginDirectory.isNotEmpty()
+                                ? juce::File (vstPluginDirectory)
+                                : juce::File::getSpecialLocation (juce::File::userHomeDirectory));
+
+    folderChooser = std::make_unique<juce::FileChooser> ("Choose the folder your VST3 plugins are in", start);
+
+    folderChooser->launchAsync (juce::FileBrowserComponent::openMode
+                                    | juce::FileBrowserComponent::canSelectDirectories,
+                                [this] (const juce::FileChooser& fc)
+    {
+        const auto picked = fc.getResult();
+
+        if (picked.isDirectory())
+        {
+            setPluginDirectory (picked.getFullPathName());
+
+            if (onPluginDirectoryChanged != nullptr)
+                onPluginDirectoryChanged (vstPluginDirectory);
+
+            scanForPlugins();
+        }
+    });
+}
+
 void MasterFxComponent::scanForPlugins()
 {
-    say ("Scanning for VST3 plugins...");
+    if (vstPluginDirectory.isEmpty())
+    {
+        choosePluginFolder();
+        return;
+    }
+
+    say ("Scanning for VST3 plugins in " + vstPluginDirectory + "...");
+
+    host.scanAsync (juce::FileSearchPath (vstPluginDirectory),
+                    [safe = juce::Component::SafePointer<MasterFxComponent> (this)] (int count, juce::StringArray failed)
+    {
+        if (safe == nullptr)
+            return;
+
+        auto message = juce::String (count) + (count == 1 ? " plugin" : " plugins") + " found";
+
+        if (! failed.isEmpty())
+            message << ", " << failed.size() << " left out after failing to load";
+
+        safe->say (message);
+    },
+    false);
+}
+
+void MasterFxComponent::scanSystemPlugins()
+{
+    say ("Scanning for VST3 plugins in system folders...");
 
     host.scanAsync ([safe = juce::Component::SafePointer<MasterFxComponent> (this)] (int count, juce::StringArray failed)
     {

@@ -34,6 +34,46 @@ void AutoMix::setQueue (std::vector<juce::File> files)
     changed();
 }
 
+void AutoMix::setSmart (bool shouldBeSmart)
+{
+    smart = shouldBeSmart;
+    planNextMix();
+    changed();
+}
+
+void AutoMix::planNextMix()
+{
+    plan = {};
+
+    if (! smart || phase != Phase::playing || ! nextReady || onAirDeck < 0)
+        return;
+
+    const auto& onAir = engine.getDeck (onAirDeck);
+    const auto outgoing = onAir.getAnalysis();
+    const auto incoming = engine.getDeck (1 - onAirDeck).getAnalysis();
+
+    if (outgoing == nullptr || incoming == nullptr)
+        return;
+
+    plan = automix::planMix (*outgoing, *incoming);
+
+    // Already past the phrase it wanted, which happens when the next track
+    // took long to load or the user moved on: a timed fade it is.
+    if (plan.smart && onAir.getPositionSeconds() > plan.outSeconds)
+        plan = {};
+}
+
+void AutoMix::restoreLowEq()
+{
+    if (! swappingLows)
+        return;
+
+    auto& mixer = engine.getMixer();
+    mixer.setChannelEq (fadeOutgoingDeck, 0, outgoingLow);
+    mixer.setChannelEq (fadeIncomingDeck, 0, incomingLow);
+    swappingLows = false;
+}
+
 int AutoMix::getNextIndex() const noexcept
 {
     if (pendingIndex >= 0)
@@ -57,6 +97,8 @@ void AutoMix::start (int index)
         if (! engine.isDeckLoading (i))
             engine.getDeck (i).pause();
 
+    restoreLowEq();
+    plan = {};
     phase = Phase::starting;
     nextLoading = nextReady = skipRequested = false;
     pendingIndex = -1;
@@ -69,6 +111,8 @@ void AutoMix::start (int index)
 
 void AutoMix::stop()
 {
+    restoreLowEq();
+    plan = {};
     phase = Phase::idle;
     nextLoading = nextReady = skipRequested = false;
     pendingIndex = -1;
@@ -149,12 +193,22 @@ void AutoMix::loadNext (int deckIndex, int index, int attemptsLeft)
         nextLoading = false;
         nextReady = true;
         pendingIndex = index;
+        planNextMix();
         changed();
     });
 }
 
 void AutoMix::beginFade (double nowSeconds, int outgoing, int incoming)
 {
+    // A skip mixes now, wherever the phrase is, so it gets the plain fade.
+    const auto smartFade = plan.smart && ! skipRequested;
+
+    // Started from the top of its intro, so its phrases begin with the
+    // outgoing track's outro. syncDeck then moves it to the beat nearest
+    // that point at the same phase as the leader, which keeps bar on bar.
+    if (smartFade)
+        engine.getDeck (incoming).seekToSeconds (plan.inSeconds);
+
     // Tempo and beat matched to what is playing, where both have a grid; a
     // track without one just fades in at its own speed.
     engine.syncDeck (incoming, outgoing, maxSyncStretch);
@@ -162,8 +216,22 @@ void AutoMix::beginFade (double nowSeconds, int outgoing, int incoming)
 
     const auto& out = engine.getDeck (outgoing);
     const auto& in = engine.getDeck (incoming);
+    auto wanted = fadeSeconds;
 
-    fadeLength = automix::effectiveFadeSeconds (fadeSeconds, out.getLengthSeconds(), in.getLengthSeconds());
+    if (const auto analysis = out.getAnalysis(); smartFade && analysis != nullptr)
+        wanted = plan.fadeBeats * analysis->secondsPerBeat() / juce::jmax (0.05, out.getTempoRatio());
+
+    fadeLength = automix::effectiveFadeSeconds (wanted, out.getLengthSeconds(), in.getLengthSeconds());
+    fadeIncomingDeck = incoming;
+
+    if (smartFade)
+    {
+        outgoingLow = engine.getMixer().getChannelEq (outgoing, 0);
+        incomingLow = engine.getMixer().getChannelEq (incoming, 0);
+        swappingLows = true;
+    }
+
+    plan = {};
     fadeStartSeconds = nowSeconds;
     fadeFrom = engine.getMixer().getCrossfaderPosition();
     fadeTo = sideOf (incoming);
@@ -181,6 +249,7 @@ void AutoMix::beginFade (double nowSeconds, int outgoing, int incoming)
 void AutoMix::finishFade (int outgoing)
 {
     engine.getMixer().setCrossfaderPosition (fadeTo);
+    restoreLowEq();
 
     // The old track is done. Clearing the deck matters beyond tidiness: a
     // loaded, stopped deck is what the visuals announce as coming up next.
@@ -200,6 +269,12 @@ void AutoMix::tick (double nowSeconds)
     {
         const auto progress = fadeLength > 0.0 ? (nowSeconds - fadeStartSeconds) / fadeLength : 1.0;
         engine.getMixer().setCrossfaderPosition (automix::fadePosition (progress, fadeFrom, fadeTo));
+
+        if (swappingLows)
+        {
+            engine.getMixer().setChannelEq (fadeOutgoingDeck, 0, automix::outgoingLowEq (progress, outgoingLow));
+            engine.getMixer().setChannelEq (fadeIncomingDeck, 0, automix::incomingLowEq (progress, incomingLow));
+        }
 
         if (progress >= 1.0)
             finishFade (fadeOutgoingDeck);
@@ -236,14 +311,19 @@ void AutoMix::tick (double nowSeconds)
 
     const auto speed = juce::jmax (0.05, onAir.getTempoRatio());
 
+    // Smart: the fade starts at the planned phrase rather than a fade's
+    // length before the end.
+    const auto mixAt = plan.smart ? plan.outSeconds : onAir.getLengthSeconds();
+    const auto lead = plan.smart ? 0.0 : fadeSeconds;
+
     automix::Situation situation;
-    situation.remainingSeconds = (onAir.getLengthSeconds() - onAir.getPositionSeconds()) / speed;
+    situation.remainingSeconds = (mixAt - onAir.getPositionSeconds()) / speed;
     situation.haveNext = getNextIndex() >= 0;
     situation.nextReady = nextReady;
     situation.nextLoading = nextLoading;
     situation.skipRequested = skipRequested;
 
-    switch (automix::decide (situation, fadeSeconds))
+    switch (automix::decide (situation, lead))
     {
         case automix::Step::load:
             if (! engine.isDeckLoading (incomingDeck))

@@ -55,6 +55,28 @@ void PluginHost::saveList() const
         xml->writeTo (listFile());
 }
 
+juce::File PluginHost::folderToScanFor (const juce::File& picked)
+{
+    // The outermost .vst3 wins: on Windows a bundle holds another .vst3 file
+    // in Contents/x86_64-win, and its folder would hold only that one plugin.
+    juce::File plugin;
+
+    for (auto f = picked; f != f.getParentDirectory(); f = f.getParentDirectory())
+        if (f.hasFileExtension (".vst3"))
+            plugin = f;
+
+    if (plugin != juce::File())
+        return plugin.getParentDirectory();
+
+    return picked.isDirectory() ? picked : picked.getParentDirectory();
+}
+
+void PluginHost::clearList()
+{
+    knownPlugins.clear();
+    saveList();
+}
+
 int PluginHost::scan (const juce::FileSearchPath& folders, bool includeDefaultFolders,
                       const std::atomic<bool>* shouldStop)
 {
@@ -84,7 +106,9 @@ int PluginHost::scan (const juce::FileSearchPath& folders, bool includeDefaultFo
     return knownPlugins.getNumTypes() - before;
 }
 
-void PluginHost::scanAsync (std::function<void (int, juce::StringArray)> onDone)
+void PluginHost::scanAsync (const juce::FileSearchPath& folders,
+                            std::function<void (int, juce::StringArray)> onDone,
+                            bool includeDefaultFolders)
 {
     if (scanning.exchange (true))
         return;
@@ -94,9 +118,9 @@ void PluginHost::scanAsync (std::function<void (int, juce::StringArray)> onDone)
 
     stopScan = false;
 
-    scanThread = std::thread ([this, onDone = std::move (onDone)]
+    scanThread = std::thread ([this, folders, includeDefaultFolders, onDone = std::move (onDone)]
     {
-        scan ({}, true, &stopScan);
+        scan (folders, includeDefaultFolders, &stopScan);
 
         // A file that crashed a scan stays in the pedal file's blacklist; the
         // rest of the failures are worth telling somebody about.
@@ -110,6 +134,11 @@ void PluginHost::scanAsync (std::function<void (int, juce::StringArray)> onDone)
                 onDone (count, failed);
         });
     });
+}
+
+void PluginHost::scanAsync (std::function<void (int, juce::StringArray)> onDone)
+{
+    scanAsync ({}, std::move (onDone), true);
 }
 
 std::unique_ptr<juce::AudioPluginInstance> PluginHost::createInstance (const juce::PluginDescription& description,
@@ -130,14 +159,30 @@ std::unique_ptr<juce::AudioPluginInstance> PluginHost::createInstance (const juc
     // like are switched off rather than fed with nothing.
     instance->disableNonMainBuses();
 
-    juce::AudioProcessor::BusesLayout stereo;
-    stereo.inputBuses.add (juce::AudioChannelSet::stereo());
-    stereo.outputBuses.add (juce::AudioChannelSet::stereo());
+    auto layout = instance->getBusesLayout();
 
-    if (! instance->setBusesLayout (stereo))
+    if (layout.inputBuses.isEmpty() || layout.outputBuses.isEmpty())
     {
-        error = description.name + " is not a stereo effect";
+        error = description.name + " is not an audio effect";
         return nullptr;
+    }
+
+    if (layout.getNumChannels (true, 0) != 2 || layout.getNumChannels (false, 0) != 2)
+    {
+        layout.inputBuses.getReference (0) = juce::AudioChannelSet::stereo();
+        layout.outputBuses.getReference (0) = juce::AudioChannelSet::stereo();
+
+        for (int i = 1; i < layout.inputBuses.size(); ++i)
+            layout.inputBuses.getReference (i) = juce::AudioChannelSet::disabled();
+
+        for (int i = 1; i < layout.outputBuses.size(); ++i)
+            layout.outputBuses.getReference (i) = juce::AudioChannelSet::disabled();
+
+        if (! instance->setBusesLayout (layout))
+        {
+            error = description.name + " is not a stereo effect";
+            return nullptr;
+        }
     }
 
     return instance;
@@ -149,6 +194,13 @@ std::unique_ptr<juce::AudioPluginInstance> PluginHost::createInstance (const juc
 {
     if (auto description = knownPlugins.getTypeForIdentifierString (identifier))
         return createInstance (*description, sampleRate, blockSize, error);
+
+    for (const auto& desc : knownPlugins.getTypes())
+    {
+        const auto uidHex = juce::String::toHexString (desc.uniqueId);
+        if (identifier.endsWithIgnoreCase (uidHex) || identifier.containsIgnoreCase ("-" + desc.name + "-"))
+            return createInstance (desc, sampleRate, blockSize, error);
+    }
 
     error = "a plugin that is no longer installed";
     return nullptr;

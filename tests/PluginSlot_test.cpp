@@ -366,3 +366,63 @@ TEST_CASE ("Stepping through effects skips an empty plugin slot", "[masterfx][pl
     fx.stepType (0);
     CHECK (fx.getType (0) == Type::plugin);
 }
+
+TEST_CASE ("A plugin with no parameters does not crash on labels or processing", "[masterfx][plugin]")
+{
+    struct ZeroParamPlugin final : public TestProcessor
+    {
+        ZeroParamPlugin() : TestProcessor (BusesProperties().withInput ("In", juce::AudioChannelSet::stereo())
+                                                            .withOutput ("Out", juce::AudioChannelSet::stereo())) {}
+        void prepareToPlay (double, int) override {}
+        void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override {}
+        const juce::String getName() const override { return "ZeroParam"; }
+    };
+
+    opendj::MasterEffects fx;
+    fx.prepare (specFor());
+    REQUIRE (fx.setPlugin (0, std::make_unique<ZeroParamPlugin>()));
+    usePluginIn (fx, 0);
+
+    CHECK (fx.getParamLabel (0, 0) == "P1");
+    CHECK (fx.getParamLabel (0, 1) == "P2");
+    CHECK_THAT (fx.getParam (0, 0), WithinAbs (0.5f, 1e-6));
+    CHECK_THAT (fx.getParam (0, 1), WithinAbs (0.5f, 1e-6));
+
+    juce::AudioBuffer<float> buffer (2, blockSize);
+    buffer.clear();
+    fx.process (buffer, blockSize);
+}
+
+TEST_CASE ("Plugins have releaseResources called when replaced or destroyed", "[masterfx][plugin]")
+{
+    struct ReleaseSpy final : public TestProcessor
+    {
+        explicit ReleaseSpy (int& counter)
+            : TestProcessor (BusesProperties().withInput ("In", juce::AudioChannelSet::stereo())
+                                              .withOutput ("Out", juce::AudioChannelSet::stereo())),
+              releases (counter) {}
+        void prepareToPlay (double, int) override {}
+        void releaseResources() override { ++releases; }
+        void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override {}
+        const juce::String getName() const override { return "ReleaseSpy"; }
+
+        int& releases;
+    };
+
+    int releaseCount = 0;
+    {
+        opendj::MasterEffects fx;
+        fx.prepare (specFor());
+        REQUIRE (fx.setPlugin (0, std::make_unique<ReleaseSpy> (releaseCount)));
+        usePluginIn (fx, 0);
+        juce::AudioBuffer<float> buffer (2, blockSize);
+        buffer.clear();
+        fx.process (buffer, blockSize);
+
+        // Replacing plugin calls releaseResources on the old one when collected
+        REQUIRE (fx.setPlugin (0, std::make_unique<HalfGain>()));
+        fx.process (buffer, blockSize);
+        fx.collectGarbage();
+        CHECK (releaseCount == 1);
+    }
+}

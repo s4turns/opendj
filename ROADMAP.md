@@ -1,9 +1,11 @@
 # OpenDJ roadmap
 
 Where the project is and what to pick up next. Anything ticked has tests or a verified manual
-check behind it, not just code that compiles. The suite is **293 tests** on Linux and 292 on
-Windows, the one difference being a stderr test whose stand-in for ffmpeg is a shell script;
-anything touching audio is tested by measuring the output, not by checking that the code ran.
+check behind it, not just code that compiles. The suite is **371 tests** on Linux. Windows runs
+one fewer, a stderr test whose stand-in for ffmpeg is a shell script. Anything touching audio is
+tested by measuring the output, not by checking that the code ran. Open work is also tracked as
+issues on [git.interdo.me](https://git.interdo.me/interdome/opendj/issues), and the numbers
+below refer to those.
 
 | Symbol | Meaning |
 | :---: | --- |
@@ -28,7 +30,7 @@ that was listed after it except video.
 | 8 | BPM detection and beat grid | ✅ | `src/analysis/TrackAnalyser.*` |
 | 9 | Sync: tempo and beat phase | ✅ | `AudioEngine::syncDeck` |
 | 10 | Turntable platters, mouse drivable | ✅ | `src/ui/PlatterComponent.*`, `src/ui/AngleMath.h` |
-| 11 | Hot cues | ✅ | `Deck::hotCuePressed` and friends |
+| 11 | Hot cues | ✅ | `Deck::hotCuePressed` and friends. Eight coloured pads per deck (click sets or jumps, right-click clears) and matching markers on both waveforms, `src/ui/HotCueColours.h` |
 | 12 | MIDI mapping engine, monitor, device picker | ✅ | `src/control/`, `src/ui/MidiSetupComponent.*` |
 | 13 | Roland DJ-202 mapping | ✅ | `mappings/roland-dj-202.json`, verified on hardware |
 | 14 | Track browser and library database | ✅ | `src/library/`, `src/ui/BrowserComponent.*` |
@@ -41,8 +43,11 @@ that was listed after it except video.
 | Key detection | ✅ | `src/analysis/KeyDetector.*`, in the browser's Key column |
 | Effects: filter, echo, reverb | ✅ | `src/core/Mixer.*`, one knob each per channel |
 | Master effects | ✅ | `src/core/MasterEffects.*`: two slots on the whole mix, each echo, reverb or filter with a wet level and two parameters |
-| VST3 effect plugins | 🚧 | `src/core/PluginHost.*`: scanned in the background, loaded into a master slot with its own window and two knobs mapped to its parameters. Tested with a stand-in processor; not yet with a real plugin |
+| VST3 effect plugins | ✅ | `src/core/PluginHost.*`: scanned in the background, loaded into a master slot with its own window and two knobs mapped to its parameters |
 | Sampler | ✅ | `src/core/Sampler.*`, eight pads |
+| Playlists | ✅ | `Library` playlist tables, `src/ui/PlaylistComponent.*`: built from the browser by selection or drag, reordered, renamed |
+| Automix | ✅ | `src/core/AutoMix.*`, `AutoMixMath.h`: plays a playlist on decks A and B, loading ahead, matching tempo and beat, sweeping the crossfader |
+| Smart crossfade | 🚧 | `src/core/MixPoints.*`: outro into intro, phrase on phrase, with a bass swap (#37). Checked against 20 real tracks' analyses, not yet listened to through a whole set. No vocal avoidance, which needs stems prepared ahead (#22) |
 | Mic input | 🚧 | `src/core/MicInput.*`, `src/ui/MicComponent.*`, with talkover and a stream-only switch. Tested by measuring the output; not yet tried with a real mic |
 | Stem separation | ✅ | `src/analysis/StemSeparator.*`, `StemDsp.*`, a knob per stem |
 | Record the master output | ✅ | `src/core/SetRecorder.*`: WAV, FLAC or MP3, with a tracklist |
@@ -50,16 +55,17 @@ that was listed after it except video.
 | Settings that survive a restart | ✅ | `src/app/Settings.*` |
 | Broadcasting to Icecast | ✅ | `src/stream/`, verified against a real Icecast 2.4.4 |
 | Broadcasting to YouTube and Twitch | 🚧 | `src/stream/RtmpBroadcaster.*`, `RtmpConnection.*`. The loopback test against ffmpeg's own listener passes 20 runs in 20 on Linux and 5 in 5 on Windows; never tried against a real platform |
-| MilkDrop visuals | ✅ | `src/visual/Visualizer.*`, `src/ui/VisualizerComponent.*`. projectM v4 on an offscreen context, in a window of its own and in the RTMP broadcast. EGL on Linux, WGL on Windows |
+| MilkDrop visuals | ✅ | `src/visual/Visualizer.*`, `src/ui/VisualizerComponent.*`. projectM v4 on an offscreen context, in a window of its own and in the RTMP broadcast. EGL on Linux, WGL on Windows. `NowPlayingOverlay` draws the title and what is coming up over it for 15 seconds |
 | Video | ⬜ | Playing video files, as opposed to drawing visuals. Very large. Probably a separate project |
 
 ## What to pick up next
 
 | Item | Notes |
 | --- | --- |
-| DJ-202 pad modes on the hardware, then the rest | Loop, roll and sampler modes are mapped from Mixxx's DJ-202 script and need pressing on the controller. Cue loop, pitch play, slicer, the parameter buttons and the TR-S sequencer are not mapped |
-| Arch and macOS | `scripts/build.sh` knows the Arch packages but has never been run there. macOS has never been tried |
-| Video | Playing video files is unstarted, and probably its own project. The visualiser is separate and built |
+| Stems on the GPU (#36) | Library analysis now uses several cores. Stem separation is still slow; OpenVINO is already the backend and can target a GPU when there is one |
+| DJ-202 pad modes on the hardware, then the rest (#6) | Loop, roll and sampler modes are mapped from Mixxx's DJ-202 script and need pressing on the controller. Cue loop, pitch play, slicer, the parameter buttons and the TR-S sequencer are not mapped |
+| Arch and macOS (#7) | `scripts/build.sh` knows the Arch packages but has never been run there. macOS has never been tried |
+| Video (#8) | Playing video files is unstarted, and probably its own project. The visualiser is separate and built |
 | The visualiser on macOS | Linux and Windows have an offscreen context, from EGL and WGL. macOS needs the CGL equivalent, and nothing there has been tried at all |
 | RTMP against a real YouTube or Twitch account | Verified so far only against ffmpeg's own loopback RTMP listener; the handshake has never reached an actual platform |
 
@@ -69,46 +75,44 @@ The goal is that a VirtualDJ user can sit down at OpenDJ and already know how to
 what they would still reach for and not find, checked against the code rather than assumed. The
 VirtualDJ column is a description of that product, not a measurement of it.
 
-Some of it is partly there already: pitch bend through the jog wheel's nudge, Camelot notation in
-`MusicalKey::toCamelot` that the browser does not yet show, and hot cues that a controller can
-set but nothing on screen shows or triggers.
+Some of it is partly there already: pitch bend through the jog wheel's nudge, and Camelot notation
+in `MusicalKey::toCamelot` that the browser does not yet show.
 
 ### Reached for in every set
 
 | Missing | What VirtualDJ has | Where OpenDJ is |
 | --- | --- | --- |
-| Playlists and history | Playlists, virtual and filter folders, an automatic history of played tracks, a side list for lining up the next few | Folders only. The only tracklist is the one a recording writes |
-| Hot cues on screen | Pads per deck with colours and names, and markers on the waveform | Controller only, never drawn |
-| Beat jump and quantize | Jumps of 1 to 32 beats; cues and loops snap to the grid | None. Automatic loops already start on the beat |
-| Beat grid editing | Adjust the BPM, move the downbeat, tap tempo | Detection only, so a wrong grid cannot be corrected |
-| More effects | Dozens, including flanger, phaser, gate, bitcrusher, brake, backspin, echo out and stutter, plus reverse and censor buttons | Filter, echo and reverb per channel, and the same three in two master slots |
-| Key tools | Key shift in semitones, key match between decks, Camelot display, harmonic hints in the browser | Detection only |
-| Auto gain | Tracks levelled by measured loudness | A trim, with no analysis behind it |
-| Automix | Unattended mixing through a playlist, beat matched | None |
-| MIDI learn and more controllers | Hundreds of controllers mapped out of the box, and a mapper that learns a control from the hardware | One mapping, written by hand. Issue #4 |
+| History and smart folders (#11) | Playlists, virtual and filter folders, an automatic history of played tracks, a side list for lining up the next few | Playlists are done. No history: `tracks.last_played_at` exists but nothing writes it. No filter folders |
+| Named hot cues (#12) | Pads per deck with colours and names, and markers on the waveform | Pads and coloured markers are done; a cue cannot be named yet |
+| Beat jump and quantize (#13) | Jumps of 1 to 32 beats; cues and loops snap to the grid | None. Automatic loops already start on the beat |
+| Beat grid editing (#14) | Adjust the BPM, move the downbeat, tap tempo | Detection only, so a wrong grid cannot be corrected |
+| More effects (#15) | Dozens, including flanger, phaser, gate, bitcrusher, brake, backspin, echo out and stutter, plus reverse and censor buttons | Filter, echo and reverb per channel, and the same three in two master slots, which also take VST3 plugins |
+| Key tools (#16) | Key shift in semitones, key match between decks, Camelot display, harmonic hints in the browser | Detection only |
+| Auto gain (#17) | Tracks levelled by measured loudness | A trim, with no analysis behind it |
+| Vocal-aware automix (#37) | Transitions that keep two vocals from overlapping | Mixes land outro on intro, phrase on phrase, but vocals are not detected |
+| MIDI learn and more controllers (#19, #4) | Hundreds of controllers mapped out of the box, and a mapper that learns a control from the hardware | One mapping, written by hand |
 
 ### Expected by regular users
 
 | Missing | Notes |
 | --- | --- |
-| A deeper sampler | More pads, banks, recording a sample from a deck, samples locked to tempo |
-| More from stems | Separating the library ahead of time, stem pads such as vocal off or drums only, effects on one stem |
-| Library import and metadata | iTunes and Music, rekordbox and Serato libraries; a tag editor; cover art; colours, ratings and comments |
-| Saved cue points | Hot cues kept with the track in the library |
-| Sandbox | Previewing a later moment in the headphones while the master plays on |
-| Keyboard mapper | Shortcuts of your own; today there are only Q, W, O, P and the number row |
-| Ableton Link | Tempo shared with other applications and devices |
-| Timecode vinyl | Decks driven by real turntables or CDJs |
+| A deeper sampler (#21) | More pads, banks, recording a sample from a deck, samples locked to tempo |
+| More from stems (#22) | Separating the library ahead of time, stem pads such as vocal off or drums only, effects on one stem |
+| Library import and metadata (#23) | iTunes and Music, rekordbox and Serato libraries; a tag editor; cover art; colours, ratings and comments |
+| Saved cue points (#24) | Hot cues kept with the track in the library |
+| Sandbox (#26) | Previewing a later moment in the headphones while the master plays on |
+| Keyboard mapper (#27) | Shortcuts of your own; today there are only Q, W, O, P and the number row |
+| Ableton Link (#29) | Tempo shared with other applications and devices |
+| Timecode vinyl (#30) | Decks driven by real turntables or CDJs |
 
 ### Large, or not only up to us
 
 | Missing | Notes |
 | --- | --- |
 | Video and karaoke | Already listed above as probably its own project |
-| A visualizer for streams | Issue #3. A smaller step towards video: the RTMP output already carries a still frame that could become a live picture |
-| Streaming services | Tidal, Beatport, SoundCloud and the rest need commercial agreements, which may not be open to a GPL project |
-| Lighting | DMX and OS2L |
-| Everything around it | A remote control app, scripting, skins, cloud sync. VST3 effects are under way in #34 |
+| Streaming services (#31) | Tidal, Beatport, SoundCloud and the rest need commercial agreements, which may not be open to a GPL project |
+| Lighting (#32) | DMX and OS2L |
+| Everything around it (#33) | A remote control app, scripting, skins, cloud sync. VST3 effects, also listed there, are done (#34) |
 
 ## Platforms
 
@@ -580,9 +584,28 @@ would fail.
 | --- | --- |
 | SQLite schema | `src/library/Library.cpp`: folders, tracks, tags, tempo, and an analysis version, so a better analyser quietly invalidates old results |
 | Analyse once | `AnalysisCache`, asked before anything is decoded. `Deck::loadFile` takes a `KnownTrack` and skips the tempo pass |
-| Scanning | A quick tag pass so the browser fills in seconds, then analysis at low priority, written as it goes so it can be stopped and resumed |
+| Scanning | A quick tag pass so the browser fills in seconds, then analysis at low priority, written as it goes so it can be stopped and resumed. Up to four tracks are analysed at once, one per core with one core left over, since each worker holds a whole decoded track |
 | Tag reading | `TagReader.cpp` parses ID3v2.2 to 2.4 and ID3v1 directly, plus MP3 length from the Xing header. Opening a decoder for 13,000 files just to ask their length is far too slow |
-| Browser | Search, sortable columns, folder filter, double-click or drag onto a deck, and `browse.scroll` so the controller's encoder moves the selection |
+| Playlists | `playlists` and `playlist_tracks`, stored by path so a track removed from the library keeps its place. Right-click a track to load it onto any deck, or add a whole selection to a playlist |
+| Browser | Search, sortable columns, folder filter, double-click or drag onto a deck, and `browse.scroll` so the controller's encoder moves the selection. Removing a folder asks first, then drops the tracks no other watched folder holds |
+
+## Automix and the smart crossfade
+
+`AutoMix` is the thin part that drives the decks; the decisions are plain functions, tested
+without an engine: `AutoMixMath.h` for when to load and fade, `MixPoints.*` for where.
+
+| Piece | Notes |
+| --- | --- |
+| Bars | `barLevels` averages the 2 ms detail peaks over each bar of the beat grid, overall and in the mid and high bands |
+| Intro and outro | Found by what is missing from the mids and highs, not by loudness. A techno intro or outro is the drums alone, and the kick keeps the overall level within about a tenth of full, so a loudness threshold finds nothing. Thin means the mid and high levels, each against the track's 75th percentile, average under 0.7 |
+| Phrases | 16 beats, counted from the first bar with music. The outro starts on a phrase boundary, no earlier than halfway, so a breakdown is not taken for one |
+| The mix | Out at the start of the outro, but never more than 16 bars before the music ends; in at the incoming track's first bar with music. 32 beats when both sides have two phrases to spare, else 16 |
+| Bass swap | The incoming low EQ is killed for the first half of the fade, then the lows swap. Restored when the fade ends or automix stops |
+| Fallback | A grid with confidence under 0.3, or a plan whose moment has passed by the time the next track loads, gets the timed fade. "Next now" always does |
+
+Checked against the analysis of 20 tracks from a techno library before the thresholds were set:
+intros were found in 16. The constants are in `MixPoints.h`, named, so they can be retuned in one
+place once it has been heard through real sets.
 
 ## Recording a set
 

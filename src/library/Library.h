@@ -99,7 +99,16 @@ public:
     //==========================================================================
 
     bool addFolder (const juce::File& folder);
+    /** Stops watching a folder and drops its tracks from the library. A track
+        that is also inside another watched folder stays. Playlists keep their
+        entries, since they are stored by path. */
     bool removeFolder (const juce::File& folder);
+
+    bool isWatched (const juce::File& folder) const;
+
+    /** How many tracks removeFolder() would drop. */
+    int countTracksOnlyIn (const juce::File& folder) const;
+
     std::vector<juce::File> getFolders() const;
 
     //==========================================================================

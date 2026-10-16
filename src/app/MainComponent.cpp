@@ -155,6 +155,12 @@ MainComponent::MainComponent()
     };
 
     masterFxView = std::make_unique<MasterFxComponent> (engine.getMixer().getMasterEffects(), pluginHost);
+    masterFxView->setPluginDirectory (settings.vstPluginDirectory);
+    masterFxView->onPluginDirectoryChanged = [this] (const juce::String& dir)
+    {
+        settings.vstPluginDirectory = dir;
+        saveSettings();
+    };
     masterFxView->onMessage = [this] (const juce::String& message)
     {
         pluginNotice = message;
@@ -677,6 +683,9 @@ void MainComponent::saveSettings()
 
     state.visibleDecks = visibleDecks;
     state.waveformZoomSeconds = settings.waveformZoomSeconds;
+
+    if (masterFxView != nullptr)
+        state.vstPluginDirectory = masterFxView->getPluginDirectory();
 
     state.writeTo (SessionState::defaultFile());
 

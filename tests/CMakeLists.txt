@@ -37,11 +37,13 @@ target_sources(opendj-tests PRIVATE
     AngleMath_test.cpp
     OverlayMath_test.cpp
     AutoMix_test.cpp
+    MixPoints_test.cpp
     TempoMath_test.cpp
     StemModel_test.cpp
     WaveformMath_test.cpp
     StemDsp_test.cpp
     Library_test.cpp
+    LibraryScanner_test.cpp
     TagReader_test.cpp
     ${OPENDJ_ENGINE_SOURCES})
 

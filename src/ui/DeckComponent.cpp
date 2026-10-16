@@ -5,6 +5,8 @@
 
 #include "ui/DeckComponent.h"
 
+#include "ui/HotCueColours.h"
+
 #include "control/Action.h"
 
 #include <utility>
@@ -143,6 +145,17 @@ DeckComponent::DeckComponent (AudioEngine& engineToUse, int deckIndex, const juc
 
         addAndMakeVisible (button);
     }
+
+    for (int slot = 0; slot < Deck::numHotCues; ++slot)
+    {
+        auto& pad = hotCueButtons[(size_t) slot];
+        pad.setButtonText (juce::String (slot + 1));
+        pad.onPress = [this, slot] { deck.hotCuePressed (slot); refresh(); };
+        pad.onClear = [this, slot] { deck.clearHotCue (slot); refresh(); };
+        addAndMakeVisible (pad);
+    }
+
+    shownHotCues.fill (-2.0);   // nothing matches, so the first refresh paints them
 
     loopToggleButton.setTooltip ("Turn the current loop on or off");
     loopToggleButton.onClick = [this] { deck.toggleLoop(); refresh(); };
@@ -348,6 +361,7 @@ void DeckComponent::refresh()
                            && engine.getEffectiveBpm (1 - index) > 0.0);
 
     refreshLoopControls();
+    refreshHotCues();
 
     slipButton.setColour (juce::TextButton::buttonColourId,
                           deck.isSlipEnabled() ? loopColour.darker (0.2f)
@@ -454,6 +468,40 @@ void DeckComponent::refreshLoopControls()
     overviewWave.setLoop (start, end, looping);
 }
 
+void DeckComponent::refreshHotCues()
+{
+    std::array<double, Deck::numHotCues> positions {};
+
+    for (int slot = 0; slot < Deck::numHotCues; ++slot)
+        positions[(size_t) slot] = deck.getHotCueSeconds (slot);
+
+    // Pads only change when a cue does, so a full refresh at the frame rate
+    // does not restyle eight buttons sixty times a second.
+    if (positions == shownHotCues)
+        return;
+
+    shownHotCues = positions;
+
+    for (int slot = 0; slot < Deck::numHotCues; ++slot)
+    {
+        auto& pad = hotCueButtons[(size_t) slot];
+        const auto seconds = positions[(size_t) slot];
+        const auto isSet = seconds >= 0.0;
+        const auto colour = hotCueColour (slot);
+
+        pad.setColour (juce::TextButton::buttonColourId, isSet ? colour.darker (0.3f) : juce::Colour (0xff2c2c34));
+        pad.setColour (juce::TextButton::textColourOffId, isSet ? colour.darker (0.3f).contrasting (0.8f)
+                                                                     : colour.brighter (0.5f));
+        pad.setTooltip (isSet ? "Hot cue " + juce::String (slot + 1) + " at " + formatTime (seconds)
+                                    + ". Click to jump there, right-click to clear"
+                              : "Hot cue " + juce::String (slot + 1) + ": click to set it here");
+    }
+
+    const std::vector<double> markers (positions.begin(), positions.end());
+    scrollingWave.setHotCues (markers);
+    overviewWave.setHotCues (markers);
+}
+
 void DeckComponent::paint (juce::Graphics& g)
 {
     g.setColour (panelColour);
@@ -503,6 +551,16 @@ void DeckComponent::resized()
 
     for (auto& button : loopButtons)
         button.setBounds (loopRow.removeFromLeft (lengthWidth).reduced (1));
+
+    // Hot cue pads, a row of their own under the loops.
+    area.removeFromTop (4);
+    {
+        auto padRow = area.removeFromTop (24);
+        const auto padWidth = padRow.getWidth() / Deck::numHotCues;
+
+        for (auto& pad : hotCueButtons)
+            pad.setBounds (padRow.removeFromLeft (padWidth).reduced (1));
+    }
 
     // Then the stems: the button that asks for a separation, and a knob per part.
     area.removeFromTop (6);
