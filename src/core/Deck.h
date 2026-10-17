@@ -290,7 +290,9 @@ private:
 
     std::array<std::atomic<float>, numStems> stemGains;
     std::array<juce::SmoothedValue<float>, numStems> stemGainRamps;   // audio thread
-    std::atomic<std::shared_ptr<const TrackAnalysis>> analysisData;
+    // Apple's libc++ lacks atomic<shared_ptr>. Access this only through the
+    // portable shared_ptr atomic free functions, which provide the same safety.
+    std::shared_ptr<const TrackAnalysis> analysisData;
     std::unique_ptr<Track> owned;                       // the live track
     std::vector<std::unique_ptr<Track>> retired;        // message thread only
 

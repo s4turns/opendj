@@ -22,9 +22,10 @@ namespace
     // a level has to let the ramps settle first.
     constexpr int blocksToSettle = 20;
 
-    void fillSine (juce::AudioBuffer<float>& buffer, double frequency, double& phase, float amplitude)
+    void fillSine (juce::AudioBuffer<float>& buffer, double frequency, double& phase, float amplitude,
+                    double deviceSampleRate = sampleRate)
     {
-        const auto delta = juce::MathConstants<double>::twoPi * frequency / sampleRate;
+        const auto delta = juce::MathConstants<double>::twoPi * frequency / deviceSampleRate;
 
         for (int i = 0; i < buffer.getNumSamples(); ++i)
         {
@@ -296,6 +297,57 @@ TEST_CASE ("a filtered channel still passes what is left of it", "[mixer][filter
     harness.mixer.setChannelFilter (0, 0.0f);
 
     REQUIRE (harness.measureMasterRms (100.0) > 0.01f);
+}
+
+TEST_CASE ("channel filters survive sweeps and Bluetooth sample rate changes", "[mixer][filter][bluetooth]")
+{
+    Harness harness;
+    harness.mixer.setChannelCue (0, true);
+    harness.mixer.setCueGain (1.0f);
+    harness.deckB.clear();
+    std::array<juce::AudioBuffer<float>*, opendj::Mixer::numChannels> decks { &harness.deckA, &harness.deckB };
+
+    // The ULT WEAR device opened at 16 kHz. Include other low rates and a
+    // return from music playback rates, as a Bluetooth profile change does.
+    for (const auto rate : { 16000.0, 8000.0, 22050.0, 32000.0, 44100.0, 48000.0, 96000.0, 16000.0 })
+    {
+        INFO ("device sample rate: " << rate);
+        harness.mixer.prepare (rate, blockSize);
+        double phase = 0.0;
+
+        for (const auto position : { 0.5f, 0.4f, 0.0f, 0.25f, 0.5f, 0.6f, 1.0f, 0.75f, 0.5f })
+        {
+            INFO ("filter position: " << position);
+            harness.mixer.setChannelFilter (0, position);
+
+            for (int block = 0; block < blocksToSettle; ++block)
+            {
+                fillSine (harness.deckA, 400.0, phase, 0.1f, rate);
+                harness.mixer.processBlock (decks, harness.master, harness.cue);
+
+                bool finite = true;
+                float peak = 0.0f;
+                for (const auto* bus : { &harness.master, &harness.cue })
+                    for (int ch = 0; ch < 2; ++ch)
+                        for (int i = 0; i < blockSize; ++i)
+                        {
+                            const auto value = bus->getSample (ch, i);
+                            finite = finite && std::isfinite (value);
+                            peak = juce::jmax (peak, std::abs (value));
+                        }
+
+                REQUIRE (finite);
+                REQUIRE (peak < 0.5f);  // a quiet source must not turn into a full-scale burst
+            }
+        }
+
+        // Returning to centre must restore music without resetting the mixer
+        // or reconnecting the device: poisoned echo/reverb state cannot pass.
+        REQUIRE_THAT (harness.master.getRMSLevel (0, 0, blockSize),
+                      WithinAbs (0.1f / std::sqrt (2.0f), 0.015f));
+        REQUIRE_THAT (harness.cue.getRMSLevel (0, 0, blockSize),
+                      WithinAbs (0.1f / std::sqrt (2.0f), 0.015f));
+    }
 }
 
 TEST_CASE ("the filter position is reported back for the interface", "[mixer][filter]")

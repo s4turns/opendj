@@ -63,23 +63,21 @@ namespace
         return cleaned.isEmpty() ? juce::String ("OpenDJ") : cleaned;
     }
 
-    /** Whether an ffmpeg answers `-encoders` with libx264 in the list, which
-        is the one thing every candidate must have: this whole feature is
-        built on shelling out for the H.264 encoding neither JUCE nor OpenDJ
-        can do itself. A build without it starts and runs happily on anything
-        that does not ask for libx264, so failing later, mid broadcast, would
-        be a far worse way to find out. */
-    bool ffmpegCanEncodeH264 (const juce::String& executable)
+    /** Probe the installed ffmpeg rather than assuming which encoders and
+        filters it was built with. Homebrew's minimal build has libx264 but
+        omits drawtext, so a title must be optional even with H.264 available. */
+    bool ffmpegHasFeature (const juce::String& executable, const juce::String& listOption,
+                           const juce::String& feature)
     {
         juce::ChildProcess probe;
 
-        if (! probe.start (juce::StringArray { executable, "-hide_banner", "-encoders" },
+        if (! probe.start (juce::StringArray { executable, "-hide_banner", listOption },
                            juce::ChildProcess::wantStdOut))
             return false;
 
         const auto output = probe.readAllProcessOutput();
         probe.waitForProcessToFinish (5000);
-        return output.contains ("libx264");
+        return output.contains (feature);
     }
 
     /** The font `drawtext` should use, already escaped for a filtergraph, or
@@ -153,7 +151,7 @@ juce::String RtmpSettings::validate() const
 //==============================================================================
 
 juce::StringArray buildFfmpegArguments (const RtmpSettings& settings, double sampleRate,
-                                        const juce::String& videoSource)
+                                        const juce::String& videoSource, bool drawTitle)
 {
     juce::StringArray args;
 
@@ -223,7 +221,7 @@ juce::StringArray buildFfmpegArguments (const RtmpSettings& settings, double sam
         juce::String videoFilter;
         videoFilter << "color=c=0x1a1a2e:s=" << settings.videoWidth << "x" << settings.videoHeight << ":r=2";
 
-        if (const auto fontFile = titleFontFile(); canDrawTitle (fontFile))
+        if (const auto fontFile = titleFontFile(); drawTitle && canDrawTitle (fontFile))
         {
             videoFilter << ",drawtext=";
 
@@ -1285,7 +1283,7 @@ juce::String RtmpConnection::findFfmpeg (juce::String& diagnostic)
         versionCheck.waitForProcessToFinish (5000);
         sawAny = true;
 
-        if (ffmpegCanEncodeH264 (candidate))
+        if (ffmpegHasFeature (candidate, "-encoders", "libx264"))
             return candidate;
     }
 
@@ -1326,7 +1324,8 @@ bool RtmpConnection::launch (const RtmpSettings& settings, double sampleRate, ju
         return false;
     }
 
-    const auto args = buildFfmpegArguments (settings, sampleRate, videoSource);
+    const auto drawTitle = ! settings.liveVideo && ffmpegHasFeature (ffmpegPath, "-filters", " drawtext ");
+    const auto args = buildFfmpegArguments (settings, sampleRate, videoSource, drawTitle);
 
     if (! process->start (ffmpegPath, args, settings.liveVideo, error))
     {

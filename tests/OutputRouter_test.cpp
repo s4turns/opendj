@@ -8,6 +8,7 @@
 #include "core/OutputRouter.h"
 
 #include <array>
+#include <limits>
 #include <vector>
 
 using Catch::Matchers::WithinAbs;
@@ -199,6 +200,36 @@ TEST_CASE ("a block longer than the busses is trimmed to fit", "[routing]")
 
     REQUIRE_THAT (outputs.at (0), WithinAbs (0.10f, 1.0e-6f));
     REQUIRE (outputs.tailIsIntact());
+}
+
+TEST_CASE ("invalid audio samples never reach the device", "[routing][device-safety]")
+{
+    Busses busses;
+    const std::array<float, 3> invalid { std::numeric_limits<float>::quiet_NaN(),
+                                       std::numeric_limits<float>::infinity(),
+                                       -std::numeric_limits<float>::infinity() };
+
+    for (int ch = 0; ch < 2; ++ch)
+        for (size_t i = 0; i < invalid.size(); ++i)
+        {
+            busses.master.setSample (ch, (int) i, invalid[i]);
+            busses.cue.setSample (ch, (int) i, invalid[i]);
+        }
+
+    for (const auto mode : { OutputMode::separatePairs, OutputMode::splitStereo })
+    {
+        Outputs outputs (4);
+        routeOutputs (busses.master, busses.cue, outputs.data(), outputs.size(), numSamples, mode);
+
+        const auto writtenChannels = mode == OutputMode::separatePairs ? 4 : 2;
+        for (int ch = 0; ch < writtenChannels; ++ch)
+            for (int i = 0; i < (int) invalid.size(); ++i)
+                REQUIRE (outputs.at (ch, i) == 0.0f);
+
+        // Only invalid samples are silenced; the valid signal still follows.
+        REQUIRE_THAT (outputs.at (0, 3), WithinAbs (mode == OutputMode::separatePairs ? 0.10f : 0.15f, 1.0e-6f));
+        REQUIRE (outputs.tailIsIntact());
+    }
 }
 
 TEST_CASE ("whether the cue bus can be heard depends on the mode", "[routing]")

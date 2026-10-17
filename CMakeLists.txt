@@ -21,8 +21,10 @@ set(OPENDJ_ASIO_SDK_PATH "" CACHE PATH "Path to a local copy of the Steinberg AS
 # ---------------------------------------------------------------------------
 # Dependencies
 # ---------------------------------------------------------------------------
+# Keep the existing default, while allowing platform scripts to isolate their
+# dependency sources and build trees with -DFETCHCONTENT_BASE_DIR.
+set(FETCHCONTENT_BASE_DIR "${CMAKE_SOURCE_DIR}/external" CACHE PATH "")
 include(FetchContent)
-set(FETCHCONTENT_BASE_DIR "${CMAKE_SOURCE_DIR}/external" CACHE PATH "" FORCE)
 
 FetchContent_Declare(JUCE
     GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
@@ -277,6 +279,13 @@ set(OPENDJ_ENGINE_SOURCES
 # ---------------------------------------------------------------------------
 # Application target
 # ---------------------------------------------------------------------------
+set(OPENDJ_MACOS_APP_OPTIONS)
+if(APPLE)
+    list(APPEND OPENDJ_MACOS_APP_OPTIONS
+        MICROPHONE_PERMISSION_ENABLED TRUE
+        MICROPHONE_PERMISSION_TEXT "OpenDJ uses audio input for the microphone mixer and broadcasts.")
+endif()
+
 juce_add_gui_app(OpenDJ
     PRODUCT_NAME  "OpenDJ"
     COMPANY_NAME  "OpenDJ"
@@ -287,7 +296,12 @@ juce_add_gui_app(OpenDJ
     # from these: an .ico on Windows, an .icns in a macOS bundle.
     ICON_BIG      ${CMAKE_SOURCE_DIR}/images/icon.png
     ICON_SMALL    ${CMAKE_SOURCE_DIR}/images/icon-256.png
-    NEEDS_CURL    FALSE)
+    NEEDS_CURL    FALSE
+    ${OPENDJ_MACOS_APP_OPTIONS})
+
+if(APPLE)
+    juce_add_bundle_resources_directory(OpenDJ "${CMAKE_SOURCE_DIR}/mappings")
+endif()
 
 juce_generate_juce_header(OpenDJ)
 

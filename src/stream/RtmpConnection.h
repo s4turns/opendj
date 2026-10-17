@@ -75,11 +75,14 @@ struct RtmpSettings
     generated entirely by ffmpeg's own `lavfi` colour source and `drawtext`
     filter: nothing in OpenDJ renders or ships an image. That is the
     simplest track that satisfies "needs an H.264 video track", and it is a
-    deliberately static one; see the design note in ROADMAP.md before
+    deliberately static one. Set drawTitle to false if ffmpeg lacks drawtext;
+    the colour source still provides the required video track.
+    See the design note in ROADMAP.md before
     reaching for a waveform or the album art.
 */
 juce::StringArray buildFfmpegArguments (const RtmpSettings& settings, double sampleRate,
-                                        const juce::String& videoSource = "pipe:3");
+                                        const juce::String& videoSource = "pipe:3",
+                                        bool drawTitle = true);
 
 /** One ffmpeg subprocess carrying one broadcast.
 

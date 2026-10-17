@@ -114,10 +114,12 @@ void Mixer::ChannelStrip::prepare (const juce::dsp::ProcessSpec& spec)
 
     filterLowCutoff.reset (spec.sampleRate, smoothingSeconds);
     filterHighCutoff.reset (spec.sampleRate, smoothingSeconds);
-    filterLowCutoff.setCurrentAndTargetValue (filterOpenLow);
-    filterHighCutoff.setCurrentAndTargetValue (filterOpenHigh);
-    filterLow.setCutoffFrequency (filterOpenLow);
-    filterHigh.setCutoffFrequency (filterOpenHigh);
+    const auto openLow = lowPassCutoffFor (0.5f, spec.sampleRate);
+    const auto openHigh = highPassCutoffFor (0.5f, spec.sampleRate);
+    filterLowCutoff.setCurrentAndTargetValue (openLow);
+    filterHighCutoff.setCurrentAndTargetValue (openHigh);
+    filterLow.setCutoffFrequency (openLow);
+    filterHigh.setCutoffFrequency (openHigh);
 
     for (auto& g : bandGain)
         g.reset (spec.sampleRate, smoothingSeconds);
@@ -449,8 +451,8 @@ void Mixer::processBlock (const std::array<juce::AudioBuffer<float>*, numChannel
         // A cutoff is swept, not stepped: setting it per sample would be
         // needless work, but jumping it per block would zipper.
         const auto filterPosition = strip.filterPosition.load (std::memory_order_relaxed);
-        strip.filterLowCutoff.setTargetValue (lowPassCutoffFor (filterPosition));
-        strip.filterHighCutoff.setTargetValue (highPassCutoffFor (filterPosition));
+        strip.filterLowCutoff.setTargetValue (lowPassCutoffFor (filterPosition, currentSampleRate));
+        strip.filterHighCutoff.setTargetValue (highPassCutoffFor (filterPosition, currentSampleRate));
 
         const auto echoAmount = strip.echoAmount.load (std::memory_order_relaxed);
         strip.echoDelaySamples.setTargetValue (

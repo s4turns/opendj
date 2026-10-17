@@ -265,6 +265,18 @@ TEST_CASE ("a blank title falls back to something rather than an empty filter", 
     REQUIRE (args.joinIntoString (" ").contains ("text='OpenDJ'"));
 }
 
+TEST_CASE ("a broadcast keeps its video track when ffmpeg has no text filter", "[rtmp]")
+{
+    const auto args = opendj::buildFfmpegArguments (usable(), 48000.0, "pipe:3", false);
+    const auto joined = args.joinIntoString (" ");
+
+    REQUIRE (joined.contains ("color=c="));
+    REQUIRE (! joined.contains ("drawtext"));
+    REQUIRE (args.contains ("libx264"));
+    REQUIRE (args.contains ("aac"));
+    REQUIRE (args.contains (usable().fullUrl()));
+}
+
 TEST_CASE ("writing while offline is harmless", "[rtmp]")
 {
     RtmpBroadcaster broadcaster;
@@ -775,6 +787,7 @@ TEST_CASE ("stopping a broadcast returns even when ffmpeg has stopped reading", 
     REQUIRE (script.replaceWithText (
         "@echo off\r\n"
         "echo %* | findstr /C:\"-encoders\" >nul && (echo  V....D libx264 stand-in& exit /b 0)\r\n"
+        "echo %* | findstr /C:\"-filters\" >nul && (echo  T.C drawtext stand-in& exit /b 0)\r\n"
         "echo %* | findstr /C:\"-version\" >nul && (echo ffmpeg version stand-in& exit /b 0)\r\n"
         "echo Output #0, flv, to 'rtmp://stand-in': 1>&2\r\n"
         // One process, no children: a child such as ping would inherit the pipe
@@ -785,6 +798,7 @@ TEST_CASE ("stopping a broadcast returns even when ffmpeg has stopped reading", 
         "#!/bin/sh\n"
         "case \"$*\" in\n"
         "  *-encoders*) echo ' V....D libx264              stand-in'; exit 0 ;;\n"
+        "  *-filters*)  echo ' T.C drawtext              stand-in'; exit 0 ;;\n"
         "  *-version*)  echo 'ffmpeg version stand-in'; exit 0 ;;\n"
         "esac\n"
         "echo \"Output #0, flv, to 'rtmp://stand-in':\" >&2\n"
