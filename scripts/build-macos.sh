@@ -15,13 +15,17 @@ Usage: scripts/build-macos.sh [options]
   --jobs N                      Parallel build jobs (default: logical CPU count)
   --deployment-target VERSION   Minimum macOS version (default: 12.6)
   --openvino DIR                Enable stems using DIR/OpenVINOConfig.cmake
+  --onnxruntime DIR             Enable stems on the Apple GPU through Core ML, using
+                                an unpacked onnxruntime-osx-* release in DIR
   -h, --help                    Show this help
 
 Builds and fetched dependencies stay under build-macos/<arch>/<configuration>.
 Intel tests/runs on Apple Silicon require Rosetta. Universal tests run natively;
 use --arch x86_64 --test to exercise the Intel version on Apple Silicon.
 OpenVINO is disabled unless requested; its libraries must match every requested
-architecture. The macOS visualizer backend is not implemented yet.
+architecture. ONNX Runtime is likewise off unless requested: use the
+onnxruntime-osx-arm64 release for arm64, or osx-universal2 for any other
+architecture; its library is copied into the app. The macOS visualizer backend is not implemented yet.
 USAGE
 }
 
@@ -40,6 +44,7 @@ do_deps=0
 jobs=""
 deployment_target="${MACOSX_DEPLOYMENT_TARGET:-12.6}"
 openvino_dir=""
+onnxruntime_dir=""
 run_args=()
 
 while [[ $# -gt 0 ]]; do
@@ -54,6 +59,7 @@ while [[ $# -gt 0 ]]; do
         --jobs) require_value "$@"; jobs="$2"; shift 2 ;;
         --deployment-target) require_value "$@"; deployment_target="$2"; shift 2 ;;
         --openvino) require_value "$@"; openvino_dir="$2"; shift 2 ;;
+        --onnxruntime) require_value "$@"; onnxruntime_dir="$2"; shift 2 ;;
         -h|--help) usage; exit 0 ;;
         *) fail "Unknown option: $1. See --help." ;;
     esac
@@ -138,6 +144,31 @@ if [[ -n "$openvino_dir" ]]; then
 else
     cmake_args+=(-DCMAKE_DISABLE_FIND_PACKAGE_OpenVINO=ON -DCMAKE_REQUIRE_FIND_PACKAGE_OpenVINO=OFF)
 fi
+
+if [[ -n "$onnxruntime_dir" ]]; then
+    [[ -f "$onnxruntime_dir/include/onnxruntime_cxx_api.h" && -f "$onnxruntime_dir/lib/libonnxruntime.dylib" ]] \
+        || fail "--onnxruntime must name an unpacked onnxruntime-osx-* release (with include/ and lib/)."
+    onnxruntime_dir="$(cd "$onnxruntime_dir" && pwd)"
+    onnxruntime_archs="$(lipo -archs "$onnxruntime_dir/lib/libonnxruntime.dylib")"
+    for requested_architecture in ${cmake_architectures//;/ }; do
+        [[ " $onnxruntime_archs " == *" $requested_architecture "* ]] \
+            || fail "ONNX Runtime in $onnxruntime_dir has no $requested_architecture (it has: $onnxruntime_archs). Use the osx-universal2 release."
+    done
+
+    # The app links the runtime directly, so it will not even open on a macOS
+    # older than the one the runtime was built for: 14.0 for 1.31.
+    onnxruntime_minos="$(otool -l "$onnxruntime_dir/lib/libonnxruntime.dylib" | awk '$1 == "minos" { print $2; exit }')"
+    if [[ -n "$onnxruntime_minos" ]] && awk -v a="$deployment_target" -v b="$onnxruntime_minos" 'BEGIN {
+            split(a, x, "."); split(b, y, ".")
+            for (i = 1; i <= 3; ++i) if (x[i] + 0 != y[i] + 0) exit !(x[i] + 0 < y[i] + 0)
+            exit 1 }'; then
+        echo "ONNX Runtime needs macOS $onnxruntime_minos; raising the minimum from $deployment_target."
+        deployment_target="$onnxruntime_minos"
+        cmake_args+=("-DCMAKE_OSX_DEPLOYMENT_TARGET=$deployment_target")
+    fi
+fi
+# Always passed, so leaving the option out turns ONNX Runtime off again.
+cmake_args+=("-DOPENDJ_ONNXRUNTIME_ROOT=$onnxruntime_dir")
 
 if [[ $do_clean -eq 1 ]]; then
     echo "Removing $build_dir"

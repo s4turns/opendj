@@ -154,15 +154,20 @@ if(OPENDJ_ONNXRUNTIME_ROOT AND EXISTS "${OPENDJ_ONNXRUNTIME_ROOT}/include/onnxru
     target_include_directories(opendj_onnxruntime SYSTEM INTERFACE "${OPENDJ_ONNXRUNTIME_ROOT}/include")
     target_link_libraries(opendj_onnxruntime INTERFACE "${OPENDJ_ONNXRUNTIME_LIBRARY}")
     target_compile_definitions(opendj_onnxruntime INTERFACE OPENDJ_HAVE_ONNXRUNTIME=1)
+    # The real file behind libonnxruntime.dylib's symlinks, for copying.
+    file(REAL_PATH "${OPENDJ_ONNXRUNTIME_LIBRARY}" OPENDJ_ONNXRUNTIME_LIBRARY_FILE)
     set(OPENDJ_HAVE_ONNXRUNTIME ON)
 
     message(STATUS "ONNX Runtime found: stems can be separated on the GPU")
 
     # The runtime and its CUDA provider go next to the program, as OpenVINO's
     # do. NVIDIA's own libraries do not: they are 1.5 GB, and StemModel finds
-    # them where setup-windows.ps1 put them.
+    # them where setup-windows.ps1 put them. The Mac app carries the runtime in
+    # its Frameworks folder, so it runs without the archive it was built from;
+    # the library is found there by its install name, libonnxruntime.1.dylib.
     function(opendj_use_onnxruntime target)
         target_link_libraries(${target} PRIVATE opendj_onnxruntime)
+        get_target_property(bundle ${target} MACOSX_BUNDLE)
 
         if(WIN32)
             foreach(dll onnxruntime onnxruntime_providers_shared onnxruntime_providers_cuda)
@@ -172,6 +177,15 @@ if(OPENDJ_ONNXRUNTIME_ROOT AND EXISTS "${OPENDJ_ONNXRUNTIME_ROOT}/include/onnxru
                             "${OPENDJ_ONNXRUNTIME_ROOT}/lib/${dll}.dll" "$<TARGET_FILE_DIR:${target}>")
                 endif()
             endforeach()
+        elseif(APPLE AND bundle)
+            add_custom_command(TARGET ${target} POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_BUNDLE_CONTENT_DIR:${target}>/Frameworks"
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${OPENDJ_ONNXRUNTIME_LIBRARY_FILE}" "$<TARGET_BUNDLE_CONTENT_DIR:${target}>/Frameworks/libonnxruntime.1.dylib")
+            # Only the bundle's own folder: CMake would otherwise also add the
+            # archive's, a path on the build machine.
+            set_property(TARGET ${target} APPEND PROPERTY INSTALL_RPATH "@executable_path/../Frameworks")
+            set_property(TARGET ${target} PROPERTY BUILD_WITH_INSTALL_RPATH ON)
         else()
             set_property(TARGET ${target} APPEND PROPERTY BUILD_RPATH "${OPENDJ_ONNXRUNTIME_ROOT}/lib")
         endif()

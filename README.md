@@ -319,10 +319,15 @@ an Intel Mac tester or macOS Intel CI runner is still needed for those checks.
 The visualizer is currently unavailable on macOS. Stems are disabled by default;
 `--openvino /path/to/runtime/cmake` enables an installed OpenVINO runtime with
 libraries matching the requested architectures, and the HTDemucs model must also
-be installed. A build configured with `-DOPENDJ_ONNXRUNTIME_ROOT` pointing at an unpacked
-`onnxruntime-osx-arm64` release, and `htdemucs_v4.onnx` from this project's
-`stem-model-onnx-1` release in `~/.local/share/opendj/models`, separates through
-Core ML instead; that path has not yet been tried on a Mac. For RTMP broadcasting, install ffmpeg with libx264 (`brew install ffmpeg`).
+be installed. `--onnxruntime /path/to/onnxruntime-osx-arm64-1.31.0` (an unpacked
+[ONNX Runtime release](https://github.com/microsoft/onnxruntime/releases); `osx-universal2`
+for Intel or universal builds) separates on the Apple GPU and Neural Engine through
+Core ML instead, with `htdemucs_v4.onnx` from this project's `stem-model-onnx-1`
+release in `~/.local/share/opendj/models`. The runtime is copied into the app, and
+raises the app's minimum macOS version to its own (14.0 for 1.31). On an M5 Pro a
+six minute track separates in about 26 seconds, 2.5 times as fast as on the CPU.
+Core ML compiles the model on first use, which takes half a minute, and keeps the
+result (about 600 MB) in `~/.cache/opendj/coreml`. For RTMP broadcasting, install ffmpeg with libx264 (`brew install ffmpeg`).
 When ffmpeg lacks the optional `drawtext` filter, the static video card omits the title.
 See `scripts/build-macos.sh --help` for all options.
 
