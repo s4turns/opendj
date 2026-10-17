@@ -5,11 +5,20 @@
 
 #include "core/OutputRouter.h"
 
+#include <cmath>
+
 namespace opendj
 {
 
 namespace
 {
+    /** Never send NaN or infinity to an audio driver, even if an upstream
+        effect fails. Silence the bad sample while leaving valid audio alone. */
+    float safeSample (float value) noexcept
+    {
+        return std::isfinite (value) ? value : 0.0f;
+    }
+
     /** One output channel, or null when the device has not got that one or is
         not using it. Everything below goes through this, which is why nothing
         below has to check a channel index again. */
@@ -22,9 +31,12 @@ namespace
                       int sourceChannel, int numSamples) noexcept
     {
         if (destination != nullptr && sourceChannel < source.getNumChannels())
-            juce::FloatVectorOperations::copy (destination,
-                                               source.getReadPointer (sourceChannel),
-                                               numSamples);
+        {
+            const auto* samples = source.getReadPointer (sourceChannel);
+
+            for (int i = 0; i < numSamples; ++i)
+                destination[i] = safeSample (samples[i]);
+        }
     }
 
     /** Both sides of a stereo bus, halved, into one output. Halving rather than
@@ -40,7 +52,7 @@ namespace
         const auto* right = source.getNumChannels() > 1 ? source.getReadPointer (1) : left;
 
         for (int i = 0; i < numSamples; ++i)
-            destination[i] = (left[i] + right[i]) * 0.5f;
+            destination[i] = safeSample ((left[i] + right[i]) * 0.5f);
     }
 }
 

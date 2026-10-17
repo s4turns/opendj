@@ -286,6 +286,40 @@ The MilkDrop visuals behind the Visuals button come with an idle preset and noth
 you fetch a library for them; `scripts/get-presets.ps1` installs 14,575 of them into
 `%APPDATA%\OpenDJ`. They are fetched rather than shipped: see [ROADMAP.md](ROADMAP.md) for why.
 
+### macOS (Apple Silicon first)
+
+Use the separate macOS script; the Linux and Windows scripts are unchanged.
+Install Xcode or Apple's Command Line Tools (`xcode-select --install`), then:
+
+```sh
+scripts/build-macos.sh --deps                  # install CMake and Ninja with Homebrew
+scripts/build-macos.sh --test                  # native build and tests
+scripts/build-macos.sh --run track-a.wav       # native build and launch
+scripts/build-macos.sh --arch universal --release  # Apple Silicon + Intel app
+scripts/build-macos.sh --arch x86_64 --test     # Intel tests through Rosetta on Apple Silicon
+```
+
+The default is the hardware's native architecture, with a minimum macOS version
+of 12.6. Use `--deployment-target VERSION` to change that minimum. Each architecture
+and configuration has its own build and dependency directory under `build-macos/`.
+The resulting app is at
+`build-macos/<arch>/<configuration>/OpenDJ_artefacts/<configuration>/OpenDJ.app`;
+copy the entire app bundle to run it elsewhere. The controller mapping is bundled
+inside it. `--clean` removes only the selected architecture/configuration.
+
+The script applies an ad-hoc signature for local development. Public downloads
+still need Developer ID signing and notarization. Rosetta exercises the Intel
+code but cannot establish Intel hardware audio performance or driver compatibility;
+an Intel Mac tester or macOS Intel CI runner is still needed for those checks.
+[Apple documents building and testing both architectures on Apple Silicon](https://developer.apple.com/documentation/apple-silicon/building-a-universal-macos-binary).
+
+The visualizer is currently unavailable on macOS. Stems are disabled by default;
+`--openvino /path/to/runtime/cmake` enables an installed OpenVINO runtime with
+libraries matching the requested architectures, and the HTDemucs model must also
+be installed. For RTMP broadcasting, install ffmpeg with libx264 (`brew install ffmpeg`).
+When ffmpeg lacks the optional `drawtext` filter, the static video card omits the title.
+See `scripts/build-macos.sh --help` for all options.
+
 ### Any platform, by hand
 
 ```

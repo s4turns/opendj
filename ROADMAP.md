@@ -64,7 +64,8 @@ that was listed after it except video.
 | --- | --- |
 | Stems on the GPU (#36) | Library analysis now uses several cores. Stem separation is still slow; OpenVINO is already the backend and can target a GPU when there is one |
 | DJ-202 pad modes on the hardware, then the rest (#6) | Loop, roll and sampler modes are mapped from Mixxx's DJ-202 script and need pressing on the controller. Cue loop, pitch play, slicer, the parameter buttons and the TR-S sequencer are not mapped |
-| Arch and macOS (#7) | `scripts/build.sh` knows the Arch packages but has never been run there. macOS has never been tried |
+| Arch | `scripts/build.sh` knows the Arch packages but has never been run there |
+| macOS hardware coverage | Apple Silicon builds, tests and opens with CoreAudio. Intel hardware and the DJ-202 on macOS still need checking; see Platforms below |
 | Video (#8) | Playing video files is unstarted, and probably its own project. The visualiser is separate and built |
 | The visualiser on macOS | Linux and Windows have an offscreen context, from EGL and WGL. macOS needs the CGL equivalent, and nothing there has been tried at all |
 | RTMP against a real YouTube or Twitch account | Verified so far only against ffmpeg's own loopback RTMP listener; the handshake has never reached an actual platform |
@@ -122,7 +123,8 @@ in `MusicalKey::toCamelot` that the browser does not yet show.
 | Fedora | ✅ | ✅ | Fedora 44, GCC 16, on a DJ-202's own four channel interface through PipeWire's JACK |
 | Debian and Ubuntu | ✅ | ⬜ | Builds and tests in CI; never run on a desktop |
 | Arch | ⬜ | ⬜ | Packages known, untested |
-| macOS | ⬜ | ⬜ | JUCE supports it; nothing has been tried |
+| macOS Apple Silicon | ✅ | ✅ | Separate `scripts/build-macos.sh`, Apple Clang 21. Native app opens with CoreAudio; 375 CTest entries pass with stems and visuals disabled. Microphone and DJ-202 hardware use remain unverified |
+| macOS Intel | ✅ | 🚧 | Universal app contains x86_64 and arm64; all 375 Intel test cases pass through Rosetta on Apple Silicon with stems and visuals disabled. No Intel hardware available |
 
 ## Rules worth knowing before changing the engine
 
@@ -710,9 +712,9 @@ Plus the loop family: `loop.in`, `loop.out`, `loop.toggle`, `loop.beats`, `loop.
 
 # What running it turned up
 
-Three real faults that no test caught, all found by building the thing and using it. They are
-kept together because they share a lesson: the audio path had no seam a test could reach without
-a sound card.
+Real faults that no test caught, all found by building the thing and using it. The first two
+exposed an audio path that had no seam a test could reach without a sound card; later faults
+exposed cases the tests did not cover.
 
 ## Decks C and D were silent
 
@@ -754,6 +756,51 @@ track was discarded as undecodable. `TrackDecoder` now reads in chunks and halve
 failure, keeping everything that does decode. A track whose reported length overruns what exists
 plays, which is the honest answer.
 
+## Bluetooth filter sweeps stopped playback
+
+**Status:** Resolved. The fix passes offline regression tests and the user confirmed it resolves
+the issue with Sony ULT WEAR Bluetooth headphones on macOS Apple Silicon.
+
+**Reported symptom.** While playing through Sony ULT WEAR Bluetooth headphones on macOS Apple
+Silicon, moving the filter stopped sound. The user described the sound service as failing and had
+to reconnect the headphones to resume playback. OpenDJ reported the device at 16 kHz. A CoreAudio
+service crash has not been established from logs.
+
+**Cause and reproduction.** Both channel and master filters used a fixed 22 kHz open cutoff and
+an 8 kHz high-pass endpoint. At a 16 kHz sample rate, a valid cutoff must be below the 8 kHz
+Nyquist frequency. An offline sweep from the centre to position 0.4 reproduced invalid channel
+samples and a master filter peak of approximately 7.7 million from a 0.1-amplitude sine wave.
+NaN and infinity could reach the output router, and invalid samples could persist in downstream
+echo and reverb state, explaining why returning the knob alone might not restore sound.
+
+**Fix.** The shared curves in `src/core/EffectCurves.h` scale their endpoints to at most 49% of
+the actual device sample rate: 7,840 Hz at 16 kHz. Both `Mixer` and `MasterEffects` use those
+curves and reset their smoothed cutoffs to the valid range during device preparation. Scaling
+the whole sweep preserves useful knob travel at low rates. `OutputRouter` also replaces NaN
+and infinity with silence before handing samples to the driver, in both routing modes.
+
+**Regression coverage.** The new cases in [Mixer_test.cpp](tests/Mixer_test.cpp),
+[MasterEffects_test.cpp](tests/MasterEffects_test.cpp) and
+[OutputRouter_test.cpp](tests/OutputRouter_test.cpp) failed before the fix and pass afterwards.
+They sweep at 8, 16, 22.05, 32, 44.1, 48 and 96 kHz, then return to 16 kHz. They check that samples
+remain finite, levels stay bounded, returning to centre restores audio without resetting the
+processor, and invalid samples are silenced at the device boundary. The master filter is tested
+at maximum resonance. All 375 native test entries and 375 Intel test cases through Rosetta pass
+with stems and visuals disabled.
+
+Run only these offline regression tests after building with the macOS script:
+
+```sh
+build-macos/arm64/RelWithDebInfo/tests/opendj-tests_artefacts/RelWithDebInfo/opendj-tests \
+    '[bluetooth],[device-safety]' --reporter compact
+```
+
+**Hardware verification.** After launching the rebuilt app, the user tested with the ULT WEAR
+headphones and confirmed that the fix resolved the reported filter-triggered sound failure.
+
+**Other launch observation.** The launch command built successfully and exited with code 0,
+but also printed `!! killing thread by force !!`. The cause of that warning remains unconfirmed.
+
 ---
 
 # The Roland DJ-202
@@ -791,14 +838,14 @@ MIDI version.
 
 # Working on this
 
-| Task | Windows | Linux |
-| --- | --- | --- |
-| Install dependencies | comes with VS 2022 Build Tools | `scripts/build.sh --deps` |
-| Build | `pwsh scripts/build.ps1` | `scripts/build.sh` |
-| Build and run | `pwsh scripts/build.ps1 -Run` | `scripts/build.sh --run` |
-| Run the tests | `pwsh scripts/build.ps1 -Test` | `ctest --test-dir build` |
-| Start from scratch | `pwsh scripts/build.ps1 -Clean` | `scripts/build.sh --clean` |
-| Build with ASIO | `pwsh scripts/build.ps1 -Asio` | not applicable |
+| Task | Windows | Linux | macOS |
+| --- | --- | --- | --- |
+| Install dependencies | comes with VS 2022 Build Tools | `scripts/build.sh --deps` | `scripts/build-macos.sh --deps` |
+| Build | `pwsh scripts/build.ps1` | `scripts/build.sh` | `scripts/build-macos.sh` |
+| Build and run | `pwsh scripts/build.ps1 -Run` | `scripts/build.sh --run` | `scripts/build-macos.sh --run` |
+| Run the tests | `pwsh scripts/build.ps1 -Test` | `ctest --test-dir build` | `scripts/build-macos.sh --test` |
+| Start from scratch | `pwsh scripts/build.ps1 -Clean` | `scripts/build.sh --clean` | `scripts/build-macos.sh --clean` |
+| Build with ASIO | `pwsh scripts/build.ps1 -Asio` | not applicable | not applicable |
 
 Pass audio files on the command line to start with tracks already on the decks, which is far
 faster than clicking through a file dialog while testing:

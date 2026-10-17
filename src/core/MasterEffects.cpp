@@ -342,10 +342,12 @@ void MasterEffects::Slot::prepare (const juce::dsp::ProcessSpec& spec)
     filterLowCutoff.reset (spec.sampleRate, smoothingSeconds);
     filterHighCutoff.reset (spec.sampleRate, smoothingSeconds);
     filterResonance.reset (spec.sampleRate, smoothingSeconds);
-    filterLowCutoff.setCurrentAndTargetValue (filterOpenLow);
-    filterHighCutoff.setCurrentAndTargetValue (filterOpenHigh);
-    filterLow.setCutoffFrequency (filterOpenLow);
-    filterHigh.setCutoffFrequency (filterOpenHigh);
+    const auto openLow = lowPassCutoffFor (0.5f, spec.sampleRate);
+    const auto openHigh = highPassCutoffFor (0.5f, spec.sampleRate);
+    filterLowCutoff.setCurrentAndTargetValue (openLow);
+    filterHighCutoff.setCurrentAndTargetValue (openHigh);
+    filterLow.setCutoffFrequency (openLow);
+    filterHigh.setCutoffFrequency (openHigh);
 
     typeGain.reset (spec.sampleRate, typeFadeSeconds);
     typeGain.setCurrentAndTargetValue (1.0f);
@@ -578,8 +580,8 @@ void MasterEffects::processSlot (Slot& slot, juce::AudioBuffer<float>& buffer, i
 
         case Type::filter:
         {
-            slot.filterLowCutoff.setTargetValue (lowPassCutoffFor (p0));
-            slot.filterHighCutoff.setTargetValue (highPassCutoffFor (p0));
+            slot.filterLowCutoff.setTargetValue (lowPassCutoffFor (p0, sampleRate));
+            slot.filterHighCutoff.setTargetValue (highPassCutoffFor (p0, sampleRate));
             slot.filterResonance.setTargetValue (resonanceFor (p1));
 
             for (int i = 0; i < numSamples; ++i)

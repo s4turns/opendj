@@ -34,6 +34,7 @@ enum class OutputMode
     Realtime safe: no allocation, no locks, and never a write past `numSamples`
     or past the channel the device gave us. A null channel pointer is skipped,
     since JUCE passes null for an output that is not active.
+    Non-finite samples are replaced with silence before reaching the driver.
 */
 void routeOutputs (const juce::AudioBuffer<float>& master,
                    const juce::AudioBuffer<float>& cue,

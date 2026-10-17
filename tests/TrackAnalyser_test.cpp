@@ -162,7 +162,8 @@ TEST_CASE ("dominance passes from low to mid to high across the crossovers", "[a
     // three bands of a bucket have no reason to sum to its energy.
     const auto dominantBand = [] (double frequency)
     {
-        const auto& bucket = middleOf (peaksWithBands (makeTone (frequency, 2.0), 4410));
+        const auto peaks = peaksWithBands (makeTone (frequency, 2.0), 4410);
+        const auto& bucket = middleOf (peaks);
 
         if (bucket.low >= bucket.mid && bucket.low >= bucket.high)
             return 0;

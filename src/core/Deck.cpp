@@ -217,7 +217,7 @@ bool Deck::loadFile (const juce::File& file, const KnownTrack* known)
         : TrackAnalyser::analyse (track->audio, track->sampleRate);
 
     publish (std::move (track));
-    analysisData.store (std::move (analysis));
+    std::atomic_store (&analysisData, std::move (analysis));
 
     static std::atomic<juce::uint64> nextSerial { 0 };
     loadSerial.store (++nextSerial, std::memory_order_relaxed);
@@ -277,7 +277,7 @@ void Deck::publish (std::unique_ptr<Track> newTrack)
 void Deck::unload()
 {
     publish (nullptr);
-    analysisData.store (nullptr);
+    std::atomic_store (&analysisData, std::shared_ptr<const TrackAnalysis>());
     loadSerial.store (0, std::memory_order_relaxed);
 }
 
@@ -289,7 +289,7 @@ juce::String Deck::getLastLoadError() const
 
 std::shared_ptr<const TrackAnalysis> Deck::getAnalysis() const
 {
-    return analysisData.load();
+    return std::atomic_load (&analysisData);
 }
 
 void Deck::cleanUp()

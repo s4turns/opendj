@@ -23,9 +23,10 @@ namespace
         return { sampleRate, (juce::uint32) maxBlock, 2 };
     }
 
-    void fillSine (juce::AudioBuffer<float>& buffer, double frequency, double& phase, float amplitude)
+    void fillSine (juce::AudioBuffer<float>& buffer, double frequency, double& phase, float amplitude,
+                    double deviceSampleRate = sampleRate)
     {
-        const auto delta = juce::MathConstants<double>::twoPi * frequency / sampleRate;
+        const auto delta = juce::MathConstants<double>::twoPi * frequency / deviceSampleRate;
 
         for (int i = 0; i < buffer.getNumSamples(); ++i)
         {
@@ -194,6 +195,52 @@ TEST_CASE ("A master filter turned down takes the top off and is open at centre"
 
     // And the other way, a high pass.
     CHECK (measure (0.9f, 100.0) < sineRms * 0.1f);
+}
+
+TEST_CASE ("master filters survive sweeps and Bluetooth sample rate changes", "[masterfx][filter][bluetooth]")
+{
+    opendj::MasterEffects fx;
+    fx.setType (0, Type::filter);
+    fx.setType (1, Type::filter);
+    fx.setWet (0, 1.0f);
+    fx.setEnabled (0, true);
+    fx.setParam (0, 1, 1.0f);   // maximum resonance
+    juce::AudioBuffer<float> buffer (2, blockSize);
+
+    for (const auto rate : { 16000.0, 8000.0, 22050.0, 32000.0, 44100.0, 48000.0, 96000.0, 16000.0 })
+    {
+        INFO ("device sample rate: " << rate);
+        fx.prepare ({ rate, (juce::uint32) blockSize, 2 });
+        double phase = 0.0;
+
+        for (const auto position : { 0.5f, 0.4f, 0.0f, 0.25f, 0.5f, 0.6f, 1.0f, 0.75f, 0.5f })
+        {
+            INFO ("filter position: " << position);
+            fx.setParam (0, 0, position);
+
+            for (int block = 0; block < 20; ++block)
+            {
+                fillSine (buffer, 400.0, phase, 0.1f, rate);
+                fx.process (buffer, blockSize);
+
+                bool finite = true;
+                float peak = 0.0f;
+                for (int ch = 0; ch < 2; ++ch)
+                    for (int i = 0; i < blockSize; ++i)
+                    {
+                        const auto value = buffer.getSample (ch, i);
+                        finite = finite && std::isfinite (value);
+                        peak = juce::jmax (peak, std::abs (value));
+                    }
+
+                REQUIRE (finite);
+                REQUIRE (peak < 2.0f);  // allows resonance, catches runaway feedback
+            }
+        }
+
+        REQUIRE_THAT (buffer.getRMSLevel (0, 0, blockSize),
+                      WithinAbs (0.1f / std::sqrt (2.0f), 0.015f));
+    }
 }
 
 TEST_CASE ("Changing a master effect mid-signal does not click", "[masterfx]")
