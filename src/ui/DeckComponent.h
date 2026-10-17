@@ -115,6 +115,7 @@ public:
 private:
     void loadButtonClicked();
     void refreshLoopControls();
+    void updateSeparateTooltip();
     void refreshHotCues();
     void applyTempoFromSlider();
     double rangePercent() const;

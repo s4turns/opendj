@@ -66,6 +66,10 @@ if(OpenVINO_FOUND)
     endif()
 endif()
 
+if(OPENDJ_HAVE_ONNXRUNTIME)
+    opendj_use_onnxruntime(opendj-tests)
+endif()
+
 if(OPENDJ_VISUALIZER_AVAILABLE)
     target_compile_definitions(opendj-tests PRIVATE OPENDJ_HAVE_VISUALIZER=1)
     target_link_libraries(opendj-tests PRIVATE libprojectM::projectM libprojectM::playlist)

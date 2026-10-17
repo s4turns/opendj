@@ -270,6 +270,9 @@ through winget, or you can do it up front. The same script installs ffmpeg (with
 RTMP broadcasting needs at runtime, and the pieces for stem separation: Intel's OpenVINO runtime from winget and
 the htdemucs model (about 105 MB, from Hugging Face, into `~/.local/share/opendj/models`). OpenDJ finds winget's
 ffmpeg without a restart of the shell, and `build.ps1` finds OpenVINO and copies its DLLs next to the program.
+On a machine with an NVIDIA card it also fetches ONNX Runtime, NVIDIA's CUDA and cuDNN libraries (about 2.2 GB)
+and an ONNX copy of the model, so stems separate on the GPU, four times as fast as on the CPU; the Stems
+button's tooltip says which device is in use.
 Add `-SkipStems` to leave the stem pieces out:
 
 ```
@@ -316,7 +319,10 @@ an Intel Mac tester or macOS Intel CI runner is still needed for those checks.
 The visualizer is currently unavailable on macOS. Stems are disabled by default;
 `--openvino /path/to/runtime/cmake` enables an installed OpenVINO runtime with
 libraries matching the requested architectures, and the HTDemucs model must also
-be installed. For RTMP broadcasting, install ffmpeg with libx264 (`brew install ffmpeg`).
+be installed. A build configured with `-DOPENDJ_ONNXRUNTIME_ROOT` pointing at an unpacked
+`onnxruntime-osx-arm64` release, and `htdemucs_v4.onnx` from this project's
+`stem-model-onnx-1` release in `~/.local/share/opendj/models`, separates through
+Core ML instead; that path has not yet been tried on a Mac. For RTMP broadcasting, install ffmpeg with libx264 (`brew install ffmpeg`).
 When ffmpeg lacks the optional `drawtext` filter, the static video card omits the title.
 See `scripts/build-macos.sh --help` for all options.
 

@@ -39,7 +39,10 @@ public:
     bool isAvailable() const { return hasNativeModel() || separatorCommand.existsAsFile(); }
 
     /** True when the model runs in this process rather than as a command. */
-    bool hasNativeModel() const { return StemModel::findModel().existsAsFile(); }
+    bool hasNativeModel() const
+    {
+        return StemModel::findModel().existsAsFile() || StemModel::findOnnxModel().existsAsFile();
+    }
 
     /** Where the separator was found, or why there is none, for the interface. */
     juce::String getStatusDescription() const;
@@ -82,7 +85,7 @@ private:
     StemModel model;
     bool modelLoadAttempted = false;
     juce::String modelError;
-    juce::CriticalSection modelLock;
+    mutable juce::CriticalSection modelLock;
 
     const juce::File separatorCommand;
     juce::File cacheRoot { defaultCacheRoot() };

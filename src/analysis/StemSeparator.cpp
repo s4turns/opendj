@@ -105,13 +105,30 @@ juce::String StemSeparator::getStatusDescription() const
 {
     if (hasNativeModel())
     {
-        auto description = "Separating in process, model at " + StemModel::findModel().getFullPathName();
+        // Asked from the message thread, which must not wait out a load.
+        const juce::ScopedTryLock lock (modelLock);
+
+        if (! lock.isLocked())
+            return "Loading the stem model";
+
+        // Which model is in use is only known once one has loaded; before
+        // that, the one it would most likely be.
+        auto file = model.getModelFile();
+
+        if (file == juce::File())
+            file = StemModel::findOnnxModel().existsAsFile() ? StemModel::findOnnxModel() : StemModel::findModel();
+
+        juce::String description;
 
         if (const auto device = model.getDeviceName(); device.isNotEmpty())
-            description << " on the " << device;
+            description << "Separating on " << device << ", model at " << file.getFullPathName();
+        else
+            description << "Separating in process, model at " << file.getFullPathName();
 
         if (modelError.isNotEmpty())
             description << ". " << modelError;
+        else if (const auto reason = model.getFallbackReason(); reason.isNotEmpty())
+            description << ". " << reason;
 
         return description;
     }

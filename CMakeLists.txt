@@ -138,6 +138,46 @@ else()
     message(STATUS "OpenVINO not found: OpenDJ will build without stem separation")
 endif()
 
+# ONNX Runtime puts stem separation on a GPU OpenVINO cannot reach: NVIDIA
+# through CUDA, or a Mac's through Core ML. Optional like OpenVINO, and found
+# only where asked for, as the root of one of Microsoft's release archives;
+# setup-windows.ps1 fetches the CUDA one and build.ps1 passes it here.
+set(OPENDJ_ONNXRUNTIME_ROOT "" CACHE PATH "Root of an ONNX Runtime release archive, for stems on the GPU")
+
+file(TO_CMAKE_PATH "${OPENDJ_ONNXRUNTIME_ROOT}" OPENDJ_ONNXRUNTIME_ROOT)
+
+if(OPENDJ_ONNXRUNTIME_ROOT AND EXISTS "${OPENDJ_ONNXRUNTIME_ROOT}/include/onnxruntime_cxx_api.h")
+    find_library(OPENDJ_ONNXRUNTIME_LIBRARY NAMES onnxruntime
+        PATHS "${OPENDJ_ONNXRUNTIME_ROOT}/lib" NO_DEFAULT_PATH REQUIRED)
+
+    add_library(opendj_onnxruntime INTERFACE)
+    target_include_directories(opendj_onnxruntime SYSTEM INTERFACE "${OPENDJ_ONNXRUNTIME_ROOT}/include")
+    target_link_libraries(opendj_onnxruntime INTERFACE "${OPENDJ_ONNXRUNTIME_LIBRARY}")
+    target_compile_definitions(opendj_onnxruntime INTERFACE OPENDJ_HAVE_ONNXRUNTIME=1)
+    set(OPENDJ_HAVE_ONNXRUNTIME ON)
+
+    message(STATUS "ONNX Runtime found: stems can be separated on the GPU")
+
+    # The runtime and its CUDA provider go next to the program, as OpenVINO's
+    # do. NVIDIA's own libraries do not: they are 1.5 GB, and StemModel finds
+    # them where setup-windows.ps1 put them.
+    function(opendj_use_onnxruntime target)
+        target_link_libraries(${target} PRIVATE opendj_onnxruntime)
+
+        if(WIN32)
+            foreach(dll onnxruntime onnxruntime_providers_shared onnxruntime_providers_cuda)
+                if(EXISTS "${OPENDJ_ONNXRUNTIME_ROOT}/lib/${dll}.dll")
+                    add_custom_command(TARGET ${target} POST_BUILD
+                        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                            "${OPENDJ_ONNXRUNTIME_ROOT}/lib/${dll}.dll" "$<TARGET_FILE_DIR:${target}>")
+                endif()
+            endforeach()
+        else()
+            set_property(TARGET ${target} APPEND PROPERTY BUILD_RPATH "${OPENDJ_ONNXRUNTIME_ROOT}/lib")
+        endif()
+    endfunction()
+endif()
+
 # projectM draws the MilkDrop visuals, both in the window and into the
 # broadcast. Optional in the same spirit as OpenVINO above: a build without it
 # is a complete DJ application that simply has no visualiser.
@@ -363,6 +403,10 @@ if(OpenVINO_FOUND)
     if(WIN32)
         opendj_copy_openvino_dlls(OpenDJ)
     endif()
+endif()
+
+if(OPENDJ_HAVE_ONNXRUNTIME)
+    opendj_use_onnxruntime(OpenDJ)
 endif()
 
 if(OPENDJ_VISUALIZER_AVAILABLE)

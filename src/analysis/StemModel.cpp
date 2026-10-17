@@ -7,11 +7,24 @@
 
 #include "analysis/StemDsp.h"
 
+#include <array>
 #include <cmath>
 #include <numeric>
 
 #if OPENDJ_HAVE_OPENVINO
  #include <openvino/openvino.hpp>
+#endif
+
+#if OPENDJ_HAVE_ONNXRUNTIME
+ #include <onnxruntime_cxx_api.h>
+
+ #if JUCE_WINDOWS
+  #define NOMINMAX
+  #define WIN32_LEAN_AND_MEAN
+  #include <windows.h>
+  #include <dxgi.h>
+  #pragma comment (lib, "dxgi.lib")
+ #endif
 #endif
 
 namespace opendj
@@ -72,78 +85,340 @@ namespace
 
         return weight;
     }
+
+    juce::Array<juce::File> modelFolders()
+    {
+        const auto home = juce::File::getSpecialLocation (juce::File::userHomeDirectory);
+
+        return
+        {
+            home.getChildFile (".local/share/opendj/models"),
+            home.getChildFile (".local/share/stemsep/models"),
+            juce::File ("/usr/local/lib/openvino-models"),
+            juce::File ("/usr/local/lib64/audacity/openvino-models")
+        };
+    }
+
+    juce::File findIn (const char* environmentVariable, std::initializer_list<const char*> names)
+    {
+        if (const auto named = juce::SystemStats::getEnvironmentVariable (environmentVariable, {});
+            named.isNotEmpty())
+            if (const juce::File file (named); file.existsAsFile())
+                return file;
+
+        for (const auto& folder : modelFolders())
+            for (const auto* name : names)
+                if (const auto file = folder.getChildFile (name); file.existsAsFile())
+                    return file;
+
+        return {};
+    }
 }
 
-#if OPENDJ_HAVE_OPENVINO
-
-struct StemModel::Impl
+/** One engine: runs a single segment through the model. The inputs are the
+    normalised spectrum [1, 4, freqBins, frames] and waveform [1, 2, segment];
+    the outputs, valid until the next call, are the spectrum of all four stems
+    [1, 16, freqBins, frames] and their waveforms [1, 8, segment]. */
+struct StemModel::Backend
 {
-    ov::Core core;
-    ov::CompiledModel compiled;
-    ov::InferRequest request;
+    virtual ~Backend() = default;
+
+    virtual bool infer (float* spectrum, float* waveform,
+                        const float*& spectrumOut, const float*& waveformOut) = 0;
 
     juce::String device;
-    bool loaded = false;
-
-    // Which output is which, decided by shape rather than by name: the names in
-    // the converted graph are numbers that change with the conversion.
-    size_t spectrumOutput = 0;
-    size_t waveformOutput = 1;
+    juce::File file;
 };
 
-StemModel::StemModel() : impl (std::make_unique<Impl>()) {}
+namespace
+{
+#if OPENDJ_HAVE_OPENVINO
+    struct OpenVinoBackend final : StemModel::Backend
+    {
+        ov::Core core;
+        ov::CompiledModel compiled;
+        ov::InferRequest request;
+
+        // Which output is which, decided by shape rather than by name: the
+        // names in the converted graph are numbers that change with the
+        // conversion.
+        size_t spectrumOutput = 0;
+        size_t waveformOutput = 1;
+
+        /** Throws when the model cannot be read or compiled. */
+        explicit OpenVinoBackend (const juce::File& modelXml)
+        {
+            file = modelXml;
+            auto model = core.read_model (modelXml.getFullPathName().toStdString());
+
+            // OpenVINO's GPU is Intel graphics only, several times faster
+            // where there is one; a machine without one separates on the CPU.
+            const auto devices = core.get_available_devices();
+            const auto hasGpu = std::find (devices.begin(), devices.end(), "GPU") != devices.end();
+
+            device = hasGpu ? "GPU" : "CPU";
+
+            try
+            {
+                compiled = core.compile_model (model, device.toStdString());
+            }
+            catch (const std::exception&)
+            {
+                device = "CPU";
+                compiled = core.compile_model (model, "CPU");
+            }
+
+            device << " (OpenVINO)";
+            request = compiled.create_infer_request();
+
+            const auto outputs = compiled.outputs();
+
+            if (outputs.size() != 2)
+                throw std::runtime_error ("the model has " + std::to_string (outputs.size())
+                                          + " outputs, expected 2");
+
+            // The spectrum output is four dimensional, the waveform three.
+            spectrumOutput = outputs[0].get_shape().size() == 4 ? 0 : 1;
+            waveformOutput = 1 - spectrumOutput;
+        }
+
+        bool infer (float* spectrum, float* waveform,
+                    const float*& spectrumOut, const float*& waveformOut) override
+        {
+            try
+            {
+                request.set_input_tensor (0, ov::Tensor (ov::element::f32,
+                                                         { 1, 4, (size_t) dsp::freqBins, (size_t) dsp::frames },
+                                                         spectrum));
+                request.set_input_tensor (1, ov::Tensor (ov::element::f32,
+                                                         { 1, 2, (size_t) dsp::segment },
+                                                         waveform));
+                request.infer();
+            }
+            catch (const std::exception&)
+            {
+                return false;
+            }
+
+            spectrumOut = request.get_output_tensor (spectrumOutput).data<const float>();
+            waveformOut = request.get_output_tensor (waveformOutput).data<const float>();
+            return true;
+        }
+    };
+#endif
+
+#if OPENDJ_HAVE_ONNXRUNTIME
+   #if JUCE_WINDOWS
+    /** setup-windows.ps1 unpacks NVIDIA's runtime libraries here rather than
+        installing the CUDA toolkit. The CUDA provider and cuDNN load them, and
+        cuDNN its own parts, with ordinary LoadLibrary calls, so the folder goes
+        on this process's PATH before the provider is asked for. */
+    void addCudaLibrariesToPath()
+    {
+        const auto bin = juce::File::getSpecialLocation (juce::File::userHomeDirectory)
+                             .getChildFile (".local/share/opendj/cuda/bin");
+
+        if (! bin.isDirectory())
+            return;
+
+        const auto path = juce::SystemStats::getEnvironmentVariable ("PATH", {});
+
+        if (! path.containsIgnoreCase (bin.getFullPathName()))
+            SetEnvironmentVariableW (L"PATH", (bin.getFullPathName() + ";" + path).toWideCharPointer());
+    }
+
+    /** The card CUDA's device 0 most likely is: the first NVIDIA adapter. */
+    juce::String nvidiaAdapterName()
+    {
+        IDXGIFactory1* factory = nullptr;
+
+        if (FAILED (CreateDXGIFactory1 (__uuidof (IDXGIFactory1), (void**) &factory)))
+            return {};
+
+        juce::String name;
+        IDXGIAdapter1* adapter = nullptr;
+
+        for (UINT i = 0; name.isEmpty() && factory->EnumAdapters1 (i, &adapter) != DXGI_ERROR_NOT_FOUND; ++i)
+        {
+            DXGI_ADAPTER_DESC1 description {};
+
+            if (SUCCEEDED (adapter->GetDesc1 (&description)) && description.VendorId == 0x10de)
+                name = juce::String (description.Description);
+
+            adapter->Release();
+        }
+
+        factory->Release();
+        return name;
+    }
+   #endif
+
+    struct OnnxRuntimeBackend final : StemModel::Backend
+    {
+        Ort::Env environment { ORT_LOGGING_LEVEL_ERROR, "OpenDJ" };
+        Ort::Session session { nullptr };
+        Ort::MemoryInfo memory = Ort::MemoryInfo::CreateCpu (OrtArenaAllocator, OrtMemTypeDefault);
+        std::vector<Ort::Value> outputs;
+
+        size_t spectrumOutput = 0;
+        size_t waveformOutput = 1;
+
+        /** Throws when the model cannot be loaded on a GPU. There is no point
+            running this one on the CPU: OpenVINO does that, faster. */
+        explicit OnnxRuntimeBackend (const juce::File& modelOnnx)
+        {
+            file = modelOnnx;
+            Ort::SessionOptions options;
+
+           #if JUCE_MAC
+            // Untested: no Mac has been at hand. Core ML picks the GPU or the
+            // Neural Engine itself, and hands back to the CPU what it cannot run.
+            options.AppendExecutionProvider ("CoreML", { { "ModelFormat", "MLProgram" },
+                                                         { "MLComputeUnits", "ALL" } });
+            device = "Apple GPU (Core ML)";
+           #else
+            #if JUCE_WINDOWS
+             addCudaLibrariesToPath();
+            #endif
+
+            // Throws when the provider, or the CUDA and cuDNN libraries it is
+            // linked against, cannot be loaded: no NVIDIA card, or no CUDA.
+            OrtCUDAProviderOptions cuda;
+            options.AppendExecutionProvider_CUDA (cuda);
+
+            #if JUCE_WINDOWS
+             device = nvidiaAdapterName();
+            #endif
+
+            if (device.isEmpty())
+                device = "NVIDIA GPU";
+
+            device << " (CUDA)";
+           #endif
+
+           #if JUCE_WINDOWS
+            session = Ort::Session (environment, modelOnnx.getFullPathName().toWideCharPointer(), options);
+           #else
+            session = Ort::Session (environment, modelOnnx.getFullPathName().toRawUTF8(), options);
+           #endif
+
+            if (session.GetOutputCount() != 2)
+                throw std::runtime_error ("the model has " + std::to_string (session.GetOutputCount())
+                                          + " outputs, expected 2");
+
+            spectrumOutput = session.GetOutputTypeInfo (0).GetTensorTypeAndShapeInfo().GetDimensionsCount() == 4 ? 0 : 1;
+            waveformOutput = 1 - spectrumOutput;
+        }
+
+        bool infer (float* spectrum, float* waveform,
+                    const float*& spectrumOut, const float*& waveformOut) override
+        {
+            const std::array<int64_t, 4> spectrumShape { 1, 4, dsp::freqBins, dsp::frames };
+            const std::array<int64_t, 3> waveformShape { 1, 2, dsp::segment };
+
+            std::array<Ort::Value, 2> inputs
+            {
+                Ort::Value::CreateTensor<float> (memory, spectrum, (size_t) (4 * dsp::freqBins * dsp::frames),
+                                                 spectrumShape.data(), spectrumShape.size()),
+                Ort::Value::CreateTensor<float> (memory, waveform, (size_t) (2 * dsp::segment),
+                                                 waveformShape.data(), waveformShape.size())
+            };
+
+            const char* const inputNames[] { "x", "xt" };
+            const char* const outputNames[] { "x_out", "xt_out" };
+
+            try
+            {
+                outputs = session.Run (Ort::RunOptions { nullptr }, inputNames, inputs.data(), inputs.size(),
+                                       outputNames, 2);
+            }
+            catch (const std::exception&)
+            {
+                return false;
+            }
+
+            spectrumOut = outputs[spectrumOutput].GetTensorData<float>();
+            waveformOut = outputs[waveformOutput].GetTensorData<float>();
+            return true;
+        }
+    };
+#endif
+}
+
+StemModel::StemModel() = default;
 StemModel::~StemModel() = default;
 
-bool StemModel::isLoaded() const              { return impl != nullptr && impl->loaded; }
-juce::String StemModel::getDeviceName() const { return impl != nullptr ? impl->device : juce::String(); }
+bool StemModel::isLoaded() const                { return backend != nullptr; }
+juce::String StemModel::getDeviceName() const   { return backend != nullptr ? backend->device : juce::String(); }
+juce::File StemModel::getModelFile() const      { return backend != nullptr ? backend->file : juce::File(); }
+juce::String StemModel::getFallbackReason() const { return fallbackReason; }
 
-juce::String StemModel::load (const juce::File& modelXml)
+juce::String StemModel::load (Engine engine)
 {
-    const auto file = modelXml.existsAsFile() ? modelXml : findModel();
+    backend.reset();
+    fallbackReason = {};
+
+    juce::String error;
+
+    if (engine != Engine::openVino)
+    {
+       #if OPENDJ_HAVE_ONNXRUNTIME
+        if (const auto file = findOnnxModel(); file.existsAsFile())
+        {
+            try
+            {
+                backend = std::make_unique<OnnxRuntimeBackend> (file);
+                return {};
+            }
+            catch (const std::exception& e)
+            {
+                error = juce::String ("Could not use the GPU through ONNX Runtime: ") + e.what();
+            }
+        }
+        else
+        {
+            error = "No htdemucs_v4.onnx found. Looked in: " + getSearchedLocations().joinIntoString (", ");
+        }
+       #else
+        error = "OpenDJ was built without ONNX Runtime.";
+       #endif
+
+        if (engine == Engine::onnxRuntime)
+            return error;
+    }
+
+   #if OPENDJ_HAVE_OPENVINO
+    const auto file = findModel();
 
     if (! file.existsAsFile())
         return "No htdemucs model found. Looked in: " + getSearchedLocations().joinIntoString (", ");
 
     try
     {
-        auto model = impl->core.read_model (file.getFullPathName().toStdString());
+        backend = std::make_unique<OpenVinoBackend> (file);
 
-        // The GPU is several times faster where there is one, but a machine
-        // without a usable one must still be able to separate, slowly.
-        const auto devices = impl->core.get_available_devices();
-        const auto hasGpu = std::find (devices.begin(), devices.end(), "GPU") != devices.end();
+        // Only worth saying when there was a GPU engine to fall back from.
+       #if OPENDJ_HAVE_ONNXRUNTIME
+        if (engine == Engine::automatic && findOnnxModel().existsAsFile())
+            fallbackReason = error;
+       #endif
 
-        impl->device = hasGpu ? "GPU" : "CPU";
-
-        try
-        {
-            impl->compiled = impl->core.compile_model (model, impl->device.toStdString());
-        }
-        catch (const std::exception&)
-        {
-            impl->device = "CPU";
-            impl->compiled = impl->core.compile_model (model, "CPU");
-        }
-
-        impl->request = impl->compiled.create_infer_request();
-
-        const auto outputs = impl->compiled.outputs();
-
-        if (outputs.size() != 2)
-            return "The model has " + juce::String ((int) outputs.size()) + " outputs, expected 2.";
-
-        // The spectrum output is four dimensional, the waveform three.
-        impl->spectrumOutput = outputs[0].get_shape().size() == 4 ? 0 : 1;
-        impl->waveformOutput = 1 - impl->spectrumOutput;
-
-        impl->loaded = true;
         return {};
     }
     catch (const std::exception& e)
     {
-        impl->loaded = false;
         return juce::String ("Could not load the model: ") + e.what();
     }
+   #else
+    if (engine == Engine::openVino)
+        return "OpenDJ was built without OpenVINO.";
+
+   #if OPENDJ_HAVE_ONNXRUNTIME
+    return error;
+   #else
+    return "OpenDJ was built without OpenVINO or ONNX Runtime, so it cannot separate stems itself.";
+   #endif
+   #endif
 }
 
 bool StemModel::separate (const juce::AudioBuffer<float>& mix,
@@ -242,25 +517,11 @@ bool StemModel::separate (const juce::AudioBuffer<float>& mix,
         for (auto& v : timeInput)
             v = (v - timeStats.mean) / (epsilon + timeStats.deviation);
 
-        try
-        {
-            impl->request.set_input_tensor (0, ov::Tensor (ov::element::f32,
-                                                           { 1, 4, (size_t) dsp::freqBins, (size_t) dsp::frames },
-                                                           specInput.data()));
-            impl->request.set_input_tensor (1, ov::Tensor (ov::element::f32,
-                                                           { 1, 2, (size_t) dsp::segment },
-                                                           timeInput.data()));
-            impl->request.infer();
-        }
-        catch (const std::exception&)
-        {
-            return false;
-        }
+        const float* specData = nullptr;
+        const float* timeData = nullptr;
 
-        const auto specOut = impl->request.get_output_tensor (impl->spectrumOutput);
-        const auto timeOut = impl->request.get_output_tensor (impl->waveformOutput);
-        const auto* specData = specOut.data<const float>();
-        const auto* timeData = timeOut.data<const float>();
+        if (! backend->infer (specInput.data(), timeInput.data(), specData, timeData))
+            return false;
 
         const auto planeSize = (size_t) (dsp::freqBins * dsp::frames);
 
@@ -328,65 +589,24 @@ bool StemModel::separate (const juce::AudioBuffer<float>& mix,
     return true;
 }
 
-#else // no OpenVINO
-
-struct StemModel::Impl {};
-
-StemModel::StemModel() = default;
-StemModel::~StemModel() = default;
-bool StemModel::isLoaded() const { return false; }
-juce::String StemModel::getDeviceName() const { return {}; }
-
-juce::String StemModel::load (const juce::File&)
-{
-    return "OpenDJ was built without OpenVINO, so it cannot separate stems itself.";
-}
-
-bool StemModel::separate (const juce::AudioBuffer<float>&, SeparatedTrack&,
-                          const std::function<bool (float)>&)
-{
-    return false;
-}
-
-#endif
-
 juce::StringArray StemModel::getSearchedLocations()
 {
-    const auto home = juce::File::getSpecialLocation (juce::File::userHomeDirectory);
+    juce::StringArray locations { "$OPENDJ_STEM_MODEL", "$OPENDJ_STEM_MODEL_ONNX" };
 
-    return
-    {
-        "$OPENDJ_STEM_MODEL",
-        home.getChildFile (".local/share/opendj/models").getFullPathName(),
-        home.getChildFile (".local/share/stemsep/models").getFullPathName(),
-        "/usr/local/lib/openvino-models",
-        "/usr/local/lib64/audacity/openvino-models"
-    };
+    for (const auto& folder : modelFolders())
+        locations.add (folder.getFullPathName());
+
+    return locations;
 }
 
 juce::File StemModel::findModel()
 {
-    if (const auto named = juce::SystemStats::getEnvironmentVariable ("OPENDJ_STEM_MODEL", {});
-        named.isNotEmpty())
-        if (const juce::File file (named); file.existsAsFile())
-            return file;
+    return findIn ("OPENDJ_STEM_MODEL", { "htdemucs_v4.xml", "htdemucs.xml" });
+}
 
-    const auto home = juce::File::getSpecialLocation (juce::File::userHomeDirectory);
-
-    const juce::File folders[]
-    {
-        home.getChildFile (".local/share/opendj/models"),
-        home.getChildFile (".local/share/stemsep/models"),
-        juce::File ("/usr/local/lib/openvino-models"),
-        juce::File ("/usr/local/lib64/audacity/openvino-models")
-    };
-
-    for (const auto& folder : folders)
-        for (const auto* name : { "htdemucs_v4.xml", "htdemucs.xml" })
-            if (const auto file = folder.getChildFile (name); file.existsAsFile())
-                return file;
-
-    return {};
+juce::File StemModel::findOnnxModel()
+{
+    return findIn ("OPENDJ_STEM_MODEL_ONNX", { "htdemucs_v4.onnx" });
 }
 
 } // namespace opendj

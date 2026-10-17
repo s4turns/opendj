@@ -187,7 +187,7 @@ DeckComponent::DeckComponent (AudioEngine& engineToUse, int deckIndex, const juc
     addAndMakeVisible (tempoLabel);
 
     // Stems: a knob each, and the button that asks for a separation.
-    stemControls.separate.setTooltip ("Separate this track into drums, bass, other and vocals");
+    updateSeparateTooltip();
     stemControls.separate.onClick = [this]
     {
         if (deck.hasStems() || engine.isDeckSeparating (index))
@@ -204,6 +204,8 @@ DeckComponent::DeckComponent (AudioEngine& engineToUse, int deckIndex, const juc
                     "Could not separate the track",
                     safe->engine.getStemSeparator().getStatusDescription());
 
+            // The model is loaded by now, so the tooltip can name the device.
+            safe->updateSeparateTooltip();
             safe->refresh();
         });
 
@@ -435,6 +437,13 @@ void DeckComponent::itemDropped (const SourceDetails& details)
     dragHovering = false;
     repaint();
     load (juce::File (details.description.toString()));
+}
+
+/** Says where separation runs, so a slow one can be told from one on the CPU. */
+void DeckComponent::updateSeparateTooltip()
+{
+    stemControls.separate.setTooltip ("Separate this track into drums, bass, other and vocals.\n"
+                                      + engine.getStemSeparator().getStatusDescription());
 }
 
 void DeckComponent::refreshLoopControls()
