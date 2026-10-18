@@ -52,6 +52,17 @@ AudioEngine::AudioEngine()
     {
         decks[(size_t) i] = std::make_unique<Deck> (i, formatManager);
         echoBeats[(size_t) i].store (1.0, std::memory_order_relaxed);
+
+        // A pad can be pressed from the MIDI thread, which should not wait on
+        // a database, so the cues are written from a loader thread instead.
+        decks[(size_t) i]->onHotCuesChanged = [this] (const juce::File& file, const HotCues& cues)
+        {
+            loaderPool.addJob ([this, file, cues]
+            {
+                if (auto* cache = analysisCache.load (std::memory_order_acquire))
+                    cache->storeHotCues (file, cues);
+            });
+        };
     }
 
     // Every frame the visualiser finishes is offered to the broadcast, which

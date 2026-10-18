@@ -83,6 +83,7 @@ private:
     void refreshStatus();
     void addFolderClicked();
     void removeFolderClicked();
+    void importClicked();
     juce::File folderForRow (int row) const;
 
     Library& library;
@@ -92,6 +93,7 @@ private:
     juce::TextButton addFolderButton { "Add folder..." };
     juce::TextButton removeFolderButton { "Remove" };
     juce::TextButton rescanButton { "Rescan" };
+    juce::TextButton importButton { "Import..." };
     juce::Label statusLabel;
 
     FolderListModel folderModel { *this };
@@ -103,7 +105,7 @@ private:
     LibraryQuery query;
 
     bool refreshPending = false;
-    std::unique_ptr<juce::FileChooser> folderChooser;
+    std::unique_ptr<juce::FileChooser> folderChooser, importChooser;
 
     mutable juce::CriticalSection selectionLock;
     juce::File selectedFile;

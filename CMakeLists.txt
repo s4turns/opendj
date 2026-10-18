@@ -327,6 +327,7 @@ set(OPENDJ_ENGINE_SOURCES
     ${CMAKE_SOURCE_DIR}/src/control/AlsaMidiCompat.cpp
     ${CMAKE_SOURCE_DIR}/src/library/Library.cpp
     ${CMAKE_SOURCE_DIR}/src/library/LibraryScanner.cpp
+    ${CMAKE_SOURCE_DIR}/src/library/RekordboxImport.cpp
     ${CMAKE_SOURCE_DIR}/src/library/TagReader.cpp
     ${CMAKE_SOURCE_DIR}/src/visual/Visualizer.cpp)
 

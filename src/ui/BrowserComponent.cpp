@@ -5,12 +5,14 @@
 
 #include "ui/BrowserComponent.h"
 
+#include "library/RekordboxImport.h"
+
 namespace opendj
 {
 
 namespace
 {
-    enum Column { artist = 1, title, bpm, length, key, album };
+    enum Column { artist = 1, title, bpm, length, key, album, rating, comment };
 
     // A refresh no more often than this, however fast the scanner writes.
     constexpr int refreshIntervalMs = 400;
@@ -42,6 +44,10 @@ BrowserComponent::BrowserComponent (Library& libraryToUse, LibraryScanner& scann
     addFolderButton.onClick = [this] { addFolderClicked(); };
     addAndMakeVisible (addFolderButton);
 
+    importButton.setTooltip ("Import a rekordbox collection: File > Export Collection in xml format");
+    importButton.onClick = [this] { importClicked(); };
+    addAndMakeVisible (importButton);
+
     removeFolderButton.onClick = [this] { removeFolderClicked(); };
     addAndMakeVisible (removeFolderButton);
 
@@ -65,6 +71,12 @@ BrowserComponent::BrowserComponent (Library& libraryToUse, LibraryScanner& scann
     header.addColumn ("Length", length, 60, 50, 80, juce::TableHeaderComponent::defaultFlags);
     header.addColumn ("Key", key, 50, 40, 80, juce::TableHeaderComponent::defaultFlags);
     header.addColumn ("Album", album, 180, 80, -1, juce::TableHeaderComponent::defaultFlags);
+
+    // Not sortable: the library has no index for them, and they are mostly
+    // empty until a collection is imported.
+    const auto unsortable = juce::TableHeaderComponent::defaultFlags & ~juce::TableHeaderComponent::sortable;
+    header.addColumn ("Rating", rating, 70, 50, 90, unsortable);
+    header.addColumn ("Comment", comment, 160, 60, -1, unsortable);
     header.setSortColumnId (artist, true);
     header.setStretchToFitActive (true);
 
@@ -225,6 +237,52 @@ void BrowserComponent::addFolderClicked()
     });
 }
 
+void BrowserComponent::importClicked()
+{
+    importChooser = std::make_unique<juce::FileChooser> ("Import a rekordbox collection (xml)",
+                                                         juce::File(), "*.xml");
+
+    importChooser->launchAsync (juce::FileBrowserComponent::openMode
+                                | juce::FileBrowserComponent::canSelectFiles,
+                                [this] (const juce::FileChooser& chooser)
+    {
+        const auto xml = chooser.getResult();
+
+        if (! xml.existsAsFile())
+            return;
+
+        importButton.setEnabled (false);
+        importButton.setButtonText ("Importing...");
+
+        // A collection of thousands of tracks takes a while to write, so it is
+        // done away from the message thread and reported when it is done.
+        juce::Thread::launch ([safe = juce::Component::SafePointer<BrowserComponent> (this), &target = library, xml]
+        {
+            const auto collection = RekordboxImport::read (xml);
+            const auto summary = collection.error.isEmpty() ? RekordboxImport::importInto (target, collection)
+                                                            : RekordboxImportSummary();
+
+            juce::MessageManager::callAsync ([safe, collection, summary]
+            {
+                if (safe == nullptr)
+                    return;
+
+                safe->importButton.setEnabled (true);
+                safe->importButton.setButtonText ("Import...");
+                safe->refreshNow();
+
+                if (safe->onPlaylistsChanged != nullptr)
+                    safe->onPlaylistsChanged();
+
+                juce::AlertWindow::showMessageBoxAsync (
+                    collection.error.isEmpty() ? juce::MessageBoxIconType::InfoIcon : juce::MessageBoxIconType::WarningIcon,
+                    "Import rekordbox collection",
+                    collection.error.isEmpty() ? summary.describe() : collection.error);
+            });
+        });
+    });
+}
+
 void BrowserComponent::removeFolderClicked()
 {
     const auto folder = folderForRow (folderList.getSelectedRow());
@@ -285,9 +343,16 @@ int BrowserComponent::getNumRows()
 // Track table
 //==============================================================================
 
-void BrowserComponent::paintRowBackground (juce::Graphics& g, int row, int, int, bool selected)
+void BrowserComponent::paintRowBackground (juce::Graphics& g, int row, int, int height, bool selected)
 {
     g.fillAll (selected ? accentColour.withAlpha (0.3f) : (row % 2 == 0 ? rowColour : rowAltColour));
+
+    // A track's colour, as rekordbox and Serato show it: a stripe at the start.
+    if (juce::isPositiveAndBelow (row, (int) rows.size()) && rows[(size_t) row].colour != 0)
+    {
+        g.setColour (juce::Colour (rows[(size_t) row].colour));
+        g.fillRect (0, 1, 4, height - 2);
+    }
 }
 
 void BrowserComponent::paintCell (juce::Graphics& g, int row, int columnId, int width, int height, bool)
@@ -305,6 +370,8 @@ void BrowserComponent::paintCell (juce::Graphics& g, int row, int columnId, int 
         case title:  text = record.displayTitle(); break;
         case album:  text = record.album; break;
         case key:    text = record.key; break;
+        case comment: text = record.comment; break;
+        case rating:  text = juce::String::repeatedString (juce::String::fromUTF8 ("\xe2\x98\x85"), record.rating); break;
         case length: text = formatLength (record.durationSeconds); justification = juce::Justification::centredRight; break;
         case bpm:
             text = record.bpm > 0.0 ? juce::String (record.bpm, 1) : (record.analysed ? "--" : "");
@@ -442,6 +509,8 @@ void BrowserComponent::resized()
     removeFolderButton.setBounds (toolbar.removeFromLeft (70));
     toolbar.removeFromLeft (6);
     rescanButton.setBounds (toolbar.removeFromLeft (70));
+    toolbar.removeFromLeft (6);
+    importButton.setBounds (toolbar.removeFromLeft (80));
     toolbar.removeFromLeft (12);
     statusLabel.setBounds (toolbar.removeFromRight (juce::jmin (420, toolbar.getWidth() / 2)));
     toolbar.removeFromRight (12);

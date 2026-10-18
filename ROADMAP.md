@@ -30,7 +30,7 @@ that was listed after it except video.
 | 8 | BPM detection and beat grid | ✅ | `src/analysis/TrackAnalyser.*` |
 | 9 | Sync: tempo and beat phase | ✅ | `AudioEngine::syncDeck` |
 | 10 | Turntable platters, mouse drivable | ✅ | `src/ui/PlatterComponent.*`, `src/ui/AngleMath.h` |
-| 11 | Hot cues | ✅ | `Deck::hotCuePressed` and friends. Eight coloured pads per deck (click sets or jumps, right-click clears) and matching markers on both waveforms, `src/ui/HotCueColours.h` |
+| 11 | Hot cues | ✅ | `Deck::hotCuePressed` and friends. Eight coloured pads per deck (click sets or jumps, right-click clears) and matching markers on both waveforms, `src/ui/HotCueColours.h`. Kept with the track in the library and back on the pads when it is loaded again (#24) |
 | 12 | MIDI mapping engine, monitor, device picker | ✅ | `src/control/`, `src/ui/MidiSetupComponent.*` |
 | 13 | Roland DJ-202 mapping | ✅ | `mappings/roland-dj-202.json`, verified on hardware |
 | 14 | Track browser and library database | ✅ | `src/library/`, `src/ui/BrowserComponent.*` |
@@ -99,8 +99,7 @@ in `MusicalKey::toCamelot` that the browser does not yet show.
 | --- | --- |
 | A deeper sampler (#21) | More pads, banks, recording a sample from a deck, samples locked to tempo |
 | More from stems (#22) | Separating the library ahead of time, stem pads such as vocal off or drums only, effects on one stem |
-| Library import and metadata (#23) | iTunes and Music, rekordbox and Serato libraries; a tag editor; cover art; colours, ratings and comments |
-| Saved cue points (#24) | Hot cues kept with the track in the library |
+| Library import and metadata (#23) | iTunes and Music and Serato libraries; a tag editor; cover art. rekordbox collections import from their XML (`src/library/RekordboxImport.*`), with grids, hot cues, playlists, colours, ratings and comments, which the library now keeps |
 | Sandbox (#26) | Previewing a later moment in the headphones while the master plays on |
 | Keyboard mapper (#27) | Shortcuts of your own; today there are only Q, W, O, P and the number row |
 | Ableton Link (#29) | Tempo shared with other applications and devices |
