@@ -7,6 +7,8 @@
 
 #include "library/Library.h"
 
+#include <sqlite3.h>
+
 using Catch::Matchers::WithinAbs;
 
 namespace
@@ -325,4 +327,128 @@ TEST_CASE ("deleting a playlist removes its entries and renaming keeps them", "[
     REQUIRE (f.library.deletePlaylist (id));
     REQUIRE (f.library.getPlaylists().empty());
     REQUIRE (f.library.getPlaylistFiles (id).empty());
+}
+
+TEST_CASE ("hot cues round trip by path and come back with the track", "[library][hotcue]")
+{
+    Fixture fixture;
+
+    REQUIRE (fixture.library.upsertTrack (fixture.recordFor (fixture.first, "Yeah", "Boys Noize")) != 0);
+
+    for (const auto cue : fixture.library.getHotCues (fixture.first))
+        REQUIRE (cue < 0.0);
+
+    auto cues = opendj::noHotCues();
+    cues[0] = 12.5;
+    cues[7] = 200.0;
+    REQUIRE (fixture.library.setHotCues (fixture.first, cues));
+
+    const auto stored = fixture.library.getHotCues (fixture.first);
+    REQUIRE_THAT (stored[0], WithinAbs (12.5, 1.0e-9));
+    REQUIRE_THAT (stored[7], WithinAbs (200.0, 1.0e-9));
+    REQUIRE (stored[3] < 0.0);
+
+    // The deck asks through the cache when it loads.
+    const auto known = fixture.library.lookup (fixture.first);
+    REQUIRE (known.has_value());
+    REQUIRE_THAT (known->hotCues[0], WithinAbs (12.5, 1.0e-9));
+
+    // Clearing a pad is writing every pad again without it.
+    cues[0] = -1.0;
+    fixture.library.storeHotCues (fixture.first, cues);
+    REQUIRE (fixture.library.getHotCues (fixture.first)[0] < 0.0);
+    REQUIRE_THAT (fixture.library.getHotCues (fixture.first)[7], WithinAbs (200.0, 1.0e-9));
+
+    // Another file has its own.
+    REQUIRE (fixture.library.getHotCues (fixture.second)[7] < 0.0);
+}
+
+TEST_CASE ("hot cues outlive the track being removed and found again", "[library][hotcue]")
+{
+    Fixture fixture;
+
+    REQUIRE (fixture.library.upsertTrack (fixture.recordFor (fixture.first, "Yeah", "Boys Noize")) != 0);
+
+    auto cues = opendj::noHotCues();
+    cues[2] = 30.0;
+    REQUIRE (fixture.library.setHotCues (fixture.first, cues));
+
+    REQUIRE (fixture.library.removeTrack (fixture.first));
+    REQUIRE (fixture.library.upsertTrack (fixture.recordFor (fixture.first, "Yeah", "Boys Noize")) != 0);
+
+    REQUIRE_THAT (fixture.library.getHotCues (fixture.first)[2], WithinAbs (30.0, 1.0e-9));
+}
+
+TEST_CASE ("rating, colour and comment are kept and survive a rescan", "[library]")
+{
+    Fixture fixture;
+
+    REQUIRE_FALSE (fixture.library.setTrackDetails (fixture.first, 4, 0xffff007fu, "peak time"));   // not in the library yet
+
+    REQUIRE (fixture.library.upsertTrack (fixture.recordFor (fixture.first, "Yeah", "Boys Noize")) != 0);
+    REQUIRE (fixture.library.setTrackDetails (fixture.first, 4, 0xffff007fu, "peak time"));
+
+    // The scanner writes tags over and over; it must not wipe these.
+    REQUIRE (fixture.library.upsertTrack (fixture.recordFor (fixture.first, "Yeah (edit)", "Boys Noize")) != 0);
+
+    const auto record = fixture.library.findTrack (fixture.first);
+    REQUIRE (record.has_value());
+    REQUIRE (record->title == "Yeah (edit)");
+    REQUIRE (record->rating == 4);
+    REQUIRE (record->colour == 0xffff007fu);
+    REQUIRE (record->comment == "peak time");
+
+    REQUIRE (fixture.library.setTrackDetails (fixture.first, 9, 0, {}));
+    REQUIRE (fixture.library.findTrack (fixture.first)->rating == 5);
+}
+
+TEST_CASE ("a library made before ratings and hot cues is upgraded in place", "[library]")
+{
+    const auto folder = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                            .getChildFile ("opendj-library-upgrade-" + juce::String (juce::Random::getSystemRandom().nextInt64()));
+    REQUIRE (folder.createDirectory());
+    const auto databaseFile = folder.getChildFile ("library.sqlite");
+
+    // The first schema's track table, with one track in it.
+    {
+        sqlite3* raw = nullptr;
+        REQUIRE (sqlite3_open (databaseFile.getFullPathName().toRawUTF8(), &raw) == SQLITE_OK);
+        REQUIRE (sqlite3_exec (raw,
+            "CREATE TABLE tracks (id INTEGER PRIMARY KEY, path TEXT NOT NULL UNIQUE,"
+            " file_size INTEGER NOT NULL DEFAULT 0, file_modified INTEGER NOT NULL DEFAULT 0,"
+            " title TEXT NOT NULL DEFAULT '', artist TEXT NOT NULL DEFAULT '', album TEXT NOT NULL DEFAULT '',"
+            " genre TEXT NOT NULL DEFAULT '', key TEXT NOT NULL DEFAULT '', duration_seconds REAL NOT NULL DEFAULT 0,"
+            " bpm REAL NOT NULL DEFAULT 0, first_beat_seconds REAL NOT NULL DEFAULT 0,"
+            " tempo_confidence REAL NOT NULL DEFAULT 0, analysis_version INTEGER NOT NULL DEFAULT 0,"
+            " added_at INTEGER NOT NULL DEFAULT 0, last_played_at INTEGER NOT NULL DEFAULT 0);"
+            "INSERT INTO tracks (path, title) VALUES ('/music/old.mp3', 'Old');",
+            nullptr, nullptr, nullptr) == SQLITE_OK);
+        sqlite3_close (raw);
+    }
+
+    {
+        opendj::Library library;
+        REQUIRE (library.open (databaseFile).wasOk());
+
+        const auto old = library.findTrack (juce::File ("/music/old.mp3"));
+        REQUIRE (old.has_value());
+        REQUIRE (old->title == "Old");
+        REQUIRE (old->rating == 0);
+
+        REQUIRE (library.setTrackDetails (juce::File ("/music/old.mp3"), 3, 0, "kept"));
+
+        auto cues = opendj::noHotCues();
+        cues[1] = 4.0;
+        REQUIRE (library.setHotCues (juce::File ("/music/old.mp3"), cues));
+    }
+
+    // And opening it again finds nothing more to do.
+    {
+        opendj::Library library;
+        REQUIRE (library.open (databaseFile).wasOk());
+        REQUIRE (library.findTrack (juce::File ("/music/old.mp3"))->comment == "kept");
+        REQUIRE_THAT (library.getHotCues (juce::File ("/music/old.mp3"))[1], WithinAbs (4.0, 1.0e-9));
+    }
+
+    folder.deleteRecursively();
 }

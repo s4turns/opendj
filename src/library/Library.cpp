@@ -82,9 +82,11 @@ namespace
     // Every column of the track table, in the order recordFromRow() reads them.
     constexpr const char* trackColumns =
         "id, path, title, artist, album, genre, key, duration_seconds, bpm, "
-        "first_beat_seconds, tempo_confidence, analysis_version, file_size, file_modified";
+        "first_beat_seconds, tempo_confidence, analysis_version, file_size, file_modified, "
+        "rating, colour, comment";
 
-    constexpr int schemaVersion = 1;
+    // 2: rating, colour and comment columns, and the hot_cues table.
+    constexpr int schemaVersion = 2;
 
     juce::String pathOf (const juce::File& file)
     {
@@ -218,17 +220,41 @@ juce::Result Library::createSchema()
         "  path TEXT NOT NULL,"
         "  PRIMARY KEY (playlist_id, position));"
 
+        "CREATE TABLE IF NOT EXISTS hot_cues ("
+        "  path TEXT NOT NULL,"
+        "  slot INTEGER NOT NULL,"
+        "  seconds REAL NOT NULL,"
+        "  PRIMARY KEY (path, slot));"
+
         "CREATE INDEX IF NOT EXISTS tracks_by_title ON tracks (title COLLATE NOCASE);"
         "CREATE INDEX IF NOT EXISTS tracks_by_artist ON tracks (artist COLLATE NOCASE);"
         "CREATE INDEX IF NOT EXISTS tracks_pending ON tracks (analysis_version);");
 
-    if (! ok)
+    // Columns added after the first release. CREATE TABLE IF NOT EXISTS leaves
+    // an older database's table as it was, so they are added to it here.
+    const auto upgraded = ok
+        && addColumnIfMissing ("tracks", "rating", "INTEGER NOT NULL DEFAULT 0")
+        && addColumnIfMissing ("tracks", "colour", "INTEGER NOT NULL DEFAULT 0")
+        && addColumnIfMissing ("tracks", "comment", "TEXT NOT NULL DEFAULT ''");
+
+    if (! upgraded)
         return juce::Result::fail (juce::String ("Could not create the library schema: ") + sqlite3_errmsg (database));
 
     Statement version (database, "INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', ?)");
     version.bind (1, juce::String (schemaVersion)).run();
 
     return juce::Result::ok();
+}
+
+bool Library::addColumnIfMissing (const char* table, const char* column, const char* definition)
+{
+    Statement columns (database, (juce::String ("PRAGMA table_info (") + table + ")").toRawUTF8());
+
+    while (columns.step())
+        if (columns.getText (1) == column)
+            return true;
+
+    return execute ((juce::String ("ALTER TABLE ") + table + " ADD COLUMN " + column + " " + definition).toRawUTF8());
 }
 
 void Library::changed()
@@ -347,6 +373,9 @@ TrackRecord Library::recordFromRow (Statement& row)
     record.analysed = row.getInt (11) == analysisVersion;
     record.fileSize = row.getInt64 (12);
     record.fileModified = row.getInt64 (13);
+    record.rating = row.getInt (14);
+    record.colour = (juce::uint32) row.getInt64 (15);
+    record.comment = row.getText (16);
     return record;
 }
 
@@ -768,6 +797,71 @@ int Library::countAnalysed() const
     return count.step() ? count.getInt (0) : 0;
 }
 
+bool Library::setTrackDetails (const juce::File& file, int rating, juce::uint32 colour, const juce::String& comment)
+{
+    bool ok = false;
+
+    {
+        std::lock_guard<std::mutex> lock (mutex);
+        Statement update (database, "UPDATE tracks SET rating = ?, colour = ?, comment = ? WHERE path = ?");
+        ok = update.bind (1, juce::jlimit (0, 5, rating)).bind (2, (juce::int64) colour)
+                   .bind (3, comment).bind (4, pathOf (file)).run()
+             && sqlite3_changes (database) > 0;
+    }
+
+    if (ok)
+        changed();
+
+    return ok;
+}
+
+//==============================================================================
+// Hot cues
+//==============================================================================
+
+HotCues Library::readHotCues (const juce::File& file) const
+{
+    auto cues = noHotCues();
+
+    Statement select (database, "SELECT slot, seconds FROM hot_cues WHERE path = ?");
+    select.bind (1, pathOf (file));
+
+    while (select.step())
+        if (const auto slot = select.getInt (0); juce::isPositiveAndBelow (slot, numHotCues))
+            cues[(size_t) slot] = select.getDouble (1);
+
+    return cues;
+}
+
+HotCues Library::getHotCues (const juce::File& file) const
+{
+    std::lock_guard<std::mutex> lock (mutex);
+    return readHotCues (file);
+}
+
+bool Library::setHotCues (const juce::File& file, const HotCues& cues)
+{
+    std::lock_guard<std::mutex> lock (mutex);
+
+    if (! execute ("BEGIN"))
+        return false;
+
+    Statement clear (database, "DELETE FROM hot_cues WHERE path = ?");
+    auto ok = clear.bind (1, pathOf (file)).run();
+
+    for (int slot = 0; ok && slot < numHotCues; ++slot)
+    {
+        if (cues[(size_t) slot] < 0.0)
+            continue;
+
+        Statement insert (database, "INSERT INTO hot_cues (path, slot, seconds) VALUES (?, ?, ?)");
+        ok = insert.bind (1, pathOf (file)).bind (2, slot).bind (3, cues[(size_t) slot]).run();
+    }
+
+    execute (ok ? "COMMIT" : "ROLLBACK");
+    return ok;
+}
+
 //==============================================================================
 // AnalysisCache
 //==============================================================================
@@ -788,6 +882,7 @@ std::optional<KnownTrack> Library::lookup (const juce::File& file)
     known.bpm = record->bpm;
     known.firstBeatSeconds = record->firstBeatSeconds;
     known.tempoConfidence = record->tempoConfidence;
+    known.hotCues = getHotCues (file);
 
     return known;
 }
@@ -823,6 +918,11 @@ void Library::store (const juce::File& file, const TrackAnalysis& analysis, doub
     record.analysed = true;
 
     upsertTrack (record);
+}
+
+void Library::storeHotCues (const juce::File& file, const HotCues& cues)
+{
+    setHotCues (file, cues);
 }
 
 } // namespace opendj

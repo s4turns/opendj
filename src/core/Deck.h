@@ -14,6 +14,7 @@
 
 #include <array>
 #include <atomic>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <vector>
@@ -125,7 +126,7 @@ public:
     // Hot cues
     //==========================================================================
 
-    static constexpr int numHotCues = 8;
+    static constexpr int numHotCues = opendj::numHotCues;
 
     /** Sets the hot cue to the current position if it is empty, or jumps to it
         if it is not. This is the one-button behaviour pads want. */
@@ -133,6 +134,12 @@ public:
     void clearHotCue (int slot);
     double getHotCueSeconds (int slot) const;
     bool hasHotCue (int slot) const;
+    HotCues getHotCues() const;
+
+    /** Called with the loaded file and every pad after one is set or cleared,
+        from whichever thread pressed it, so the cues can be kept. Set once,
+        before the deck is used. */
+    std::function<void (const juce::File&, const HotCues&)> onHotCuesChanged;
 
     //==========================================================================
     // Loops

@@ -219,6 +219,11 @@ bool Deck::loadFile (const juce::File& file, const KnownTrack* known)
     publish (std::move (track));
     std::atomic_store (&analysisData, std::move (analysis));
 
+    // After publish(), which empties the pads for the new track.
+    if (known != nullptr)
+        for (int slot = 0; slot < numHotCues; ++slot)
+            hotCues[(size_t) slot].store (known->hotCues[(size_t) slot], std::memory_order_relaxed);
+
     static std::atomic<juce::uint64> nextSerial { 0 };
     loadSerial.store (++nextSerial, std::memory_order_relaxed);
     return true;
@@ -429,15 +434,26 @@ void Deck::hotCuePressed (int slot)
     auto& cue = hotCues[(size_t) slot];
 
     if (cue.load (std::memory_order_relaxed) < 0.0)
+    {
         cue.store (getPositionSeconds(), std::memory_order_relaxed);
+
+        if (onHotCuesChanged != nullptr)
+            onHotCuesChanged (getLoadedFile(), getHotCues());
+    }
     else
+    {
         seekToSeconds (cue.load (std::memory_order_relaxed));
+    }
 }
 
 void Deck::clearHotCue (int slot)
 {
-    if (juce::isPositiveAndBelow (slot, numHotCues))
-        hotCues[(size_t) slot].store (-1.0, std::memory_order_relaxed);
+    if (! juce::isPositiveAndBelow (slot, numHotCues))
+        return;
+
+    if (hotCues[(size_t) slot].exchange (-1.0, std::memory_order_relaxed) >= 0.0
+        && onHotCuesChanged != nullptr && isLoaded())
+        onHotCuesChanged (getLoadedFile(), getHotCues());
 }
 
 double Deck::getHotCueSeconds (int slot) const
@@ -450,6 +466,16 @@ double Deck::getHotCueSeconds (int slot) const
 bool Deck::hasHotCue (int slot) const
 {
     return getHotCueSeconds (slot) >= 0.0;
+}
+
+HotCues Deck::getHotCues() const
+{
+    HotCues cues;
+
+    for (int slot = 0; slot < numHotCues; ++slot)
+        cues[(size_t) slot] = hotCues[(size_t) slot].load (std::memory_order_relaxed);
+
+    return cues;
 }
 
 //==============================================================================

@@ -406,6 +406,57 @@ TEST_CASE ("loading a track clears the hot cues from the last one", "[deck][hotc
     REQUIRE_FALSE (fixture.deck->hasHotCue (3));
 }
 
+TEST_CASE ("a track loads with the hot cues the library kept for it", "[deck][hotcue]")
+{
+    Fixture fixture;
+
+    opendj::KnownTrack known;
+    known.hotCues[0] = 1.25;
+    known.hotCues[5] = 6.5;
+
+    REQUIRE (fixture.deck->loadFile (fixture.temporaryFile.getFile(), &known));
+
+    REQUIRE_THAT (fixture.deck->getHotCueSeconds (0), WithinAbs (1.25, 1.0e-9));
+    REQUIRE_THAT (fixture.deck->getHotCueSeconds (5), WithinAbs (6.5, 1.0e-9));
+    REQUIRE_FALSE (fixture.deck->hasHotCue (1));
+
+    fixture.deck->hotCuePressed (5);
+    fixture.run (1);
+    REQUIRE_THAT (fixture.deck->getPositionSeconds(), WithinAbs (6.5, 0.01));
+}
+
+TEST_CASE ("setting or clearing a hot cue reports every pad, and jumping does not", "[deck][hotcue]")
+{
+    Fixture fixture;
+
+    std::vector<opendj::HotCues> reported;
+    juce::File reportedFile;
+    fixture.deck->onHotCuesChanged = [&] (const juce::File& file, const opendj::HotCues& cues)
+    {
+        reportedFile = file;
+        reported.push_back (cues);
+    };
+
+    fixture.deck->seekToSeconds (2.0);
+    fixture.run (1);
+    fixture.deck->hotCuePressed (2);
+
+    REQUIRE (reported.size() == 1);
+    REQUIRE (reportedFile == fixture.temporaryFile.getFile());
+    REQUIRE_THAT (reported.back()[2], WithinAbs (2.0, 0.01));
+    REQUIRE (reported.back()[0] < 0.0);
+
+    fixture.deck->hotCuePressed (2);   // a jump, which changes nothing worth keeping
+    REQUIRE (reported.size() == 1);
+
+    fixture.deck->clearHotCue (2);
+    REQUIRE (reported.size() == 2);
+    REQUIRE (reported.back()[2] < 0.0);
+
+    fixture.deck->clearHotCue (2);     // already empty
+    REQUIRE (reported.size() == 2);
+}
+
 TEST_CASE ("without key lock a faster tempo raises the pitch", "[deck][keylock]")
 {
     Fixture fixture;
