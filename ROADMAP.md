@@ -46,8 +46,8 @@ that was listed after it except video.
 | VST3 effect plugins | ✅ | `src/core/PluginHost.*`: scanned in the background, loaded into a master slot with its own window and two knobs mapped to its parameters |
 | Sampler | ✅ | `src/core/Sampler.*`, eight pads |
 | Playlists | ✅ | `Library` playlist tables, `src/ui/PlaylistComponent.*`: built from the browser by selection or drag, reordered, renamed |
-| Automix | ✅ | `src/core/AutoMix.*`, `AutoMixMath.h`: plays a playlist on decks A and B, loading ahead, matching tempo and beat, sweeping the crossfader |
-| Smart crossfade | 🚧 | `src/core/MixPoints.*`: outro into intro, phrase on phrase, with a bass swap (#37). Checked against 20 real tracks' analyses, not yet listened to through a whole set. No vocal avoidance, which needs stems prepared ahead (#22) |
+| Automix | ✅ | `src/core/AutoMix.*`, `AutoMixMath.h`: plays a playlist on decks A and B, loading ahead, matching tempo and beat, sweeping the crossfader. Key lock goes on for a deck whose tempo it changes |
+| Smart crossfade | 🚧 | `src/core/MixPoints.*`: outro into intro, phrase on phrase, with a bass swap (#37). Checked against 20 real tracks' analyses, not yet listened to through a whole set. Vocals are kept apart where a separator is installed (#37): each track is separated while the one before plays, the mix moves to the nearest phrase, or the shorter fade, with fewest bars sung over each other, and the outgoing vocals make way for any that remain |
 | Mic input | 🚧 | `src/core/MicInput.*`, `src/ui/MicComponent.*`, with talkover and a stream-only switch. Tested by measuring the output; not yet tried with a real mic |
 | Stem separation | ✅ | `src/analysis/StemSeparator.*`, `StemDsp.*`, a knob per stem |
 | Stems on the GPU (#36) | ✅ | `src/analysis/StemModel.*`: ONNX Runtime with CUDA on an NVIDIA card, OpenVINO on Intel graphics or the CPU. A five minute track takes 27 s on an RTX 4070 against 118 s on the CPU. Core ML on a Mac: a six minute track takes about 26 s on an M5 Pro, 2.5 times as fast as its CPU |
@@ -90,7 +90,7 @@ in `MusicalKey::toCamelot` that the browser does not yet show.
 | More effects (#15) | Dozens, including flanger, phaser, gate, bitcrusher, brake, backspin, echo out and stutter, plus reverse and censor buttons | Filter, echo and reverb per channel, and the same three in two master slots, which also take VST3 plugins |
 | Key tools (#16) | Key shift in semitones, key match between decks, Camelot display, harmonic hints in the browser | Detection only |
 | Auto gain (#17) | Tracks levelled by measured loudness | A trim, with no analysis behind it |
-| Vocal-aware automix (#37) | Transitions that keep two vocals from overlapping | Mixes land outro on intro, phrase on phrase, but vocals are not detected |
+| Vocal-aware automix (#37) | Transitions that keep two vocals from overlapping | Vocals are detected from the separated stems and kept apart; not yet heard through a whole set. Energy matching and verse and chorus detection are still open |
 | MIDI learn and more controllers (#19, #4) | Hundreds of controllers mapped out of the box, and a mapper that learns a control from the hardware | One mapping, written by hand |
 
 ### Expected by regular users
@@ -603,6 +603,9 @@ without an engine: `AutoMixMath.h` for when to load and fade, `MixPoints.*` for 
 | The mix | Out at the start of the outro, but never more than 16 bars before the music ends; in at the incoming track's first bar with music. 32 beats when both sides have two phrases to spare, else 16 |
 | Bass swap | The incoming low EQ is killed for the first half of the fade, then the lows swap. Restored when the fade ends or automix stops |
 | Fallback | A grid with confidence under 0.3, or a plan whose moment has passed by the time the next track loads, gets the timed fade. "Next now" always does |
+| Vocals | With a separator installed, each track is separated while the one before it plays, and `vocalBars` marks a bar as sung when the vocal stem is over a quarter of the bar's level (about -12 dB) and above -40 dBFS. On one real song the bars fell either side of that with nothing between: 0 to 5% in its instrumental stretch, 30 to 90% elsewhere |
+| Keeping singers apart | The planner counts bars where both tracks sing, for the planned mix, the phrases up to 32 bars back and the shorter fade, and takes the fewest, then the planned length, then the nearest phrase. Where some remain, the outgoing vocal stem fades over the bar before the incoming vocals start. Stems that arrive after the phrase they would have moved the mix to leave the plan as it was |
+| Key lock | Turned on for the incoming deck when its tempo is changed to match, before it is heard. When automix stops, a deck it turned it on for gets the user's setting back, unless it is still playing, where that would be heard as the pitch jumping |
 
 Checked against the analysis of 20 tracks from a techno library before the thresholds were set:
 intros were found in 16. The constants are in `MixPoints.h`, named, so they can be retuned in one

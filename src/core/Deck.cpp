@@ -147,8 +147,7 @@ void Deck::setSeparation (std::shared_ptr<const SeparatedTrack> separation, cons
         return;
 
     auto* raw = separation.get();
-    auto previous = std::move (ownedSeparation);
-    ownedSeparation = std::move (separation);
+    auto previous = std::atomic_exchange (&ownedSeparation, std::move (separation));
 
     activeSeparation.store (raw, std::memory_order_release);
 
@@ -247,8 +246,9 @@ void Deck::publish (std::unique_ptr<Track> newTrack)
     // The stems belonged to the track being replaced, so they go with it.
     activeSeparation.store (nullptr, std::memory_order_release);
 
-    if (ownedSeparation != nullptr)
-        retiredSeparations.emplace_back (std::move (ownedSeparation),
+    if (auto previousSeparation = std::atomic_exchange (&ownedSeparation, std::shared_ptr<const SeparatedTrack>());
+        previousSeparation != nullptr)
+        retiredSeparations.emplace_back (std::move (previousSeparation),
                                          blocksProcessed.load (std::memory_order_relaxed));
 
     // A loop belongs to the track it was made in. Carrying one across would
@@ -295,6 +295,11 @@ juce::String Deck::getLastLoadError() const
 std::shared_ptr<const TrackAnalysis> Deck::getAnalysis() const
 {
     return std::atomic_load (&analysisData);
+}
+
+std::shared_ptr<const SeparatedTrack> Deck::getSeparation() const
+{
+    return std::atomic_load (&ownedSeparation);
 }
 
 void Deck::cleanUp()

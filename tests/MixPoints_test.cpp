@@ -282,3 +282,161 @@ TEST_CASE ("a smart mix fades at the planned phrase, not a fade's length early",
     s.skipRequested = true;
     REQUIRE (decide (s, 0.0) == Step::fade);
 }
+
+namespace
+{
+    /** Separated stems on a 120 BPM grid with the downbeat at 0.25 s (2 s
+        bars): drums all the way through, and vocals at `level` in the bars
+        listed. */
+    SeparatedTrack stemsWith (int numBars, const std::vector<std::pair<int, float>>& vocalBarsAndLevels)
+    {
+        SeparatedTrack track;
+        track.sampleRate = 44100.0;
+        const auto barSamples = (int) (2.0 * track.sampleRate);
+        const auto numSamples = (int) (0.25 * track.sampleRate) + barSamples * numBars;
+
+        for (auto& stem : track.stems)
+        {
+            stem.setSize (2, numSamples);
+            stem.clear();
+        }
+
+        for (int i = 0; i < numSamples; ++i)
+        {
+            const auto t = i / track.sampleRate;
+            const auto drum = 0.3f * (float) std::sin (juce::MathConstants<double>::twoPi * 60.0 * t);
+
+            for (int ch = 0; ch < 2; ++ch)
+                track.stems[(size_t) Stem::drums].setSample (ch, i, drum);
+        }
+
+        for (const auto& [bar, level] : vocalBarsAndLevels)
+        {
+            const auto first = (int) (0.25 * track.sampleRate) + bar * barSamples;
+
+            for (int i = first; i < first + barSamples && i < numSamples; ++i)
+            {
+                const auto t = i / track.sampleRate;
+                const auto voice = level * (float) std::sin (juce::MathConstants<double>::twoPi * 330.0 * t);
+
+                for (int ch = 0; ch < 2; ++ch)
+                    track.stems[(size_t) Stem::vocals].setSample (ch, i, voice);
+            }
+        }
+
+        return track;
+    }
+
+    std::vector<bool> sungBars (int count, int from, int to)
+    {
+        std::vector<bool> bars ((size_t) count, false);
+
+        for (int b = from; b <= to && b < count; ++b)
+            bars[(size_t) b] = true;
+
+        return bars;
+    }
+}
+
+TEST_CASE ("vocals are found bar by bar, and bleed is not singing", "[automix][vocals]")
+{
+    const auto analysis = trackOf ({}, 120.0, 0.25);
+
+    // Bars 3 to 5 sung; bar 7 has a trace of vocal bleed under the drums.
+    const auto stems = stemsWith (10, { { 3, 0.3f }, { 4, 0.3f }, { 5, 0.3f }, { 7, 0.02f } });
+    const auto sung = vocalBars (stems, analysis);
+
+    REQUIRE (sung.size() == 10);
+
+    for (int b = 0; b < 10; ++b)
+        REQUIRE (sung[(size_t) b] == (b >= 3 && b <= 5));
+
+    // A voice alone, but almost silent, is not singing either.
+    auto quiet = stemsWith (4, { { 1, 0.005f } });
+    quiet.stems[(size_t) Stem::drums].clear();
+    REQUIRE_FALSE (vocalBars (quiet, analysis)[1]);
+
+    // No grid, no bars.
+    REQUIRE (vocalBars (stems, TrackAnalysis()).empty());
+}
+
+TEST_CASE ("without vocals the plan is the one made from the shape", "[automix][vocals]")
+{
+    const auto outgoing = trackOf (typicalTrack());
+    const auto incoming = trackOf (typicalTrack(), 124.0, 0.1);
+
+    const auto plain = planMix (outgoing, incoming);
+    const auto silent = planMix (outgoing, incoming, sungBars (77, 0, -1), sungBars (77, 0, -1));
+
+    REQUIRE (silent.smart);
+    REQUIRE_THAT (silent.outSeconds, WithinAbs (plain.outSeconds, 1e-9));
+    REQUIRE (silent.fadeBeats == plain.fadeBeats);
+    REQUIRE (silent.vocalClashBars == 0);
+    REQUIRE (silent.vocalHandoffBar == -1);
+}
+
+TEST_CASE ("the mix moves a phrase on to clear the outgoing vocals", "[automix][vocals]")
+{
+    const auto outgoing = trackOf (typicalTrack());
+    const auto incoming = trackOf (typicalTrack(), 124.0, 0.1);
+
+    // Sung over the first phrase of the outro, where the plan would mix, and
+    // the incoming track sings from its first bar.
+    const auto plan = planMix (outgoing, incoming, sungBars (77, 58, 61), sungBars (77, 2, 5));
+
+    REQUIRE (plan.smart);
+    REQUIRE_THAT (plan.outSeconds, WithinAbs (barStartSeconds (outgoing, 62), 1e-9));
+    REQUIRE (plan.fadeBeats == 32);
+    REQUIRE (plan.vocalClashBars == 0);
+    REQUIRE (plan.vocalHandoffBar == -1);
+}
+
+TEST_CASE ("vocals that cannot be kept apart get a short fade and a handoff", "[automix][vocals]")
+{
+    const auto outgoing = trackOf (typicalTrack());
+    const auto incoming = trackOf (typicalTrack(), 124.0, 0.1);
+
+    // Singing to the very end, into a track that sings from its first bar:
+    // every mix overlaps, so the overlap is made as short as it can be, where
+    // the shape put it, and the outgoing vocals make way at once.
+    auto plan = planMix (outgoing, incoming, sungBars (77, 42, 73), sungBars (77, 2, 9));
+
+    REQUIRE (plan.smart);
+    REQUIRE (plan.fadeBeats == 16);
+    REQUIRE_THAT (plan.outSeconds, WithinAbs (barStartSeconds (outgoing, 58), 1e-9));
+    REQUIRE (plan.vocalClashBars == 4);
+    REQUIRE (plan.vocalHandoffBar == 0);
+
+    // The incoming vocals start two bars in: the outgoing ones go by then.
+    plan = planMix (outgoing, incoming, sungBars (77, 42, 73), sungBars (77, 4, 9));
+
+    REQUIRE (plan.fadeBeats == 16);
+    REQUIRE (plan.vocalClashBars == 2);
+    REQUIRE (plan.vocalHandoffBar == 2);
+}
+
+TEST_CASE ("the outgoing vocals fade over the bar before the handoff", "[automix][vocals]")
+{
+    REQUIRE_THAT (outgoingVocalGain (3.0, -1, 0.8f), WithinAbs (0.8, 1e-6));
+
+    REQUIRE_THAT (outgoingVocalGain (0.5, 2, 1.0f), WithinAbs (1.0, 1e-6));
+    REQUIRE_THAT (outgoingVocalGain (1.5, 2, 1.0f), WithinAbs (0.5, 1e-6));
+    REQUIRE_THAT (outgoingVocalGain (2.0, 2, 1.0f), WithinAbs (0.0, 1e-6));
+    REQUIRE_THAT (outgoingVocalGain (3.5, 2, 1.0f), WithinAbs (0.0, 1e-6));
+
+    // At the very start there is no bar before: over the first beat instead.
+    REQUIRE_THAT (outgoingVocalGain (0.0, 0, 1.0f), WithinAbs (1.0, 1e-6));
+    REQUIRE_THAT (outgoingVocalGain (0.125, 0, 1.0f), WithinAbs (0.5, 1e-6));
+    REQUIRE_THAT (outgoingVocalGain (0.25, 0, 1.0f), WithinAbs (0.0, 1e-6));
+
+    // The user's own setting is where it starts from.
+    REQUIRE_THAT (outgoingVocalGain (1.5, 2, 0.6f), WithinAbs (0.3, 1e-6));
+}
+
+TEST_CASE ("a matched deck needs key lock unless it plays at its own speed", "[automix][keylock]")
+{
+    REQUIRE_FALSE (needsKeyLock (1.0));
+    REQUIRE_FALSE (needsKeyLock (1.0005));
+    REQUIRE (needsKeyLock (1.05));
+    REQUIRE (needsKeyLock (0.9));
+}
