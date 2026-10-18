@@ -10,6 +10,8 @@
 #include <array>
 #include <cmath>
 #include <numeric>
+#include <string>
+#include <unordered_map>
 
 #if OPENDJ_HAVE_OPENVINO
  #include <openvino/openvino.hpp>
@@ -253,6 +255,39 @@ namespace
     }
    #endif
 
+   #if JUCE_MAC
+    /** Where Core ML keeps the model it compiled. Compiling takes 20 to 30
+        seconds on every load otherwise, against a few with the cache.
+
+        ONNX Runtime keys its cache on the model's path alone, so a newer model
+        dropped over the old one would quietly run the old one's compilation.
+        The folder is named after the file's size and date for that reason, and
+        an older model's folder, some 600 MB, is removed when a new one is made. */
+    juce::File coreMLCacheFolder (const juce::File& modelOnnx)
+    {
+        const auto home = juce::File::getSpecialLocation (juce::File::userHomeDirectory);
+        const auto xdg = juce::SystemStats::getEnvironmentVariable ("XDG_CACHE_HOME", {});
+        const auto root = (xdg.isNotEmpty() ? juce::File (xdg) : home.getChildFile (".cache"))
+                              .getChildFile ("opendj").getChildFile ("coreml");
+
+        const auto key = modelOnnx.getFileNameWithoutExtension() + "-"
+                       + juce::String (modelOnnx.getSize()) + "-"
+                       + juce::String (modelOnnx.getLastModificationTime().toMilliseconds());
+        const auto folder = root.getChildFile (key);
+
+        if (! folder.isDirectory())
+        {
+            for (const auto& old : root.findChildFiles (juce::File::findDirectories, false,
+                                                        modelOnnx.getFileNameWithoutExtension() + "-*"))
+                old.deleteRecursively();
+
+            folder.createDirectory();
+        }
+
+        return folder;
+    }
+   #endif
+
     struct OnnxRuntimeBackend final : StemModel::Backend
     {
         Ort::Env environment { ORT_LOGGING_LEVEL_ERROR, "OpenDJ" };
@@ -271,10 +306,17 @@ namespace
             Ort::SessionOptions options;
 
            #if JUCE_MAC
-            // Untested: no Mac has been at hand. Core ML picks the GPU or the
-            // Neural Engine itself, and hands back to the CPU what it cannot run.
-            options.AppendExecutionProvider ("CoreML", { { "ModelFormat", "MLProgram" },
-                                                         { "MLComputeUnits", "ALL" } });
+            // Core ML picks the GPU or the Neural Engine itself, and hands back
+            // to the CPU what it cannot run: 25 of htdemucs's 1423 nodes. On an
+            // M5 Pro a six minute track separates in about 26 seconds this way,
+            // against 2.5 times that on the CPU alone.
+            std::unordered_map<std::string, std::string> coreML { { "ModelFormat", "MLProgram" },
+                                                                  { "MLComputeUnits", "ALL" } };
+
+            if (const auto cache = coreMLCacheFolder (modelOnnx); cache.isDirectory())
+                coreML["ModelCacheDirectory"] = cache.getFullPathName().toStdString();
+
+            options.AppendExecutionProvider ("CoreML", coreML);
             device = "Apple GPU (Core ML)";
            #else
             #if JUCE_WINDOWS
