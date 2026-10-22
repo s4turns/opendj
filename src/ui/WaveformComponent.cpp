@@ -96,12 +96,12 @@ void WaveformComponent::setCuePoint (double seconds)
     repaint();
 }
 
-void WaveformComponent::setHotCues (std::vector<double> positions)
+void WaveformComponent::setHotCues (std::vector<HotCueMarker> markers)
 {
-    if (positions == hotCues)
+    if (markers == hotCues)
         return;
 
-    hotCues = std::move (positions);
+    hotCues = std::move (markers);
     repaint();
 }
 
@@ -189,7 +189,7 @@ void WaveformComponent::paintOverview (juce::Graphics& g)
     {
         for (int slot = 0; slot < (int) hotCues.size(); ++slot)
         {
-            const auto seconds = hotCues[(size_t) slot];
+            const auto seconds = hotCues[(size_t) slot].seconds;
 
             if (seconds < 0.0)
                 continue;
@@ -305,9 +305,9 @@ void WaveformComponent::paintScrolling (juce::Graphics& g)
     // pad can be found by colour or by number.
     for (int slot = 0; slot < (int) hotCues.size(); ++slot)
     {
-        const auto seconds = hotCues[(size_t) slot];
+        const auto seconds = hotCues[(size_t) slot].seconds;
 
-        if (seconds < startSeconds || seconds > startSeconds + spanSeconds)
+        if (seconds < 0.0 || seconds < startSeconds || seconds > startSeconds + spanSeconds)
             continue;
 
         const auto x = static_cast<float> ((seconds - startSeconds) / secondsPerPixel);
@@ -323,6 +323,27 @@ void WaveformComponent::paintScrolling (juce::Graphics& g)
         g.setColour (colour.contrasting (0.8f));
         g.setFont (juce::FontOptions (10.0f, juce::Font::bold));
         g.drawText (juce::String (slot + 1), tab, juce::Justification::centred, false);
+
+        // The name sits on a tab of its own, right of the number, in the slot's
+        // colour so it matches the marker. Kept to a readable width rather than
+        // running the length of the track.
+        const auto& name = hotCues[(size_t) slot].name;
+
+        if (name.isNotEmpty())
+        {
+            g.setFont (juce::FontOptions (11.0f));
+
+            juce::GlyphArrangement glyphs;
+            glyphs.addLineOfText (g.getCurrentFont(), name, 0.0f, 0.0f);
+            const auto textWidth = juce::jmin (120.0f, glyphs.getBoundingBox (0, -1, true).getWidth() + 8.0f);
+
+            const juce::Rectangle<float> label (tab.getRight(), 0.0f, textWidth, 13.0f);
+
+            g.setColour (juce::Colours::black.withAlpha (0.7f));
+            g.fillRect (label);
+            g.setColour (colour);
+            g.drawText (name, label.reduced (4.0f, 0.0f), juce::Justification::centredLeft, true);
+        }
     }
 
     // The playhead is fixed in the middle; the track moves past it.

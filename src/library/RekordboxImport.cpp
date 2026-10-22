@@ -77,7 +77,10 @@ namespace
             const auto start = mark->getDoubleAttribute ("Start", -1.0);
 
             if (juce::isPositiveAndBelow (slot, numHotCues) && start >= 0.0)
+            {
                 track.hotCues[(size_t) slot] = start;
+                track.hotCueNames[(size_t) slot] = mark->getStringAttribute ("Name");
+            }
         }
     }
 
@@ -308,7 +311,17 @@ RekordboxImportSummary RekordboxImport::importInto (Library& library, const Reko
         }
 
         if (changed)
+        {
             library.setHotCues (track.file, cues);
+
+            // Names go in after the positions, since they are kept on the same
+            // row. rekordbox leaves plenty of cues unnamed, so only set the ones
+            // that carry a name.
+            for (int slot = 0; slot < numHotCues; ++slot)
+                if (track.hotCues[(size_t) slot] >= 0.0 && track.hotCueNames[(size_t) slot].isNotEmpty())
+                    library.setHotCueName (track.file, slot, track.hotCues[(size_t) slot],
+                                           track.hotCueNames[(size_t) slot]);
+        }
 
         ++summary.tracksImported;
     }

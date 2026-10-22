@@ -155,6 +155,9 @@ public:
     HotCues getHotCues (const juce::File& file) const;
     bool setHotCues (const juce::File& file, const HotCues& cues);
 
+    HotCueNames getHotCueNames (const juce::File& file) override;
+    void setHotCueName (const juce::File& file, int slot, double seconds, const juce::String& name) override;
+
     //==========================================================================
     // Playlists
     //
@@ -196,6 +199,7 @@ private:
     juce::Result createSchema();
     bool addColumnIfMissing (const char* table, const char* column, const char* definition);
     HotCues readHotCues (const juce::File& file) const;
+    HotCueNames readHotCueNames (const juce::File& file) const;
     static TrackRecord recordFromRow (Statement& statement);
     static bool isFileUnchanged (const TrackRecord& record, const juce::File& file);
     void changed();

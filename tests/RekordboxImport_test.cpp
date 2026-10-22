@@ -157,6 +157,10 @@ TEST_CASE ("a rekordbox collection is read into tracks and playlists", "[library
     REQUIRE_THAT (yeah.hotCues[0], WithinAbs (64.012, 1.0e-9));
     REQUIRE_THAT (yeah.hotCues[3], WithinAbs (96.0, 1.0e-9));
 
+    // The mark's name comes across; an unnamed one stays empty.
+    REQUIRE (yeah.hotCueNames[0] == "drop");
+    REQUIRE (yeah.hotCueNames[3].isEmpty());
+
     for (const auto slot : { 1, 2, 4, 5, 6, 7 })
         REQUIRE (yeah.hotCues[(size_t) slot] < 0.0);
 
@@ -210,6 +214,7 @@ TEST_CASE ("importing a rekordbox collection fills the library", "[library][reko
     REQUIRE (known.has_value());
     REQUIRE (known->analysed);
     REQUIRE_THAT (known->hotCues[0], WithinAbs (64.012, 1.0e-9));
+    REQUIRE (fixture.library.getHotCueNames (fixture.yeah)[0] == "drop");
 
     // No grid to take, so this one waits for the analyser.
     const auto snow = fixture.library.findTrack (fixture.snow);

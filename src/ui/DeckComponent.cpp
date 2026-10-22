@@ -150,10 +150,21 @@ DeckComponent::DeckComponent (AudioEngine& engineToUse, int deckIndex, const juc
     {
         auto& pad = hotCueButtons[(size_t) slot];
         pad.setButtonText (juce::String (slot + 1));
-        pad.onPress = [this, slot] { deck.hotCuePressed (slot); refresh(); };
-        pad.onClear = [this, slot] { deck.clearHotCue (slot); refresh(); };
+        // Setting or clearing a pad can change which names are in play (a reused
+        // slot must not keep a cleared cue's name), so each asks for a reload.
+        pad.onPress = [this, slot] { deck.hotCuePressed (slot); hotCueNamesDirty = true; refresh(); };
+        pad.onClear = [this, slot] { deck.clearHotCue (slot); hotCueNamesDirty = true; refresh(); };
+        pad.onRename = [this, slot] { beginHotCueRename (slot); };
         addAndMakeVisible (pad);
     }
+
+    // Floats over the pad row while a cue is being named, hidden otherwise.
+    hotCueNameEditor.setJustification (juce::Justification::centredLeft);
+    hotCueNameEditor.setSelectAllWhenFocused (true);
+    hotCueNameEditor.onReturnKey  = [this] { finishHotCueRename (true); };
+    hotCueNameEditor.onEscapeKey  = [this] { finishHotCueRename (false); };
+    hotCueNameEditor.onFocusLost  = [this] { finishHotCueRename (true); };
+    addChildComponent (hotCueNameEditor);
 
     shownHotCues.fill (-2.0);   // nothing matches, so the first refresh paints them
 
@@ -341,6 +352,7 @@ void DeckComponent::refresh()
         shownAnalysis = std::move (analysis);
         scrollingWave.setAnalysis (shownAnalysis);
         overviewWave.setAnalysis (shownAnalysis);
+        hotCueNamesDirty = true;   // a new track brings its own cue names
     }
 
     platter.refresh (shownAnalysis);
@@ -485,11 +497,22 @@ void DeckComponent::refreshHotCues()
         positions[(size_t) slot] = deck.getHotCueSeconds (slot);
 
     // Pads only change when a cue does, so a full refresh at the frame rate
-    // does not restyle eight buttons sixty times a second.
-    if (positions == shownHotCues)
+    // does not restyle eight buttons sixty times a second. Names can change
+    // without a position moving, so a rename asks for one refresh by hand.
+    if (positions == shownHotCues && ! hotCueNamesDirty)
         return;
 
     shownHotCues = positions;
+
+    if (hotCueNamesDirty)
+    {
+        hotCueNames = engine.getAnalysisCache() != nullptr
+                        ? engine.getAnalysisCache()->getHotCueNames (deck.getLoadedFile())
+                        : noHotCueNames();
+        hotCueNamesDirty = false;
+    }
+
+    std::vector<HotCueMarker> markers ((size_t) Deck::numHotCues);
 
     for (int slot = 0; slot < Deck::numHotCues; ++slot)
     {
@@ -502,13 +525,59 @@ void DeckComponent::refreshHotCues()
         pad.setColour (juce::TextButton::textColourOffId, isSet ? colour.darker (0.3f).contrasting (0.8f)
                                                                      : colour.brighter (0.5f));
         pad.setTooltip (isSet ? "Hot cue " + juce::String (slot + 1) + " at " + formatTime (seconds)
-                                    + ". Click to jump there, right-click to clear"
+                                    + ". Click to jump there, double-click to name it, right-click to clear"
                               : "Hot cue " + juce::String (slot + 1) + ": click to set it here");
+
+        markers[(size_t) slot].seconds = seconds;
+        markers[(size_t) slot].name = isSet ? hotCueNames[(size_t) slot] : juce::String();
     }
 
-    const std::vector<double> markers (positions.begin(), positions.end());
     scrollingWave.setHotCues (markers);
     overviewWave.setHotCues (markers);
+}
+
+void DeckComponent::beginHotCueRename (int slot)
+{
+    // Only a set cue can be named, and only when there is a library to keep the
+    // name in. A rename already in progress is committed first.
+    if (! juce::isPositiveAndBelow (slot, Deck::numHotCues)
+        || ! deck.hasHotCue (slot)
+        || engine.getAnalysisCache() == nullptr)
+        return;
+
+    if (editingHotCue >= 0)
+        finishHotCueRename (true);
+
+    editingHotCue = slot;
+    hotCueNameEditor.setText (hotCueNames[(size_t) slot], false);
+    hotCueNameEditor.setBounds (hotCueButtons.front().getBounds()
+                                    .getUnion (hotCueButtons.back().getBounds()));
+    hotCueNameEditor.setVisible (true);
+    hotCueNameEditor.grabKeyboardFocus();
+    hotCueNameEditor.selectAll();
+}
+
+void DeckComponent::finishHotCueRename (bool keep)
+{
+    const auto slot = editingHotCue;
+
+    if (slot < 0)
+        return;
+
+    editingHotCue = -1;   // cleared first, so hiding does not re-enter through onFocusLost
+    hotCueNameEditor.setVisible (false);
+
+    if (! keep)
+        return;
+
+    if (auto* cache = engine.getAnalysisCache())
+    {
+        const auto name = hotCueNameEditor.getText().trim();
+        cache->setHotCueName (deck.getLoadedFile(), slot, deck.getHotCueSeconds (slot), name);
+        hotCueNames[(size_t) slot] = name;
+        hotCueNamesDirty = true;
+        refresh();
+    }
 }
 
 void DeckComponent::paint (juce::Graphics& g)
@@ -569,6 +638,11 @@ void DeckComponent::resized()
 
         for (auto& pad : hotCueButtons)
             pad.setBounds (padRow.removeFromLeft (padWidth).reduced (1));
+
+        // Keep the name editor over the row if a rename is open during a resize.
+        if (hotCueNameEditor.isVisible())
+            hotCueNameEditor.setBounds (hotCueButtons.front().getBounds()
+                                            .getUnion (hotCueButtons.back().getBounds()));
     }
 
     // Then the stems: the button that asks for a separation, and a knob per part.

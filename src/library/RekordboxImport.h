@@ -38,6 +38,7 @@ struct RekordboxTrack
     double firstBeatSeconds = 0.0;   ///< a downbeat, as the analyser's is
 
     HotCues hotCues = noHotCues();
+    HotCueNames hotCueNames = noHotCueNames();
 };
 
 struct RekordboxPlaylist

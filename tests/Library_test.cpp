@@ -363,6 +363,41 @@ TEST_CASE ("hot cues round trip by path and come back with the track", "[library
     REQUIRE (fixture.library.getHotCues (fixture.second)[7] < 0.0);
 }
 
+TEST_CASE ("hot cue names round trip and survive the position being rewritten", "[library][hotcue]")
+{
+    Fixture fixture;
+
+    REQUIRE (fixture.library.upsertTrack (fixture.recordFor (fixture.first, "Yeah", "Boys Noize")) != 0);
+
+    auto cues = opendj::noHotCues();
+    cues[0] = 12.5;
+    cues[4] = 88.0;
+    REQUIRE (fixture.library.setHotCues (fixture.first, cues));
+
+    // A name is kept on the same row as the position.
+    fixture.library.setHotCueName (fixture.first, 0, cues[0], "intro");
+    fixture.library.setHotCueName (fixture.first, 4, cues[4], "drop");
+
+    auto names = fixture.library.getHotCueNames (fixture.first);
+    REQUIRE (names[0] == "intro");
+    REQUIRE (names[4] == "drop");
+    REQUIRE (names[1].isEmpty());
+
+    // Rewriting the positions (what a pad press does) must not wipe the names.
+    cues[0] = 15.0;
+    fixture.library.storeHotCues (fixture.first, cues);
+    REQUIRE_THAT (fixture.library.getHotCues (fixture.first)[0], WithinAbs (15.0, 1.0e-9));
+    names = fixture.library.getHotCueNames (fixture.first);
+    REQUIRE (names[0] == "intro");
+    REQUIRE (names[4] == "drop");
+
+    // Clearing a pad drops its name with it.
+    cues[0] = -1.0;
+    fixture.library.storeHotCues (fixture.first, cues);
+    REQUIRE (fixture.library.getHotCueNames (fixture.first)[0].isEmpty());
+    REQUIRE (fixture.library.getHotCueNames (fixture.first)[4] == "drop");
+}
+
 TEST_CASE ("hot cues outlive the track being removed and found again", "[library][hotcue]")
 {
     Fixture fixture;
