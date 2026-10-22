@@ -6,7 +6,9 @@
 #include "core/MixPoints.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <tuple>
 
 namespace opendj::automix
 {
@@ -151,7 +153,53 @@ TrackShape shapeOf (const std::vector<Bar>& bars)
     return shape;
 }
 
-MixPlan planMix (const TrackAnalysis& outgoing, const TrackAnalysis& incoming)
+std::vector<bool> vocalBars (const SeparatedTrack& stems, const TrackAnalysis& analysis)
+{
+    std::vector<bool> sung;
+
+    if (! analysis.hasTempo() || stems.isEmpty() || stems.sampleRate <= 0.0)
+        return sung;
+
+    const auto& vocals = stems.stems[(size_t) Stem::vocals];
+    const auto numSamples = stems.getNumSamples();
+    const auto origin = gridOrigin (analysis);
+    const auto bar = barSeconds (analysis);
+    const auto count = (int) std::floor ((numSamples / stems.sampleRate - origin) / bar);
+
+    for (int b = 0; b < std::max (0, count); ++b)
+    {
+        const auto first = std::clamp ((int) std::lround ((origin + b * bar) * stems.sampleRate), 0, numSamples);
+        const auto last = std::clamp ((int) std::lround ((origin + (b + 1) * bar) * stems.sampleRate), first, numSamples);
+        double vocalSquares = 0.0, mixSquares = 0.0;
+
+        for (int ch = 0; ch < vocals.getNumChannels(); ++ch)
+        {
+            const auto* v = vocals.getReadPointer (ch);
+            std::array<const float*, numStems> parts {};
+
+            for (size_t s = 0; s < parts.size(); ++s)
+                parts[s] = stems.stems[s].getReadPointer (ch);
+
+            for (int i = first; i < last; ++i)
+            {
+                const auto mix = parts[0][i] + parts[1][i] + parts[2][i] + parts[3][i];
+                vocalSquares += (double) v[i] * v[i];
+                mixSquares += (double) mix * mix;
+            }
+        }
+
+        const auto n = (double) std::max (1, (last - first) * vocals.getNumChannels());
+        const auto vocalRms = std::sqrt (vocalSquares / n);
+        const auto mixRms = std::sqrt (mixSquares / n);
+
+        sung.push_back (vocalRms > vocalFloor && vocalRms > vocalShareAbove * mixRms);
+    }
+
+    return sung;
+}
+
+MixPlan planMix (const TrackAnalysis& outgoing, const TrackAnalysis& incoming,
+                 const std::vector<bool>& outgoingVocals, const std::vector<bool>& incomingVocals)
 {
     MixPlan plan;
 
@@ -190,7 +238,71 @@ MixPlan planMix (const TrackAnalysis& outgoing, const TrackAnalysis& incoming)
     if (outBar <= out.firstBar)
         return plan;
 
-    plan.outSeconds = barStartSeconds (outgoing, outBar);
+    // Two singers at once is the clash nobody misses. Count the bars where
+    // both sing for the planned mix, then for the phrases either side and the
+    // shorter fade, and move only if that sings over less.
+    auto chosenBar = outBar;
+    auto chosenFadeBars = fadeBars;
+
+    if (! outgoingVocals.empty() && ! incomingVocals.empty())
+    {
+        const auto sungIn = [] (const std::vector<bool>& bars, int b)
+        {
+            return juce::isPositiveAndBelow (b, (int) bars.size()) && bars[(size_t) b];
+        };
+
+        const auto clashes = [&] (int from, int length)
+        {
+            auto count = 0;
+
+            for (int b = 0; b < length; ++b)
+                if (sungIn (outgoingVocals, from + b) && sungIn (incomingVocals, in.firstBar + b))
+                    ++count;
+
+            return count;
+        };
+
+        // Fewest bars sung over each other, then the fade the shape asked
+        // for, then the phrase nearest the one it chose: moved as little as
+        // will do.
+        const auto cost = [&] (int bar, int length)
+        {
+            return std::make_tuple (clashes (bar, length), length == fadeBars ? 0 : 1, std::abs (bar - outBar));
+        };
+
+        auto best = cost (outBar, fadeBars);
+        const auto lowest = std::max (out.firstBar + barsPerPhrase,
+                                      phraseAtOrBefore (out.lastBar + 1 - mostBarsSkippedForVocals));
+
+        for (const auto length : { fadeBars, shortFadeBeats / beatsPerBar })
+        {
+            for (auto bar = phraseAtOrBefore (out.lastBar + 1 - length); bar >= lowest; bar -= barsPerPhrase)
+            {
+                if (const auto candidate = cost (bar, length); candidate < best)
+                {
+                    best = candidate;
+                    chosenBar = bar;
+                    chosenFadeBars = length;
+                }
+            }
+        }
+
+        plan.vocalClashBars = std::get<0> (best);
+
+        if (plan.vocalClashBars > 0)
+            for (int b = 0; b < chosenFadeBars && plan.vocalHandoffBar < 0; ++b)
+                if (sungIn (incomingVocals, in.firstBar + b) && sungIn (outgoingVocals, chosenBar + b))
+                    plan.vocalHandoffBar = b;
+
+        // The outgoing vocals go from the first bar the incoming ones are in,
+        // even if the two only meet later, so the handoff is one clean change.
+        if (plan.vocalHandoffBar > 0)
+            while (plan.vocalHandoffBar > 0 && sungIn (incomingVocals, in.firstBar + plan.vocalHandoffBar - 1))
+                --plan.vocalHandoffBar;
+    }
+
+    plan.fadeBeats = chosenFadeBars * beatsPerBar;
+    plan.outSeconds = barStartSeconds (outgoing, chosenBar);
     plan.inSeconds = barStartSeconds (incoming, in.firstBar);
     plan.smart = true;
     return plan;

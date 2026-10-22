@@ -117,6 +117,10 @@ public:
 
     bool hasStems() const noexcept { return activeSeparation.load (std::memory_order_acquire) != nullptr; }
 
+    /** The stems themselves, for reading off the audio thread: automix looks
+        at the vocals to keep two singers apart. Null when there are none. */
+    std::shared_ptr<const SeparatedTrack> getSeparation() const;
+
     /** 1 is the stem as recorded, 0 removes it. Takes effect on the next block,
         smoothed, so a pad does not click. */
     void setStemGain (Stem stem, float gain);

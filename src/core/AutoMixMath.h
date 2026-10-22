@@ -6,6 +6,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cmath>
 
 namespace opendj
 {
@@ -77,6 +78,15 @@ namespace automix
             return current + 1;
 
         return loop ? 0 : -1;
+    }
+
+    /** Whether a deck sped up or slowed down to match needs key lock to stay
+        in its own key. Twelve percent, the most automix stretches, is two
+        semitones without it: enough to put two tracks out of tune with each
+        other, and a singer audibly out of their range. */
+    inline bool needsKeyLock (double tempoRatio) noexcept
+    {
+        return std::abs (tempoRatio - 1.0) > 0.001;
     }
 }
 
