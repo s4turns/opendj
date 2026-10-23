@@ -16,6 +16,21 @@
 namespace opendj
 {
 
+/** One hot cue to draw: where it is, in seconds, and the name it was given, if
+    any. A position below zero is an empty slot. */
+struct HotCueMarker
+{
+    double seconds = -1.0;
+    juce::String name;
+
+    bool operator== (const HotCueMarker& other) const
+    {
+        return seconds == other.seconds && name == other.name;
+    }
+
+    bool operator!= (const HotCueMarker& other) const { return ! operator== (other); }
+};
+
 /** Draws a track's waveform, either as a fixed overview of the whole thing or as
     a detail view that scrolls past a stationary playhead. */
 class WaveformComponent final : public juce::Component
@@ -38,9 +53,10 @@ public:
         remembered, which is worth seeing at a glance. */
     void setLoop (double startSeconds, double endSeconds, bool enabled);
 
-    /** Where each hot cue slot is set, in seconds, negative for an empty one.
-        Drawn in the slot's colour from `HotCueColours.h`. */
-    void setHotCues (std::vector<double> positions);
+    /** Where each hot cue slot is set and what it is named, by slot. An empty
+        position is negative. Drawn in the slot's colour from `HotCueColours.h`,
+        with the name on the scrolling view's tab. */
+    void setHotCues (std::vector<HotCueMarker> markers);
 
     /** How many seconds the scrolling view shows either side of the playhead. */
     void setWindowSeconds (double seconds);
@@ -75,7 +91,7 @@ private:
     double loopStart = -1.0;
     double loopEnd = -1.0;
     bool loopEnabled = false;
-    std::vector<double> hotCues;
+    std::vector<HotCueMarker> hotCues;
     double windowSeconds = waveform::defaultZoomSeconds;
 
     /** Wheel movement not yet worth a rung. A trackpad sends this in fractions

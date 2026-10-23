@@ -86,7 +86,8 @@ namespace
         "rating, colour, comment";
 
     // 2: rating, colour and comment columns, and the hot_cues table.
-    constexpr int schemaVersion = 2;
+    // 3: a name column on hot_cues.
+    constexpr int schemaVersion = 3;
 
     juce::String pathOf (const juce::File& file)
     {
@@ -224,6 +225,7 @@ juce::Result Library::createSchema()
         "  path TEXT NOT NULL,"
         "  slot INTEGER NOT NULL,"
         "  seconds REAL NOT NULL,"
+        "  name TEXT NOT NULL DEFAULT '',"
         "  PRIMARY KEY (path, slot));"
 
         "CREATE INDEX IF NOT EXISTS tracks_by_title ON tracks (title COLLATE NOCASE);"
@@ -235,7 +237,8 @@ juce::Result Library::createSchema()
     const auto upgraded = ok
         && addColumnIfMissing ("tracks", "rating", "INTEGER NOT NULL DEFAULT 0")
         && addColumnIfMissing ("tracks", "colour", "INTEGER NOT NULL DEFAULT 0")
-        && addColumnIfMissing ("tracks", "comment", "TEXT NOT NULL DEFAULT ''");
+        && addColumnIfMissing ("tracks", "comment", "TEXT NOT NULL DEFAULT ''")
+        && addColumnIfMissing ("hot_cues", "name", "TEXT NOT NULL DEFAULT ''");
 
     if (! upgraded)
         return juce::Result::fail (juce::String ("Could not create the library schema: ") + sqlite3_errmsg (database));
@@ -846,20 +849,64 @@ bool Library::setHotCues (const juce::File& file, const HotCues& cues)
     if (! execute ("BEGIN"))
         return false;
 
-    Statement clear (database, "DELETE FROM hot_cues WHERE path = ?");
-    auto ok = clear.bind (1, pathOf (file)).run();
+    auto ok = true;
 
+    // A set slot has its position written and keeps any name it already had; an
+    // empty slot has its row removed. A plain delete-and-reinsert would drop the
+    // names, and this runs on every pad press.
     for (int slot = 0; ok && slot < numHotCues; ++slot)
     {
         if (cues[(size_t) slot] < 0.0)
-            continue;
-
-        Statement insert (database, "INSERT INTO hot_cues (path, slot, seconds) VALUES (?, ?, ?)");
-        ok = insert.bind (1, pathOf (file)).bind (2, slot).bind (3, cues[(size_t) slot]).run();
+        {
+            Statement remove (database, "DELETE FROM hot_cues WHERE path = ? AND slot = ?");
+            ok = remove.bind (1, pathOf (file)).bind (2, slot).run();
+        }
+        else
+        {
+            Statement upsert (database,
+                "INSERT INTO hot_cues (path, slot, seconds) VALUES (?, ?, ?) "
+                "ON CONFLICT (path, slot) DO UPDATE SET seconds = excluded.seconds");
+            ok = upsert.bind (1, pathOf (file)).bind (2, slot).bind (3, cues[(size_t) slot]).run();
+        }
     }
 
     execute (ok ? "COMMIT" : "ROLLBACK");
     return ok;
+}
+
+HotCueNames Library::readHotCueNames (const juce::File& file) const
+{
+    auto names = noHotCueNames();
+
+    Statement select (database, "SELECT slot, name FROM hot_cues WHERE path = ?");
+    select.bind (1, pathOf (file));
+
+    while (select.step())
+        if (const auto slot = select.getInt (0); juce::isPositiveAndBelow (slot, numHotCues))
+            names[(size_t) slot] = select.getText (1);
+
+    return names;
+}
+
+HotCueNames Library::getHotCueNames (const juce::File& file)
+{
+    std::lock_guard<std::mutex> lock (mutex);
+    return readHotCueNames (file);
+}
+
+void Library::setHotCueName (const juce::File& file, int slot, double seconds, const juce::String& name)
+{
+    if (! juce::isPositiveAndBelow (slot, numHotCues))
+        return;
+
+    std::lock_guard<std::mutex> lock (mutex);
+
+    // Upserting the position too means a name sticks even if it is typed before
+    // the set that created the cue has reached the library.
+    Statement upsert (database,
+        "INSERT INTO hot_cues (path, slot, seconds, name) VALUES (?, ?, ?, ?) "
+        "ON CONFLICT (path, slot) DO UPDATE SET name = excluded.name");
+    upsert.bind (1, pathOf (file)).bind (2, slot).bind (3, seconds).bind (4, name).run();
 }
 
 //==============================================================================

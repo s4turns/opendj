@@ -29,6 +29,16 @@ inline HotCues noHotCues() noexcept
     return cues;
 }
 
+/** A name per pad, to go with the positions. Empty means the cue is unnamed.
+    Names are track metadata, not something the audio thread ever touches, so
+    they travel separately from the positions a deck plays. */
+using HotCueNames = std::array<juce::String, numHotCues>;
+
+inline HotCueNames noHotCueNames()
+{
+    return {};
+}
+
 /** What a library already knows about a file before the deck decodes it. */
 struct KnownTrack
 {
@@ -66,6 +76,24 @@ public:
     virtual void storeHotCues (const juce::File& file, const HotCues& cues)
     {
         juce::ignoreUnused (file, cues);
+    }
+
+    /** The names a track's hot cues were given, by slot. Called on the message
+        thread when a deck needs them to label its waveform. A cache with none
+        returns empty names. */
+    virtual HotCueNames getHotCueNames (const juce::File& file)
+    {
+        juce::ignoreUnused (file);
+        return noHotCueNames();
+    }
+
+    /** Names (or renames) one hot cue. The position is passed so the cue can be
+        stored even if the set that created it has not reached the cache yet.
+        Called on the message thread. A cache with nowhere to keep it can ignore
+        it. */
+    virtual void setHotCueName (const juce::File& file, int slot, double seconds, const juce::String& name)
+    {
+        juce::ignoreUnused (file, slot, seconds, name);
     }
 };
 

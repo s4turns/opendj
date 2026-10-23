@@ -114,6 +114,13 @@ public:
         analysisCache.store (cache, std::memory_order_release);
     }
 
+    /** The installed cache, for the interface to read and write track metadata
+        such as hot cue names. Null when none is installed. */
+    AnalysisCache* getAnalysisCache() const noexcept
+    {
+        return analysisCache.load (std::memory_order_acquire);
+    }
+
     /** Separates the track on a deck into its four parts, in the background,
         and hands them to the deck when they are ready. Does nothing if the
         deck is empty or no separator is installed. */

@@ -53,6 +53,7 @@ public:
 
     std::function<void()> onPress;
     std::function<void()> onClear;
+    std::function<void()> onRename;
 
     void mouseDown (const juce::MouseEvent& e) override
     {
@@ -68,6 +69,12 @@ public:
 
         if (onPress != nullptr)
             onPress();
+    }
+
+    void mouseDoubleClick (const juce::MouseEvent&) override
+    {
+        if (onRename != nullptr)
+            onRename();
     }
 };
 
@@ -117,6 +124,8 @@ private:
     void refreshLoopControls();
     void updateSeparateTooltip();
     void refreshHotCues();
+    void beginHotCueRename (int slot);
+    void finishHotCueRename (bool keep);
     void applyTempoFromSlider();
     double rangePercent() const;
     void updateTempoReadout();
@@ -172,6 +181,15 @@ private:
     // Hot cue pads, in the same colours as their markers on the waveforms.
     std::array<PadButton, Deck::numHotCues> hotCueButtons;
     std::array<double, Deck::numHotCues> shownHotCues {};
+
+    // Names live with the track in the library, not on the deck; these are what
+    // was last read for the loaded file, shown on the waveform tabs. A rename
+    // sets the dirty flag so the next refresh reloads them even though no
+    // position moved. The editor floats over the pad row while a name is typed.
+    std::array<juce::String, Deck::numHotCues> hotCueNames;
+    bool hotCueNamesDirty = true;
+    int editingHotCue = -1;
+    juce::TextEditor hotCueNameEditor;
 
     WaveformComponent scrollingWave { WaveformComponent::Mode::scrolling };
     WaveformComponent overviewWave { WaveformComponent::Mode::overview };
