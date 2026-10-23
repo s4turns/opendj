@@ -538,6 +538,28 @@ void MainComponent::timerCallback()
 
 bool MainComponent::keyPressed (const juce::KeyPress& key, juce::Component*)
 {
+    // F11 toggles a true, borderless full screen. Kiosk mode is used rather than
+    // ResizableWindow::setFullScreen, which on Windows with a native title bar
+    // only maximises the window and leaves the title bar in place.
+    if (key.isKeyCode (juce::KeyPress::F11Key))
+    {
+        auto& desktop = juce::Desktop::getInstance();
+        desktop.setKioskModeComponent (desktop.getKioskModeComponent() == nullptr
+                                           ? getTopLevelComponent()
+                                           : nullptr,
+                                       false);
+        return true;
+    }
+
+    // Escape leaves full screen, but only while in it, so it stays free for
+    // everything else the rest of the time.
+    if (key.isKeyCode (juce::KeyPress::escapeKey)
+        && juce::Desktop::getInstance().getKioskModeComponent() != nullptr)
+    {
+        juce::Desktop::getInstance().setKioskModeComponent (nullptr, false);
+        return true;
+    }
+
     for (const auto& binding : keyBindings)
     {
         if (! key.isKeyCode (binding.keyCode))

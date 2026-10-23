@@ -111,8 +111,13 @@ void VisualizerComponent::mouseUp (const juce::MouseEvent& event)
 
 void VisualizerComponent::mouseDoubleClick (const juce::MouseEvent&)
 {
-    if (auto* window = findParentComponentOfClass<juce::ResizableWindow>())
-        window->setFullScreen (! window->isFullScreen());
+    // Same true full screen as F11: kiosk mode, not setFullScreen, so Windows
+    // gets a borderless window rather than a maximised one with its title bar.
+    auto& desktop = juce::Desktop::getInstance();
+    desktop.setKioskModeComponent (desktop.getKioskModeComponent() == nullptr
+                                       ? getTopLevelComponent()
+                                       : nullptr,
+                                   false);
 }
 
 } // namespace opendj
