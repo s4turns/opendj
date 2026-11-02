@@ -470,7 +470,7 @@ void AudioEngine::captureSampleAsync (int slot, int deckIndex, double beats, con
                 }
 
                 if (written.getSize() <= 0)
-                    written = {};   // the pad still gets the sound, just not after a restart
+                    written = juce::File();   // the pad still gets the sound, just not after a restart
             }
         }
 
