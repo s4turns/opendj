@@ -153,6 +153,127 @@ TrackShape shapeOf (const std::vector<Bar>& bars)
     return shape;
 }
 
+std::vector<Section> sectionsOf (const std::vector<Bar>& bars, const TrackShape& shape,
+                                 const std::vector<bool>& vocals)
+{
+    std::vector<Section> sections;
+
+    if (! shape.isValid() || bars.empty())
+        return sections;
+
+    std::vector<float> mid, high;
+
+    for (int b = shape.firstBar; b <= shape.lastBar; ++b)
+    {
+        mid.push_back (bars[(size_t) b].mid);
+        high.push_back (bars[(size_t) b].high);
+    }
+
+    const auto midBody = std::max (1e-9f, bodyOf (mid));
+    const auto highBody = std::max (1e-9f, bodyOf (high));
+    const auto mainStart = shape.firstBar + shape.introBars;
+    const auto mainEnd = shape.outroBars > 0 ? shape.outroStartBar() : shape.lastBar + 1;
+
+    const auto kindOf = [&] (int from, int to)
+    {
+        if (to <= mainStart)
+            return SectionKind::intro;
+
+        if (from >= mainEnd)
+            return SectionKind::outro;
+
+        double level = 0.0, fullness = 0.0;
+        int sung = 0;
+
+        for (int b = from; b < to; ++b)
+        {
+            const auto& bar = bars[(size_t) b];
+            level += bar.energy / shape.body;
+            fullness += (bar.mid / midBody + bar.high / highBody) * 0.5f;
+
+            if (juce::isPositiveAndBelow (b, (int) vocals.size()) && vocals[(size_t) b])
+                ++sung;
+        }
+
+        const auto n = (double) std::max (1, to - from);
+        level /= n;
+        fullness /= n;
+
+        if (level < breakdownBelow)
+            return SectionKind::breakdown;
+
+        if (fullness >= chorusAbove)
+            return SectionKind::chorus;
+
+        // A sung stretch nearly as full as the fullest is the hook, which
+        // the band energies alone would call a verse.
+        if (! vocals.empty() && sung / n > sungAbove && fullness >= chorusAbove * 0.9)
+            return SectionKind::chorus;
+
+        return SectionKind::verse;
+    };
+
+    for (int from = shape.firstBar; from <= shape.lastBar; from += barsPerPhrase)
+    {
+        // Phrases do not straddle the intro and outro boundaries, which are
+        // phrase-aligned already; the last phrase may be short.
+        const auto to = std::min (from + barsPerPhrase, shape.lastBar + 1);
+        const auto kind = kindOf (from, to);
+
+        if (! sections.empty() && sections.back().kind == kind)
+            sections.back().bars += to - from;
+        else
+            sections.push_back ({ kind, from, to - from });
+    }
+
+    return sections;
+}
+
+SectionKind sectionAt (const std::vector<Section>& sections, int bar) noexcept
+{
+    for (const auto& section : sections)
+        if (bar >= section.firstBar && bar < section.endBar())
+            return section.kind;
+
+    return SectionKind::verse;
+}
+
+const char* toString (SectionKind kind) noexcept
+{
+    switch (kind)
+    {
+        case SectionKind::intro:     return "intro";
+        case SectionKind::verse:     return "verse";
+        case SectionKind::chorus:    return "chorus";
+        case SectionKind::breakdown: return "breakdown";
+        case SectionKind::outro:     return "outro";
+    }
+
+    return "verse";
+}
+
+float bodyLevel (const TrackAnalysis& analysis)
+{
+    std::vector<float> levels;
+    levels.reserve (analysis.detail.buckets.size());
+
+    for (const auto& bucket : analysis.detail.buckets)
+        levels.push_back (bucket.energy);
+
+    return bodyOf (std::move (levels));
+}
+
+float levelMatch (const TrackAnalysis& outgoing, const TrackAnalysis& incoming)
+{
+    const auto out = bodyLevel (outgoing);
+    const auto in = bodyLevel (incoming);
+
+    if (out <= 0.0f || in <= 0.0f)
+        return 1.0f;
+
+    return std::clamp (out / in, quietestMatch, loudestMatch);
+}
+
 std::vector<bool> vocalBars (const SeparatedTrack& stems, const TrackAnalysis& analysis)
 {
     std::vector<bool> sung;
@@ -238,12 +359,43 @@ MixPlan planMix (const TrackAnalysis& outgoing, const TrackAnalysis& incoming,
     if (outBar <= out.firstBar)
         return plan;
 
-    // Two singers at once is the clash nobody misses. Count the bars where
-    // both sing for the planned mix, then for the phrases either side and the
-    // shorter fade, and move only if that sings over less.
     auto chosenBar = outBar;
     auto chosenFadeBars = fadeBars;
 
+    const auto outSections = sectionsOf (barLevels (outgoing), out, outgoingVocals);
+
+    const auto chorusBars = [&] (int from, int length)
+    {
+        auto count = 0;
+
+        for (int b = 0; b < length; ++b)
+            if (sectionAt (outSections, from + b) == SectionKind::chorus)
+                ++count;
+
+        return count;
+    };
+
+    // No outro to mix from: the fade would otherwise start a fade's length
+    // from the end, wherever that falls. Moved back a phrase or so, it can
+    // start after the last chorus rather than cut into it.
+    if (out.outroBars == 0 && (outgoingVocals.empty() || incomingVocals.empty()))
+    {
+        auto best = std::make_pair (chorusBars (outBar, fadeBars), 0);
+
+        for (auto bar = outBar - barsPerPhrase; bar >= std::max (out.firstBar + barsPerPhrase, earliest);
+             bar -= barsPerPhrase)
+        {
+            if (const auto candidate = std::make_pair (chorusBars (bar, fadeBars), outBar - bar); candidate < best)
+            {
+                best = candidate;
+                chosenBar = bar;
+            }
+        }
+    }
+
+    // Two singers at once is the clash nobody misses. Count the bars where
+    // both sing for the planned mix, then for the phrases either side and the
+    // shorter fade, and move only if that sings over less.
     if (! outgoingVocals.empty() && ! incomingVocals.empty())
     {
         const auto sungIn = [] (const std::vector<bool>& bars, int b)
@@ -263,11 +415,13 @@ MixPlan planMix (const TrackAnalysis& outgoing, const TrackAnalysis& incoming,
         };
 
         // Fewest bars sung over each other, then the fade the shape asked
-        // for, then the phrase nearest the one it chose: moved as little as
-        // will do.
+        // for, then no chorus cut into where there is no outro, then the
+        // phrase nearest the one it chose: moved as little as will do.
         const auto cost = [&] (int bar, int length)
         {
-            return std::make_tuple (clashes (bar, length), length == fadeBars ? 0 : 1, std::abs (bar - outBar));
+            return std::make_tuple (clashes (bar, length), length == fadeBars ? 0 : 1,
+                                    out.outroBars == 0 ? chorusBars (bar, length) : 0,
+                                    std::abs (bar - outBar));
         };
 
         auto best = cost (outBar, fadeBars);
@@ -302,6 +456,7 @@ MixPlan planMix (const TrackAnalysis& outgoing, const TrackAnalysis& incoming,
     }
 
     plan.fadeBeats = chosenFadeBars * beatsPerBar;
+    plan.outSection = sectionAt (outSections, chosenBar);
     plan.outSeconds = barStartSeconds (outgoing, chosenBar);
     plan.inSeconds = barStartSeconds (incoming, in.firstBar);
     plan.smart = true;

@@ -300,7 +300,8 @@ juce::String PlaylistComponent::describeStatus() const
     {
         const auto at = (int) plan.outSeconds;
         return "Next mix at " + juce::String (at / 60) + ":" + juce::String (at % 60).paddedLeft ('0', 2)
-             + ", over " + juce::String (plan.fadeBeats) + " beats";
+             + ", over " + juce::String (plan.fadeBeats) + " beats, from its "
+             + automix::toString (plan.outSection);
     }
 
     return "Auto crossfade is running";

@@ -8,6 +8,8 @@
 #include "core/AutoMixMath.h"
 #include "core/MixPoints.h"
 
+#include <tuple>
+
 using Catch::Matchers::WithinAbs;
 using namespace opendj;
 using namespace opendj::automix;
@@ -439,4 +441,136 @@ TEST_CASE ("a matched deck needs key lock unless it plays at its own speed", "[a
     REQUIRE_FALSE (needsKeyLock (1.0005));
     REQUIRE (needsKeyLock (1.05));
     REQUIRE (needsKeyLock (0.9));
+}
+
+//==============================================================================
+// Sections and level matching
+//==============================================================================
+
+namespace
+{
+    const Bar verse { 0.9f, 0.7f, 0.7f };   ///< the main part, short of its fullest
+
+    /** Intro, verse, chorus, breakdown, chorus, outro, in phrases. */
+    std::vector<Bar> songTrack()
+    {
+        std::vector<Bar> levels;
+        add (levels, 2, silence);
+        add (levels, 8, drums);
+        add (levels, 16, verse);
+        add (levels, 16, full);
+        add (levels, 8, breakdown);
+        add (levels, 16, full);
+        add (levels, 16, drums);
+        add (levels, 2, silence);
+        return levels;
+    }
+}
+
+TEST_CASE ("a track is read as intro, verse, chorus, breakdown and outro", "[automix][sections]")
+{
+    const auto bars = barLevels (trackOf (songTrack()));
+    const auto sections = sectionsOf (bars, shapeOf (bars));
+
+    const std::vector<std::tuple<SectionKind, int, int>> expected
+    {
+        { SectionKind::intro, 2, 8 },
+        { SectionKind::verse, 10, 16 },
+        { SectionKind::chorus, 26, 16 },
+        { SectionKind::breakdown, 42, 8 },
+        { SectionKind::chorus, 50, 16 },
+        { SectionKind::outro, 66, 16 },
+    };
+
+    REQUIRE (sections.size() == expected.size());
+
+    for (size_t i = 0; i < expected.size(); ++i)
+    {
+        INFO ("section " << i << " is a " << toString (sections[i].kind) << " at bar " << sections[i].firstBar);
+        REQUIRE (sections[i].kind == std::get<0> (expected[i]));
+        REQUIRE (sections[i].firstBar == std::get<1> (expected[i]));
+        REQUIRE (sections[i].bars == std::get<2> (expected[i]));
+    }
+
+    REQUIRE (sectionAt (sections, 30) == SectionKind::chorus);
+    REQUIRE (sectionAt (sections, 45) == SectionKind::breakdown);
+}
+
+TEST_CASE ("a sung stretch nearly as full as the drop is a chorus", "[automix][sections][vocals]")
+{
+    std::vector<Bar> levels;
+    add (levels, 8, drums);
+    add (levels, 8, Bar { 1.0f, 0.9f, 0.9f });    // the hook, a touch thinner
+    add (levels, 32, full);
+    add (levels, 8, Bar { 1.0f, 0.9f, 0.9f });
+    add (levels, 8, drums);
+
+    const auto bars = barLevels (trackOf (levels));
+    const auto shape = shapeOf (bars);
+
+    REQUIRE (sectionAt (sectionsOf (bars, shape), 12) == SectionKind::verse);
+
+    std::vector<bool> sung (bars.size(), false);
+
+    for (int b = 8; b < 16; ++b)
+        sung[(size_t) b] = true;
+
+    const auto withVocals = sectionsOf (bars, shape, sung);
+    REQUIRE (sectionAt (withVocals, 12) == SectionKind::chorus);
+    REQUIRE (sectionAt (withVocals, 52) == SectionKind::verse);   // the same, unsung
+}
+
+TEST_CASE ("with no outro the mix starts after the last chorus, not in it", "[automix][sections]")
+{
+    // The track ends at full tilt: verse, then a closing chorus, no outro.
+    std::vector<Bar> levels;
+    add (levels, 2, silence);
+    add (levels, 8, drums);
+    add (levels, 16, full);
+    add (levels, 8, verse);
+    add (levels, 8, full);
+    add (levels, 2, silence);
+
+    const auto outgoing = trackOf (levels);
+    const auto plan = planMix (outgoing, trackOf (typicalTrack()));
+
+    REQUIRE (plan.smart);
+    REQUIRE (plan.fadeBeats == 32);
+
+    // The last phrase that leaves a whole fade is bar 34, inside the closing
+    // chorus; the verse before it starts at bar 26.
+    REQUIRE_THAT (plan.outSeconds, WithinAbs (barStartSeconds (outgoing, 26), 1e-9));
+    REQUIRE (plan.outSection == SectionKind::verse);
+}
+
+TEST_CASE ("a mix from an outro is described as one", "[automix][sections]")
+{
+    const auto plan = planMix (trackOf (typicalTrack()), trackOf (typicalTrack()));
+
+    REQUIRE (plan.smart);
+    REQUIRE (plan.outSection == SectionKind::outro);
+}
+
+TEST_CASE ("the incoming track is matched to the loudness of the outgoing one", "[automix][level]")
+{
+    auto quieter = typicalTrack();
+
+    for (auto& bar : quieter)
+        bar.energy *= 0.5f;
+
+    const auto loud = trackOf (typicalTrack());
+    const auto quiet = trackOf (quieter);
+
+    REQUIRE_THAT (levelMatch (loud, quiet), WithinAbs (2.0, 1e-4));
+    REQUIRE_THAT (levelMatch (quiet, loud), WithinAbs (0.5, 1e-4));
+    REQUIRE_THAT (levelMatch (loud, loud), WithinAbs (1.0, 1e-6));
+
+    // Never more than about 6 dB either way.
+    for (auto& bar : quieter)
+        bar.energy *= 0.1f;
+
+    REQUIRE_THAT (levelMatch (loud, trackOf (quieter)), WithinAbs (loudestMatch, 1e-6));
+
+    // And nothing to measure is no change.
+    REQUIRE_THAT (levelMatch (loud, TrackAnalysis {}), WithinAbs (1.0, 1e-6));
 }

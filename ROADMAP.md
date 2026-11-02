@@ -47,7 +47,7 @@ that was listed after it except video.
 | Sampler | ✅ | `src/core/Sampler.*`, eight pads |
 | Playlists | ✅ | `Library` playlist tables, `src/ui/PlaylistComponent.*`: built from the browser by selection or drag, reordered, renamed |
 | Automix | ✅ | `src/core/AutoMix.*`, `AutoMixMath.h`: plays a playlist on decks A and B, loading ahead, matching tempo and beat, sweeping the crossfader. Key lock goes on for a deck whose tempo it changes |
-| Smart crossfade | 🚧 | `src/core/MixPoints.*`: outro into intro, phrase on phrase, with a bass swap (#37). Checked against 20 real tracks' analyses, not yet listened to through a whole set. Vocals are kept apart where a separator is installed (#37): each track is separated while the one before plays, the mix moves to the nearest phrase, or the shorter fade, with fewest bars sung over each other, and the outgoing vocals make way for any that remain |
+| Smart crossfade | 🚧 | `src/core/MixPoints.*`: outro into intro, phrase on phrase, with a bass swap (#37). Checked against 20 real tracks' analyses, not yet listened to through a whole set. Vocals are kept apart where a separator is installed (#37): each track is separated while the one before plays, the mix moves to the nearest phrase, or the shorter fade, with fewest bars sung over each other, and the outgoing vocals make way for any that remain. Each phrase is read as intro, verse, chorus, breakdown or outro from its energy (and its vocals when separated). With no outro to mix from, the fade moves back rather than cut into a closing chorus. The incoming track is matched to the loudness of the outgoing one, within 6 dB |
 | Mic input | 🚧 | `src/core/MicInput.*`, `src/ui/MicComponent.*`, with talkover and a stream-only switch. Tested by measuring the output; not yet tried with a real mic |
 | Stem separation | ✅ | `src/analysis/StemSeparator.*`, `StemDsp.*`, a knob per stem |
 | Stems on the GPU (#36) | ✅ | `src/analysis/StemModel.*`: ONNX Runtime with CUDA on an NVIDIA card, OpenVINO on Intel graphics or the CPU. A five minute track takes 27 s on an RTX 4070 against 118 s on the CPU. Core ML on a Mac: a six minute track takes about 26 s on an M5 Pro, 2.5 times as fast as its CPU |
@@ -89,7 +89,7 @@ in `MusicalKey::toCamelot` that the browser does not yet show.
 | More effects (#15) | Dozens, including flanger, phaser, gate, bitcrusher, brake, backspin, echo out and stutter, plus reverse and censor buttons | Filter, echo and reverb per channel, and the same three in two master slots, which also take VST3 plugins |
 | Key tools (#16) | Key shift in semitones, key match between decks, Camelot display, harmonic hints in the browser | Detection only |
 | Auto gain (#17) | Tracks levelled by measured loudness | A trim, with no analysis behind it |
-| Vocal-aware automix (#37) | Transitions that keep two vocals from overlapping | Vocals are detected from the separated stems and kept apart; not yet heard through a whole set. Energy matching and verse and chorus detection are still open |
+| Vocal-aware automix (#37) | Transitions that keep two vocals from overlapping | Vocals are kept apart, levels matched, and sections read from energy and vocals; not yet heard through a whole set. Sections come from energy, not from recognising repeated material, so a verse and a chorus of the same fullness look alike without stems |
 | MIDI learn and more controllers (#19, #4) | Hundreds of controllers mapped out of the box, and a mapper that learns a control from the hardware | One mapping, written by hand |
 
 ### Expected by regular users

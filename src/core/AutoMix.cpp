@@ -198,6 +198,12 @@ void AutoMix::stop()
             engine.getDeck (i).setKeyLock (keyLockBefore[(size_t) i] != 0);
 
         keyLockBefore[(size_t) i] = -1;
+
+        // The same for the trim.
+        if (trimBefore[(size_t) i] >= 0.0f && ! engine.getDeck (i).isPlaying())
+            engine.getDeck (i).setTrim (trimBefore[(size_t) i]);
+
+        trimBefore[(size_t) i] = -1.0f;
     }
 
     plan = {};
@@ -311,6 +317,24 @@ void AutoMix::beginFade (double nowSeconds, int outgoing, int incoming)
             keyLockBefore[(size_t) incoming] = 0;
 
         deck.setKeyLock (true);
+    }
+
+    // The incoming track at the loudness of the one it replaces, set before
+    // it is heard and left for the rest of it: a level that moved mid-track
+    // would be heard as someone riding the trim.
+    if (auto& deck = engine.getDeck (incoming); smart)
+    {
+        const auto outAnalysis = engine.getDeck (outgoing).getAnalysis();
+        const auto inAnalysis = deck.getAnalysis();
+
+        if (outAnalysis != nullptr && inAnalysis != nullptr)
+        {
+            if (trimBefore[(size_t) incoming] < 0.0f)
+                trimBefore[(size_t) incoming] = deck.getTrim();
+
+            deck.setTrim (engine.getDeck (outgoing).getTrim()
+                          * automix::levelMatch (*outAnalysis, *inAnalysis));
+        }
     }
 
     engine.getDeck (incoming).play();

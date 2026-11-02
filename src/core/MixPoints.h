@@ -46,6 +46,17 @@ namespace automix
     constexpr float vocalFloor = 0.01f;         ///< and above -40 dBFS, so a fade to nothing is not singing
     constexpr int mostBarsSkippedForVocals = 32; ///< how far back a mix may move to keep two singers apart
 
+    // Sections, phrase by phrase, against the track's own main part.
+    constexpr float breakdownBelow = 0.6f;      ///< overall level, of the body: the kick has dropped out
+    constexpr float chorusAbove = 0.95f;        ///< fullness, of the body's mids and highs: the fullest parts
+    constexpr float sungAbove = 0.5f;           ///< share of a phrase's bars with singing to call it sung
+
+    // Level matching: the incoming track is brought to the loudness of the
+    // one it replaces, within these limits, so a quiet master is not pushed
+    // into clipping and a hot one is not buried.
+    constexpr float quietestMatch = 0.5f;       ///< about -6 dB
+    constexpr float loudestMatch = 2.0f;        ///< about +6 dB
+
     /** The start of bar `bar`, in seconds. Bars line up with the downbeat the
         grid is anchored to, and bar 0 is the first whole bar in the track. */
     double barStartSeconds (const TrackAnalysis& analysis, int bar) noexcept;
@@ -76,6 +87,55 @@ namespace automix
 
     TrackShape shapeOf (const std::vector<Bar>& bars);
 
+    /** What part of a track a stretch of bars is. Found from the energy of
+        each phrase against the track's own main part, and from the vocals
+        when the track has been separated, not from recognising repeated
+        material, so the names are a reading of the waveform:
+
+        - intro and outro are the thin stretches at either end;
+        - a breakdown is where the overall level drops, the kick gone;
+        - a chorus is the track's fullest stretch (the drop, in dance music),
+          sung or not; with vocals known, a sung stretch nearly as full
+          counts too, since the hook is often a touch thinner than the drop;
+        - a verse is everything else in the main part. */
+    enum class SectionKind
+    {
+        intro,
+        verse,
+        chorus,
+        breakdown,
+        outro
+    };
+
+    struct Section
+    {
+        SectionKind kind = SectionKind::verse;
+        int firstBar = 0;
+        int bars = 0;
+
+        int endBar() const noexcept { return firstBar + bars; }
+    };
+
+    /** The track from its first bar with music to its last, in sections of
+        whole phrases (the last may be shorter), neighbours of the same kind
+        merged. `vocals` is optional, one entry per bar as vocalBars gives. */
+    std::vector<Section> sectionsOf (const std::vector<Bar>& bars, const TrackShape& shape,
+                                     const std::vector<bool>& vocals = {});
+
+    /** The kind of section `bar` is in, or verse when it is in none. */
+    SectionKind sectionAt (const std::vector<Section>& sections, int bar) noexcept;
+
+    const char* toString (SectionKind kind) noexcept;
+
+    /** The loudness of a track's main part: the 75th percentile of its
+        detail RMS, which a long intro, outro or breakdown does not drag
+        down. Needs no beat grid. 0 for an empty analysis. */
+    float bodyLevel (const TrackAnalysis& analysis);
+
+    /** The gain that brings `incoming` to the loudness of `outgoing`, within
+        quietestMatch and loudestMatch. 1 when either cannot be measured. */
+    float levelMatch (const TrackAnalysis& outgoing, const TrackAnalysis& incoming);
+
     /** Which bars have singing in them, one entry per bar of the grid, from a
         track's separated vocals. Empty without a tempo. */
     std::vector<bool> vocalBars (const SeparatedTrack& stems, const TrackAnalysis& analysis);
@@ -87,6 +147,10 @@ namespace automix
         double inSeconds = 0.0;    ///< in the incoming track, where it starts playing
         int fadeBeats = 0;
 
+        /** What the outgoing track is doing where the fade starts, for the
+            plan's description. */
+        SectionKind outSection = SectionKind::outro;
+
         /** Bars of the fade where both tracks would be singing at once. */
         int vocalClashBars = 0;
 
@@ -96,11 +160,13 @@ namespace automix
         int vocalHandoffBar = -1;
     };
 
-    /** Plans the mix from the track on air into the next one. With both
-        tracks' vocal bars, it also keeps two singers from overlapping: it
-        looks at the phrases either side and the shorter fade for the mix with
-        the fewest bars sung over each other, and failing that marks where the
-        outgoing vocals have to make way. */
+    /** Plans the mix from the track on air into the next one. Without an
+        outro to mix from, it moves the fade back a phrase or so rather than
+        cut into the outgoing track's chorus. With both tracks' vocal bars, it
+        also keeps two singers from overlapping: it looks at the phrases
+        either side and the shorter fade for the mix with the fewest bars sung
+        over each other, and failing that marks where the outgoing vocals have
+        to make way. Two singers apart matters more than a chorus kept whole. */
     MixPlan planMix (const TrackAnalysis& outgoing, const TrackAnalysis& incoming,
                      const std::vector<bool>& outgoingVocals = {},
                      const std::vector<bool>& incomingVocals = {});

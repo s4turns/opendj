@@ -178,6 +178,10 @@ private:
         -1 where automix has not touched it. */
     std::array<int, 2> keyLockBefore { -1, -1 };
 
+    // Each deck's trim before automix first matched a track's level on it,
+    // negative when it has not, so stopping can put it back.
+    std::array<float, 2> trimBefore { -1.0f, -1.0f };
+
     /** Callbacks from the loader arrive later, on the message thread, and
         must not touch an object that has gone. */
     std::shared_ptr<bool> alive = std::make_shared<bool> (true);
