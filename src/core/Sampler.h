@@ -18,7 +18,9 @@
 namespace opendj
 {
 
-/** Eight slots holding short sounds, triggered while the decks play.
+/** Four banks of eight slots holding short sounds, triggered while the decks
+    play. One bank is on the pads at a time; sounds in the others keep playing
+    when the bank changes.
 
     A sampler is not a third deck. It has no tempo, no beat grid and no
     crossfader position: a slot is a sound you drop on top of whatever is
@@ -32,9 +34,18 @@ namespace opendj
 class Sampler final
 {
 public:
-    /** Eight, because that is a row of pads on every controller worth mapping,
-        the DJ-202 included. */
-    static constexpr int numSlots = 8;
+    /** Eight pads, because that is a row of pads on every controller worth
+        mapping, the DJ-202 included, and four banks of them. */
+    static constexpr int numPads = 8;
+    static constexpr int numBanks = 4;
+    static constexpr int numSlots = numPads * numBanks;
+
+    /** Which bank the pads show and trigger, 0 to numBanks - 1. Any thread. */
+    void setBank (int bank) noexcept { activeBank.store (juce::jlimit (0, numBanks - 1, bank), std::memory_order_relaxed); }
+    int getBank() const noexcept { return activeBank.load (std::memory_order_relaxed); }
+
+    /** The slot behind pad `pad` (0 to 7) of the bank on the pads. */
+    int slotForPad (int pad) const noexcept { return getBank() * numPads + juce::jlimit (0, numPads - 1, pad); }
 
     Sampler();
     ~Sampler();
@@ -52,7 +63,7 @@ public:
         Message thread. */
     bool installSlot (int slot, std::unique_ptr<DecodedAudio> decoded,
                       const juce::String& name, juce::String* failureReason = nullptr,
-                      const juce::File& sourceFile = {});
+                      const juce::File& sourceFile = {}, double bpm = 0.0);
 
     /** Empties a slot. Message thread. */
     void clearSlot (int slot);
@@ -87,6 +98,33 @@ public:
         one-shot stabs once and falls silent. */
     void setSlotLooping (int slot, bool shouldLoop);
     bool isSlotLooping (int slot) const noexcept;
+
+    /** The tempo the sound was played at, in beats a minute, or 0 when it is
+        not known. Found when a sound is loaded, or taken from the deck a
+        sound was recorded from; it can also be set by hand. */
+    void setSlotBpm (int slot, double bpm);
+    double getSlotBpm (int slot) const noexcept;
+
+    /** A synced slot plays at the tempo of the music rather than its own,
+        faster or slower, and its pitch moves with it the way a record's does.
+        Needs the slot's own tempo and a tempo to follow; without either it
+        plays as recorded. */
+    void setSlotSync (int slot, bool shouldSync);
+    bool isSlotSync (int slot) const noexcept;
+
+    /** The tempo synced slots follow: the music playing now, set by the
+        engine as it changes. 0 when nothing with a tempo is playing. */
+    void setTempoReference (double bpm) noexcept { tempoReference.store (bpm, std::memory_order_relaxed); }
+    double getTempoReference() const noexcept { return tempoReference.load (std::memory_order_relaxed); }
+
+    /** The speed a slot is playing at against its own, 1 when it is not
+        synced. For the interface, and the audio thread. */
+    double getSlotRate (int slot) const noexcept;
+
+    /** The furthest a synced slot is sped up or slowed down. Beyond this the
+        two tempos are unrelated, and a sample twice as fast is not in time,
+        it is a different sound. */
+    static constexpr double maxSyncRatio = 1.5;
 
     /** The level of the whole sampler, after the slot gains. */
     void setGain (float gain);
@@ -125,6 +163,8 @@ private:
 
         std::atomic<bool> playing { false };
         std::atomic<bool> looping { false };
+        std::atomic<bool> sync { false };
+        std::atomic<double> bpm { 0.0 };
         std::atomic<float> gain { 1.0f };
         std::atomic<double> positionSeconds { 0.0 };
 
@@ -144,6 +184,8 @@ private:
     std::array<Slot, numSlots> slots;
 
     std::atomic<float> masterGain { 0.8f };
+    std::atomic<int> activeBank { 0 };
+    std::atomic<double> tempoReference { 0.0 };
     std::atomic<bool> cueEnabled { false };
     std::atomic<juce::uint32> blocksProcessed { 0 };
 

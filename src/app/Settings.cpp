@@ -222,7 +222,11 @@ void SessionState::captureFrom (const Mixer& mixer, const Sampler& sampler)
         samplerLooping[(size_t) slot] = sampler.isSlotLooping (slot);
         samplerGains[(size_t) slot] = sampler.getSlotGain (slot);
         samplerFiles[(size_t) slot] = sampler.getSlotFile (slot).getFullPathName();
+        samplerSync[(size_t) slot] = sampler.isSlotSync (slot);
+        samplerBpms[(size_t) slot] = sampler.getSlotBpm (slot);
     }
+
+    samplerBank = sampler.getBank();
 }
 
 void SessionState::applyTo (Mixer& mixer, Sampler& sampler) const
@@ -261,7 +265,10 @@ void SessionState::applyTo (Mixer& mixer, Sampler& sampler) const
     {
         sampler.setSlotLooping (slot, samplerLooping[(size_t) slot]);
         sampler.setSlotGain (slot, samplerGains[(size_t) slot]);
+        sampler.setSlotSync (slot, samplerSync[(size_t) slot]);
     }
+
+    sampler.setBank (samplerBank);
 }
 
 void SessionState::captureFrom (const MicInput& mic)
@@ -322,12 +329,20 @@ juce::var SessionState::toVar() const
     for (const auto deck : visibleDecks)
         visible.add (deck);
 
+    juce::Array<juce::var> syncs, bpms;
+
     for (size_t slot = 0; slot < Sampler::numSlots; ++slot)
     {
         files.add (samplerFiles[slot]);
         loops.add (samplerLooping[slot]);
         gains.add (samplerGains[slot]);
+        syncs.add (samplerSync[slot]);
+        bpms.add (samplerBpms[slot]);
     }
+
+    root->setProperty ("sampler_sync", syncs);
+    root->setProperty ("sampler_bpms", bpms);
+    root->setProperty ("sampler_bank", samplerBank);
 
     root->setProperty ("crossfader_assign", assigns);
     root->setProperty ("tempo_ranges", ranges);
@@ -572,6 +587,10 @@ SessionState SessionState::fromVar (const juce::var& source)
     const auto files = arrayOf (source, "sampler_files");
     const auto loops = arrayOf (source, "sampler_looping");
     const auto gains = arrayOf (source, "sampler_gains");
+    const auto syncs = arrayOf (source, "sampler_sync");
+    const auto bpms = arrayOf (source, "sampler_bpms");
+
+    state.samplerBank = (int) number (source, "sampler_bank", state.samplerBank, 0.0, Sampler::numBanks - 1);
 
     for (int slot = 0; slot < Sampler::numSlots; ++slot)
     {
@@ -583,6 +602,12 @@ SessionState SessionState::fromVar (const juce::var& source)
 
         if (const auto value = element (gains, slot); value.isDouble() || value.isInt())
             state.samplerGains[(size_t) slot] = (float) juce::jlimit (0.0, 2.0, (double) value);
+
+        if (const auto value = element (syncs, slot); value.isBool())
+            state.samplerSync[(size_t) slot] = (bool) value;
+
+        if (const auto value = element (bpms, slot); value.isDouble() || value.isInt())
+            state.samplerBpms[(size_t) slot] = juce::jlimit (0.0, 300.0, (double) value);
     }
 
     state.micGain = (float) number (source, "mic_gain", state.micGain, 0.0, 2.0);

@@ -341,18 +341,33 @@ void ActionDispatcher::dispatch (const ActionMessage& message)
         case Action::samplerTrigger:
             // Shift turns a pad into its own stop button, which is the only way
             // to end a looping slot on hardware with one row of pads.
+            // The slot is a pad of the bank on show, as on any controller
+            // with one row of pads and a bank button.
             if (pressed)
             {
+                auto& sampler = engine.getSampler();
+                const auto slot = sampler.slotForPad (message.slot);
+
                 if (shiftHeld.load (std::memory_order_relaxed))
-                    engine.getSampler().stop (message.slot);
+                    sampler.stop (slot);
                 else
-                    engine.getSampler().trigger (message.slot);
+                    sampler.trigger (slot);
             }
             break;
 
         case Action::samplerStop:
             if (pressed)
-                engine.getSampler().stop (message.slot);
+                engine.getSampler().stop (engine.getSampler().slotForPad (message.slot));
+            break;
+
+        case Action::samplerBank:
+            if (pressed)
+                engine.getSampler().setBank (message.slot);
+            break;
+
+        case Action::samplerNextBank:
+            if (pressed)
+                engine.getSampler().setBank ((engine.getSampler().getBank() + 1) % Sampler::numBanks);
             break;
 
         case Action::samplerGain:

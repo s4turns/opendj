@@ -38,8 +38,9 @@ void SamplerComponent::Pad::paint (juce::Graphics& g)
     g.drawText (juce::String (number), bounds.reduced (5.0f, 3.0f),
                 juce::Justification::topLeft, false);
 
-    if (looping)
-        g.drawText ("loop", bounds.reduced (5.0f, 3.0f), juce::Justification::topRight, false);
+    if (looping || synced)
+        g.drawText (juce::String (synced ? "sync " : "") + (looping ? "loop" : ""),
+                    bounds.reduced (5.0f, 3.0f), juce::Justification::topRight, false);
 
     g.setColour (playing ? juce::Colours::black : juce::Colours::white.withAlpha (0.8f));
     g.setFont (juce::FontOptions (12.0f));
@@ -56,13 +57,23 @@ SamplerComponent::SamplerComponent (AudioEngine& engineToUse) : engine (engineTo
     heading.setFont (juce::FontOptions (12.0f));
     addAndMakeVisible (heading);
 
-    for (int slot = 0; slot < Sampler::numSlots; ++slot)
+    for (int p = 0; p < Sampler::numPads; ++p)
     {
-        auto& pad = pads[(size_t) slot];
-        pad.number = slot + 1;
-        pad.onClick = [this, slot] (const juce::MouseEvent& e) { padClicked (slot, e); };
+        auto& pad = pads[(size_t) p];
+        pad.number = p + 1;
+        pad.onClick = [this, p] (const juce::MouseEvent& e) { padClicked (p, e); };
         addAndMakeVisible (pad);
     }
+
+    bankButton.setTooltip ("Which bank of eight sounds is on the pads. Click for the next. "
+                           "A dot means a sound is playing in a bank that is not on show");
+    bankButton.onClick = [this]
+    {
+        auto& sampler = engine.getSampler();
+        sampler.setBank ((sampler.getBank() + 1) % Sampler::numBanks);
+        timerCallback();
+    };
+    addAndMakeVisible (bankButton);
 
     level.setSliderStyle (juce::Slider::RotaryVerticalDrag);
     level.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
@@ -105,7 +116,11 @@ void SamplerComponent::resized()
 {
     auto area = getLocalBounds().reduced (6, 4);
 
-    heading.setBounds (area.removeFromLeft (56));
+    {
+        auto column = area.removeFromLeft (56);
+        heading.setBounds (column.removeFromTop (column.getHeight() / 2));
+        bankButton.setBounds (column.reduced (0, 2).withTrimmedRight (4));
+    }
 
     auto right = area.removeFromRight (96);
     cueButton.setBounds (right.removeFromRight (44).reduced (2, 6));
@@ -115,7 +130,7 @@ void SamplerComponent::resized()
 
     // The pads share whatever is left, so the row narrows with the window
     // rather than the last pad falling off the end of it.
-    const auto padWidth = (area.getWidth() - padGap * (Sampler::numSlots - 1)) / Sampler::numSlots;
+    const auto padWidth = (area.getWidth() - padGap * (Sampler::numPads - 1)) / Sampler::numPads;
 
     for (auto& pad : pads)
     {
@@ -130,36 +145,53 @@ void SamplerComponent::timerCallback()
 {
     auto& sampler = engine.getSampler();
 
-    for (int slot = 0; slot < Sampler::numSlots; ++slot)
+    for (int p = 0; p < Sampler::numPads; ++p)
     {
-        auto& pad = pads[(size_t) slot];
+        auto& pad = pads[(size_t) p];
+        const auto slot = slotOf (p);
 
         const auto loaded = sampler.isSlotLoaded (slot);
         const auto playing = sampler.isSlotPlaying (slot);
         const auto looping = sampler.isSlotLooping (slot);
+        const auto synced = sampler.isSlotSync (slot) && sampler.getSlotBpm (slot) > 0.0;
         const auto name = sampler.getSlotName (slot);
 
-        if (loaded != pad.loaded || playing != pad.playing
-            || looping != pad.looping || name != pad.name)
+        if (loaded != pad.loaded || playing != pad.playing || looping != pad.looping
+            || synced != pad.synced || name != pad.name)
         {
             pad.loaded = loaded;
             pad.playing = playing;
             pad.looping = looping;
+            pad.synced = synced;
             pad.name = name;
             pad.repaint();
         }
     }
+
+    // A sound left running in another bank is easy to lose track of.
+    auto playingElsewhere = false;
+
+    for (int slot = 0; slot < Sampler::numSlots; ++slot)
+        if (slot / Sampler::numPads != sampler.getBank() && sampler.isSlotPlaying (slot))
+            playingElsewhere = true;
+
+    const auto bankText = "Bank " + juce::String::charToString ((juce::juce_wchar) ('A' + sampler.getBank()))
+                        + (playingElsewhere ? juce::String::fromUTF8 (" \xe2\x80\xa2") : juce::String());
+
+    if (bankButton.getButtonText() != bankText)
+        bankButton.setButtonText (bankText);
 }
 
 //==============================================================================
 
-void SamplerComponent::padClicked (int slot, const juce::MouseEvent& e)
+void SamplerComponent::padClicked (int p, const juce::MouseEvent& e)
 {
     auto& sampler = engine.getSampler();
+    const auto slot = slotOf (p);
 
     if (e.mods.isPopupMenu())
     {
-        showPadMenu (slot);
+        showPadMenu (p);
         return;
     }
 
@@ -176,23 +208,57 @@ void SamplerComponent::padClicked (int slot, const juce::MouseEvent& e)
     else
         sampler.trigger (slot);
 
-    pads[(size_t) slot].repaint();
+    pads[(size_t) p].repaint();
 }
 
-void SamplerComponent::showPadMenu (int slot)
+void SamplerComponent::showPadMenu (int p)
 {
     auto& sampler = engine.getSampler();
+    const auto slot = slotOf (p);
     const auto loaded = sampler.isSlotLoaded (slot);
+    const auto bpm = sampler.getSlotBpm (slot);
 
     juce::PopupMenu menu;
     menu.addItem (1, loaded ? "Replace sound..." : "Load sound...");
     menu.addItem (2, "Loop", loaded, sampler.isSlotLooping (slot));
+    menu.addItem (5, bpm > 0.0 ? "Sync to the music (" + juce::String (bpm, 1) + " BPM)"
+                               : juce::String ("Sync to the music (no tempo found)"),
+                  loaded && bpm > 0.0, sampler.isSlotSync (slot));
     menu.addItem (3, "Stop", loaded && sampler.isSlotPlaying (slot));
+
+    // Record from any deck with a track and a grid: its loop if it is
+    // looping, or whole bars from the beat at the playhead.
+    juce::PopupMenu record;
+    const char* deckNames[] = { "A", "B", "C", "D" };
+
+    for (int d = 0; d < AudioEngine::numDecks; ++d)
+    {
+        auto& deck = engine.getDeck (d);
+        const auto analysis = deck.getAnalysis();
+
+        if (! deck.isLoaded() || analysis == nullptr || ! analysis->hasTempo())
+            continue;
+
+        const juce::String prefix = juce::String ("Deck ") + deckNames[d] + ": ";
+
+        if (deck.isLoopEnabled() && deck.hasLoop())
+        {
+            record.addItem (100 + d * 10, prefix + "its loop");
+        }
+        else
+        {
+            record.addItem (101 + d * 10, prefix + "1 bar");
+            record.addItem (102 + d * 10, prefix + "2 bars");
+            record.addItem (104 + d * 10, prefix + "4 bars");
+        }
+    }
+
+    menu.addSubMenu ("Record from a deck", record, record.getNumItems() > 0);
     menu.addSeparator();
     menu.addItem (4, "Clear", loaded);
 
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (pads[(size_t) slot]),
-                        [this, slot] (int result)
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (pads[(size_t) p]),
+                        [this, p, slot] (int result)
     {
         auto& s = engine.getSampler();
 
@@ -202,16 +268,34 @@ void SamplerComponent::showPadMenu (int slot)
             case 2: s.setSlotLooping (slot, ! s.isSlotLooping (slot)); break;
             case 3: s.stop (slot); break;
             case 4: s.clearSlot (slot); break;
-            default: break;
+            case 5: s.setSlotSync (slot, ! s.isSlotSync (slot)); break;
+            default:
+                if (result >= 100)
+                    recordInto (slot, (result - 100) / 10, 4.0 * juce::jmax (1, (result - 100) % 10));
+                break;
         }
 
-        pads[(size_t) slot].repaint();
+        pads[(size_t) p].repaint();
+    });
+}
+
+void SamplerComponent::recordInto (int slot, int deck, double beats)
+{
+    engine.captureSampleAsync (slot, deck, beats, AudioEngine::defaultSampleFolder(),
+                               [this, slot] (juce::String error)
+    {
+        if (onMessage != nullptr)
+            onMessage (error.isEmpty() ? "Pad " + juce::String (slot % Sampler::numPads + 1) + ": "
+                                             + engine.getSampler().getSlotName (slot)
+                                       : error);
+
+        timerCallback();
     });
 }
 
 void SamplerComponent::chooseFileFor (int slot)
 {
-    chooser = std::make_unique<juce::FileChooser> ("Load a sound into pad " + juce::String (slot + 1),
+    chooser = std::make_unique<juce::FileChooser> ("Load a sound into pad " + juce::String (slot % Sampler::numPads + 1),
                                                    juce::File(),
                                                    "*.wav;*.aiff;*.aif;*.flac;*.mp3;*.ogg");
 
@@ -231,10 +315,10 @@ void SamplerComponent::loadInto (int slot, const juce::File& file)
     engine.loadSampleAsync (slot, file, [this, slot, file] (juce::String error)
     {
         if (onMessage != nullptr)
-            onMessage (error.isEmpty() ? "Pad " + juce::String (slot + 1) + ": " + file.getFileName()
+            onMessage (error.isEmpty() ? "Pad " + juce::String (slot % Sampler::numPads + 1) + ": " + file.getFileName()
                                        : error);
 
-        pads[(size_t) slot].repaint();
+        timerCallback();
     });
 }
 
@@ -242,9 +326,9 @@ void SamplerComponent::loadInto (int slot, const juce::File& file)
 
 int SamplerComponent::padAt (juce::Point<int> position) const
 {
-    for (int slot = 0; slot < Sampler::numSlots; ++slot)
-        if (pads[(size_t) slot].getBounds().contains (position))
-            return slot;
+    for (int p = 0; p < Sampler::numPads; ++p)
+        if (pads[(size_t) p].getBounds().contains (position))
+            return p;
 
     return -1;
 }
@@ -268,16 +352,14 @@ void SamplerComponent::filesDropped (const juce::StringArray& files, int x, int 
     if (files.isEmpty())
         return;
 
-    auto slot = padAt ({ x, y });
+    const auto p = padAt ({ x, y });
+    auto slot = p >= 0 ? slotOf (p) : -1;
 
     // A file dropped between the pads, or on the heading, fills the first free
-    // one rather than being thrown away.
-    if (slot < 0)
-    {
-        for (int i = 0; i < Sampler::numSlots && slot < 0; ++i)
-            if (! engine.getSampler().isSlotLoaded (i))
-                slot = i;
-    }
+    // pad of the bank on show rather than being thrown away.
+    for (int i = 0; i < Sampler::numPads && slot < 0; ++i)
+        if (! engine.getSampler().isSlotLoaded (slotOf (i)))
+            slot = slotOf (i);
 
     if (slot >= 0)
         loadInto (slot, juce::File (files[0]));

@@ -344,3 +344,95 @@ TEST_CASE ("The sampler adds to what the mixer already put in the buffer", "[sam
 
     REQUIRE (h.master.getMagnitude (0, blockSize) > 0.7f);
 }
+
+//==============================================================================
+// Banks and tempo sync
+//==============================================================================
+
+TEST_CASE ("the pads follow the bank on show", "[sampler][bank]")
+{
+    Harness h;
+
+    REQUIRE (h.sampler.getBank() == 0);
+    REQUIRE (h.sampler.slotForPad (3) == 3);
+
+    h.sampler.setBank (2);
+    REQUIRE (h.sampler.slotForPad (0) == 2 * opendj::Sampler::numPads);
+    REQUIRE (h.sampler.slotForPad (7) == 3 * opendj::Sampler::numPads - 1);
+
+    // Out of range is brought back in, never a slot past the end.
+    h.sampler.setBank (99);
+    REQUIRE (h.sampler.getBank() == opendj::Sampler::numBanks - 1);
+    REQUIRE (h.sampler.slotForPad (99) == opendj::Sampler::numSlots - 1);
+}
+
+TEST_CASE ("a sound keeps playing when its bank is put away", "[sampler][bank]")
+{
+    Harness h;
+    h.load (1, 2.0);
+    h.sampler.setSlotLooping (1, true);
+    h.sampler.trigger (1);
+    h.runBlock();
+
+    h.sampler.setBank (3);
+
+    for (int i = 0; i < 4; ++i)
+        REQUIRE (h.runBlock() > 0.5f);
+
+    REQUIRE (h.sampler.isSlotPlaying (1));
+}
+
+TEST_CASE ("a synced pad plays at the music's tempo", "[sampler][sync]")
+{
+    Harness h;
+    h.load (0, 2.0);
+    h.sampler.setSlotBpm (0, 120.0);
+
+    // Not synced, or nothing to follow: as recorded.
+    h.sampler.setTempoReference (126.0);
+    REQUIRE_THAT (h.sampler.getSlotRate (0), WithinAbs (1.0, 1e-12));
+
+    h.sampler.setSlotSync (0, true);
+    REQUIRE_THAT (h.sampler.getSlotRate (0), WithinAbs (126.0 / 120.0, 1e-12));
+
+    h.sampler.setTempoReference (0.0);
+    REQUIRE_THAT (h.sampler.getSlotRate (0), WithinAbs (1.0, 1e-12));
+
+    // Half or double time is the same beat: a 120 loop under a 63 BPM track
+    // plays at 126 against it, not at half speed.
+    h.sampler.setTempoReference (63.0);
+    REQUIRE_THAT (h.sampler.getSlotRate (0), WithinAbs (126.0 / 120.0, 1e-12));
+
+    // No tempo of its own, nothing to sync.
+    h.sampler.setSlotBpm (0, 0.0);
+    REQUIRE_THAT (h.sampler.getSlotRate (0), WithinAbs (1.0, 1e-12));
+}
+
+TEST_CASE ("a synced pad really does play faster", "[sampler][sync]")
+{
+    Harness h;
+    h.load (0, 1.0);
+    h.sampler.setSlotBpm (0, 100.0);
+    h.sampler.setSlotSync (0, true);
+    h.sampler.setTempoReference (125.0);
+    h.sampler.trigger (0);
+
+    for (int i = 0; i < 10; ++i)
+        h.runBlock();
+
+    // Ten blocks at 1.25 times speed.
+    const auto expected = 10.0 * blockSize / sampleRate * 1.25;
+    REQUIRE_THAT (h.sampler.getSlotPositionSeconds (0), WithinAbs (expected, 1e-6));
+}
+
+TEST_CASE ("a sound gets its tempo when it is installed, and loses it when replaced", "[sampler][sync]")
+{
+    Harness h;
+    juce::String reason;
+
+    REQUIRE (h.sampler.installSlot (5, makeSound (1.0), "loop", &reason, {}, 128.0));
+    REQUIRE_THAT (h.sampler.getSlotBpm (5), WithinAbs (128.0, 1e-12));
+
+    h.load (5, 1.0);
+    REQUIRE (h.sampler.getSlotBpm (5) == 0.0);
+}

@@ -145,8 +145,25 @@ not accept audio alone, so they need a different machine underneath: see
 
 A row of eight pads under the browser holds short sounds, played over whatever the decks are
 doing. Click an empty pad to load one, or drop a file onto it. Click a loaded pad to fire it,
-shift-click to stop it, and right-click for Loop, Stop and Clear. The number keys 1 to 8 fire
-the same eight pads.
+shift-click to stop it, and right-click for Loop, Sync, Record from a deck, Stop and Clear. The
+number keys 1 to 8 fire the same eight pads.
+
+There are four banks of eight. The Bank button under the heading puts the next bank on the pads.
+A sound keeps playing when its bank is put away, and a dot on the button means one is still
+playing in a bank that's not on show.
+
+**Record from a deck** takes a sample straight from a track on a deck that has a beat grid. If
+the deck is looping, it takes the loop; otherwise it takes 1, 2 or 4 bars from the beat at the
+playhead. It's cut from the track itself rather than the deck's output, so it lands exactly on
+the grid, without the EQ or effects. Each one is saved as a WAV in `OpenDJ/Samples` in your user
+application data folder, so the pad comes back after a restart.
+
+**Sync** makes a pad play at the tempo of the music rather than its own: the lowest-lettered
+playing deck with a beat grid, at its pitch. Like a record, its pitch moves with its speed. A
+sample recorded from a deck already knows its tempo. A loaded file over four seconds long has
+its tempo detected, and shorter sounds are treated as one-shots with no tempo. A tempo half or
+double the sample's own counts as the same beat, and a pad further out than half again either
+way plays as recorded.
 
 The knob beside them is the level of the whole sampler, and Cue sends it to the headphones as
 well as the room, so a sound can be found before anybody else hears it.

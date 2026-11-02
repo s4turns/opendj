@@ -73,8 +73,25 @@ struct SessionState
         means the pad was empty, or its file has since moved. */
     std::array<juce::String, Sampler::numSlots> samplerFiles {};
     std::array<bool, Sampler::numSlots> samplerLooping {};
-    std::array<float, Sampler::numSlots> samplerGains { 1.0f, 1.0f, 1.0f, 1.0f,
-                                                        1.0f, 1.0f, 1.0f, 1.0f };
+    std::array<float, Sampler::numSlots> samplerGains = filled (1.0f);
+
+    /** Whether each pad follows the music's tempo, and the tempo of its
+        sound: kept because a tempo set by hand, or taken from the deck a
+        sample was recorded from, cannot be found again from the file. 0 is
+        unknown. */
+    std::array<bool, Sampler::numSlots> samplerSync {};
+    std::array<double, Sampler::numSlots> samplerBpms {};
+
+    /** The bank on the pads. */
+    int samplerBank = 0;
+
+    template <typename T>
+    static std::array<T, Sampler::numSlots> filled (T value)
+    {
+        std::array<T, Sampler::numSlots> values;
+        values.fill (value);
+        return values;
+    }
 
     /** One master effect unit: which effect it holds, and the wet level and
         parameters of every effect it can hold, so each comes back as left. */

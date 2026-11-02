@@ -276,3 +276,26 @@ TEST_CASE ("beat jump actions have names a mapping file can use", "[control][bea
     REQUIRE (actionFromString ("deck.quantize_toggle") == Action::deckQuantizeToggle);
     REQUIRE (toString (Action::beatJumpBack) == "deck.beatjump_back");
 }
+
+TEST_CASE ("a sampler pad triggers the slot of the bank on show", "[control][sampler]")
+{
+    AudioEngine engine;
+    ActionDispatcher dispatcher (engine);
+    auto& sampler = engine.getSampler();
+
+    auto sound = std::make_unique<DecodedAudio>();
+    sound->audio.setSize (2, 4800);
+    sound->audio.clear();
+    REQUIRE (sampler.installSlot (Sampler::numPads + 2, std::move (sound), "bank B pad 3"));
+
+    dispatcher.dispatch ({ Action::samplerNextBank, 0, 0, 1.0f });
+    REQUIRE (sampler.getBank() == 1);
+
+    dispatcher.dispatch ({ Action::samplerTrigger, 0, 2, 1.0f });
+    REQUIRE (sampler.isSlotPlaying (Sampler::numPads + 2));
+    REQUIRE_FALSE (sampler.isSlotPlaying (2));
+
+    dispatcher.dispatch ({ Action::samplerBank, 0, 3, 1.0f });
+    REQUIRE (sampler.getBank() == 3);
+    REQUIRE (actionFromString ("sampler.bank") == Action::samplerBank);
+}

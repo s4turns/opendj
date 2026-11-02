@@ -6,6 +6,7 @@
 #include "core/AudioEngine.h"
 
 #include "core/TempoMath.h"
+#include "analysis/TrackAnalyser.h"
 
 #include <algorithm>
 
@@ -344,12 +345,22 @@ void AudioEngine::loadSampleAsync (int slot, const juce::File& file,
         juce::String failureReason;
         auto decoded = TrackDecoder::decode (formatManager, file, &failureReason);
 
+        // A loop or a phrase long enough to have a tempo gets one, so it can
+        // be synced. Two bars at the slowest tempo worth syncing is about four
+        // seconds; anything shorter is a stab, and a stab has no tempo.
+        auto bpm = 0.0;
+
+        if (decoded != nullptr && decoded->lengthSeconds() >= 4.0)
+            if (const auto analysis = TrackAnalyser::analyse (decoded->audio, decoded->sampleRate);
+                analysis->hasTempo() && analysis->confidence >= 0.3f)
+                bpm = analysis->bpm;
+
         // Decoding is the slow part and happens here; installing is one atomic
         // store and happens on the message thread, which owns the slot.
         juce::MessageManager::callAsync (
             [this, slot, file, name = file.getFileNameWithoutExtension(),
              decoded = std::shared_ptr<DecodedAudio> (std::move (decoded)),
-             failureReason, onComplete]() mutable
+             failureReason, onComplete, bpm]() mutable
             {
                 auto error = failureReason;
 
@@ -358,7 +369,7 @@ void AudioEngine::loadSampleAsync (int slot, const juce::File& file,
                     auto owned = std::make_unique<DecodedAudio> (std::move (*decoded));
                     error = {};
 
-                    if (! sampler.installSlot (slot, std::move (owned), name, &error, file)
+                    if (! sampler.installSlot (slot, std::move (owned), name, &error, file, bpm)
                         && error.isEmpty())
                         error = "That sound could not be loaded.";
                 }
@@ -371,6 +382,138 @@ void AudioEngine::loadSampleAsync (int slot, const juce::File& file,
                     onComplete (error);
             });
     });
+}
+
+void AudioEngine::captureSampleAsync (int slot, int deckIndex, double beats, const juce::File& folder,
+                                     std::function<void (juce::String)> onComplete)
+{
+    const auto fail = [&onComplete] (const juce::String& reason)
+    {
+        if (onComplete != nullptr)
+            onComplete (reason);
+    };
+
+    if (! juce::isPositiveAndBelow (deckIndex, numDecks) || ! juce::isPositiveAndBelow (slot, Sampler::numSlots))
+        return fail ("There is no such deck or pad.");
+
+    auto& deck = *decks[(size_t) deckIndex];
+    const auto analysis = deck.getAnalysis();
+    const auto file = deck.getLoadedFile();
+
+    if (! deck.isLoaded() || analysis == nullptr)
+        return fail ("Load a track on the deck first.");
+
+    if (! analysis->hasTempo())
+        return fail ("The track has no beat grid, so there is no beat to record from. "
+                     "Set one by clicking its BPM.");
+
+    // The loop if one is running, which is what a DJ means by "that bit";
+    // otherwise whole beats from the beat at or behind the playhead.
+    auto start = analysis->beatAtOrBehindSeconds (deck.getPositionSeconds());
+    auto length = beats * analysis->secondsPerBeat();
+
+    if (deck.isLoopEnabled() && deck.hasLoop())
+    {
+        start = deck.getLoopStartSeconds();
+        length = deck.getLoopEndSeconds() - start;
+    }
+
+    if (length <= 0.0 || length > 60.0)
+        return fail ("A sample has to be under a minute long.");
+
+    const auto bpm = analysis->bpm;
+    const auto name = deck.getTrackTitle() + " " + juce::String (bpm, 1) + " BPM";
+
+    loaderPool.addJob ([this, slot, file, start, length, bpm, name, folder, onComplete]
+    {
+        juce::String reason;
+        auto decoded = TrackDecoder::decode (formatManager, file, &reason);
+        juce::File written;
+
+        if (decoded != nullptr)
+        {
+            const auto rate = decoded->sampleRate;
+            const auto first = juce::jlimit (0, decoded->audio.getNumSamples(), (int) std::lround (start * rate));
+            const auto count = juce::jlimit (0, decoded->audio.getNumSamples() - first, (int) std::lround (length * rate));
+
+            if (count <= 0)
+            {
+                decoded = nullptr;
+                reason = "That part of the track is empty.";
+            }
+            else
+            {
+                juce::AudioBuffer<float> slice (decoded->audio.getNumChannels(), count);
+
+                for (int ch = 0; ch < slice.getNumChannels(); ++ch)
+                    slice.copyFrom (ch, 0, decoded->audio, ch, first, count);
+
+                decoded->audio = std::move (slice);
+
+                // Kept as a file, so the pad comes back after a restart like
+                // any other and can be dragged into another program.
+                folder.createDirectory();
+                written = folder.getNonexistentChildFile (juce::File::createLegalFileName (name), ".wav", false);
+
+                juce::WavAudioFormat wav;
+                std::unique_ptr<juce::OutputStream> stream (written.createOutputStream());
+
+                if (stream != nullptr)
+                {
+                    const auto options = juce::AudioFormatWriterOptions()
+                                             .withSampleRate (rate)
+                                             .withNumChannels (decoded->audio.getNumChannels())
+                                             .withBitsPerSample (24);
+
+                    if (auto writer = wav.createWriterFor (stream, options); writer != nullptr)
+                        writer->writeFromAudioSampleBuffer (decoded->audio, 0, decoded->audio.getNumSamples());
+                }
+
+                if (written.getSize() <= 0)
+                    written = {};   // the pad still gets the sound, just not after a restart
+            }
+        }
+
+        juce::MessageManager::callAsync (
+            [this, slot, name, bpm, written, reason, onComplete,
+             decoded = std::shared_ptr<DecodedAudio> (std::move (decoded))]() mutable
+            {
+                auto error = reason;
+
+                if (decoded != nullptr)
+                {
+                    error = {};
+
+                    if (! sampler.installSlot (slot, std::make_unique<DecodedAudio> (std::move (*decoded)),
+                                               name, &error, written, bpm)
+                        && error.isEmpty())
+                        error = "The sample could not be put on the pad.";
+                }
+                else if (error.isEmpty())
+                {
+                    error = "The track could not be read again to record from it.";
+                }
+
+                if (onComplete != nullptr)
+                    onComplete (error);
+            });
+    });
+}
+
+double AudioEngine::getMasterTempo() const
+{
+    for (int i = 0; i < numDecks; ++i)
+        if (decks[(size_t) i]->isPlaying())
+            if (const auto bpm = getEffectiveBpm (i); bpm > 0.0)
+                return bpm;
+
+    return 0.0;
+}
+
+juce::File AudioEngine::defaultSampleFolder()
+{
+    return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+               .getChildFile ("OpenDJ").getChildFile ("Samples");
 }
 
 double AudioEngine::getEffectiveBpm (int deckIndex) const
@@ -860,6 +1003,9 @@ void AudioEngine::timerCallback()
 
     // The tempo fader moves, tracks change, and the echo has to follow both.
     updateEchoTimes();
+
+    // So do synced samples.
+    sampler.setTempoReference (getMasterTempo());
 }
 
 } // namespace opendj

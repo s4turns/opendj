@@ -79,7 +79,7 @@ bool Sampler::loadSlot (int slot, juce::AudioFormatManager& formatManager,
 
 bool Sampler::installSlot (int slot, std::unique_ptr<DecodedAudio> decoded,
                            const juce::String& name, juce::String* failureReason,
-                           const juce::File& sourceFile)
+                           const juce::File& sourceFile, double bpm)
 {
     if (! juce::isPositiveAndBelow (slot, numSlots))
     {
@@ -113,6 +113,7 @@ bool Sampler::installSlot (int slot, std::unique_ptr<DecodedAudio> decoded,
     retire (slot);
 
     s.owned = std::move (sound);
+    s.bpm.store (bpm > 0.0 ? bpm : 0.0, std::memory_order_relaxed);
     s.active.store (s.owned.get(), std::memory_order_release);
 
     return true;
@@ -250,6 +251,55 @@ void Sampler::setSlotLooping (int slot, bool shouldLoop)
         slots[(size_t) slot].looping.store (shouldLoop, std::memory_order_relaxed);
 }
 
+void Sampler::setSlotBpm (int slot, double bpm)
+{
+    if (juce::isPositiveAndBelow (slot, numSlots))
+        slots[(size_t) slot].bpm.store (bpm > 0.0 ? bpm : 0.0, std::memory_order_relaxed);
+}
+
+double Sampler::getSlotBpm (int slot) const noexcept
+{
+    return juce::isPositiveAndBelow (slot, numSlots)
+         ? slots[(size_t) slot].bpm.load (std::memory_order_relaxed)
+         : 0.0;
+}
+
+void Sampler::setSlotSync (int slot, bool shouldSync)
+{
+    if (juce::isPositiveAndBelow (slot, numSlots))
+        slots[(size_t) slot].sync.store (shouldSync, std::memory_order_relaxed);
+}
+
+bool Sampler::isSlotSync (int slot) const noexcept
+{
+    return juce::isPositiveAndBelow (slot, numSlots)
+        && slots[(size_t) slot].sync.load (std::memory_order_relaxed);
+}
+
+double Sampler::getSlotRate (int slot) const noexcept
+{
+    if (! isSlotSync (slot))
+        return 1.0;
+
+    const auto own = getSlotBpm (slot);
+    const auto reference = getTempoReference();
+
+    if (own <= 0.0 || reference <= 0.0)
+        return 1.0;
+
+    // A tempo half or double the sound's own is still the same beat, so the
+    // sound follows whichever of the three is closest rather than racing.
+    auto ratio = reference / own;
+
+    while (ratio > std::sqrt (2.0))
+        ratio *= 0.5;
+
+    while (ratio < 1.0 / std::sqrt (2.0))
+        ratio *= 2.0;
+
+    return (ratio > maxSyncRatio || ratio < 1.0 / maxSyncRatio) ? 1.0 : ratio;
+}
+
 bool Sampler::isSlotLooping (int slot) const noexcept
 {
     return juce::isPositiveAndBelow (slot, numSlots)
@@ -275,8 +325,9 @@ void Sampler::processBlock (juce::AudioBuffer<float>& master,
     const auto toCue = cueEnabled.load (std::memory_order_relaxed) && cue.getNumChannels() >= 2;
     const auto gMaster = masterGain.load (std::memory_order_relaxed);
 
-    for (auto& s : slots)
+    for (int index = 0; index < numSlots; ++index)
     {
+        auto& s = slots[(size_t) index];
         const auto* sound = s.active.load (std::memory_order_acquire);
 
         if (sound == nullptr || sound->audio.getNumSamples() <= 0)
@@ -305,7 +356,7 @@ void Sampler::processBlock (juce::AudioBuffer<float>& master,
             s.releasing = true;
 
         const auto numFrames = (juce::int64) sound->audio.getNumSamples();
-        const auto rate = sound->sampleRate / deviceSampleRate;
+        const auto rate = sound->sampleRate / deviceSampleRate * getSlotRate (index);
         const auto looping = s.looping.load (std::memory_order_relaxed);
         const auto gSlot = s.gain.load (std::memory_order_relaxed) * gMaster;
 

@@ -137,8 +137,10 @@ enum class Action
 
     // Sampler. slot selects the pad, 0 to 7; deck is unused, because the
     // sampler sits over the whole mix rather than on one channel.
-    samplerTrigger,     ///< press starts that slot from the beginning
+    samplerTrigger,     ///< press starts that pad of the bank on show from the beginning
     samplerStop,
+    samplerBank,        ///< press puts bank `slot` (0 to 3) on the pads
+    samplerNextBank,    ///< press steps on to the next bank
     samplerGain,        ///< the level of the whole sampler
 
     // Mic. deck and slot are unused: like the sampler, it sits over the whole mix.

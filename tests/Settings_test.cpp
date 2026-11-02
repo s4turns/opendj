@@ -84,8 +84,12 @@ namespace
         {
             state.samplerFiles[(size_t) slot] = "/music/stab" + juce::String (slot) + ".wav";
             state.samplerLooping[(size_t) slot] = slot % 2 == 0;
-            state.samplerGains[(size_t) slot] = 0.2f + 0.1f * (float) slot;
+            state.samplerGains[(size_t) slot] = 0.2f + 0.05f * (float) slot;
+            state.samplerSync[(size_t) slot] = slot % 3 == 0;
+            state.samplerBpms[(size_t) slot] = slot % 4 == 0 ? 120.0 + slot : 0.0;
         }
+
+        state.samplerBank = 2;
 
         return state;
     }
@@ -134,7 +138,13 @@ namespace
         REQUIRE_FALSE (a.rtmp.liveVideo);
 
         for (size_t slot = 0; slot < Sampler::numSlots; ++slot)
+        {
             REQUIRE_THAT (a.samplerGains[slot], WithinAbs (b.samplerGains[slot], 1.0e-4f));
+            REQUIRE (a.samplerSync[slot] == b.samplerSync[slot]);
+            REQUIRE_THAT (a.samplerBpms[slot], WithinAbs (b.samplerBpms[slot], 1.0e-9));
+        }
+
+        REQUIRE (a.samplerBank == b.samplerBank);
 
         for (size_t fx = 0; fx < MasterEffects::numSlots; ++fx)
         {

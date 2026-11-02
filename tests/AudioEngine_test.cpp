@@ -469,3 +469,62 @@ TEST_CASE ("a track loaded onto a deck starts at its own tempo", "[engine][decks
     engine.getDeck (0).unload();
     REQUIRE_THAT (engine.getDeck (0).getTempoRatio(), WithinAbs (1.0, 1.0e-9));
 }
+
+TEST_CASE ("a sample recorded from a deck is a bar on the grid, at the track's tempo", "[engine][sampler]")
+{
+    ScopedJuce scoped;
+    ToneFile tone (6.0, 330.0);
+    Harness h;
+
+    auto& deck = h.engine.getDeck (0);
+    REQUIRE (deck.loadFile (tone.get()));
+    REQUIRE (deck.setBeatGrid (120.0, 0.0));   // a beat every half second
+
+    deck.seekToSeconds (1.2);
+    h.engine.renderNextBlock (h.outputs.data(), (int) h.outputs.size(), blockSize);
+
+    const auto folder = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                            .getChildFile ("opendj-capture-" + juce::String (juce::Random::getSystemRandom().nextInt64()));
+
+    auto finished = false;
+    juce::String error;
+
+    h.engine.captureSampleAsync (3, 0, 4.0, folder, [&] (juce::String result)
+    {
+        error = result;
+        finished = true;
+    });
+
+    for (int i = 0; i < 5000 && ! finished; ++i)
+        juce::MessageManager::getInstance()->runDispatchLoopUntil (1);
+
+    REQUIRE (finished);
+    INFO (error);
+    REQUIRE (error.isEmpty());
+
+    auto& sampler = h.engine.getSampler();
+    REQUIRE (sampler.isSlotLoaded (3));
+    REQUIRE_THAT (sampler.getSlotBpm (3), WithinAbs (120.0, 1e-9));
+    REQUIRE_THAT (sampler.getSlotLengthSeconds (3), WithinAbs (2.0, 1e-3));   // four beats
+
+    // Kept as a file, so it comes back after a restart.
+    REQUIRE (sampler.getSlotFile (3).existsAsFile());
+    REQUIRE (sampler.getSlotFile (3).isAChildOf (folder));
+
+    sampler.clearSlot (3);
+    folder.deleteRecursively();
+}
+
+TEST_CASE ("recording a sample needs a track on the deck", "[engine][sampler]")
+{
+    ScopedJuce scoped;
+    Harness h;
+
+    juce::String error;
+    h.engine.captureSampleAsync (0, 1, 4.0, juce::File::getSpecialLocation (juce::File::tempDirectory),
+                                 [&] (juce::String result) { error = result; });
+
+    // Refused at once, before anything is decoded or written.
+    REQUIRE (error.containsIgnoreCase ("load a track"));
+    REQUIRE_FALSE (h.engine.getSampler().isSlotLoaded (0));
+}

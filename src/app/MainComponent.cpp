@@ -588,13 +588,13 @@ bool MainComponent::keyPressed (const juce::KeyPress& key, juce::Component*)
         return true;
     }
 
-    // The number row fires the sampler pads, so a machine with no controller on
-    // it still has eight sounds under one hand.
-    for (int slot = 0; slot < Sampler::numSlots; ++slot)
+    // The number row fires the sampler pads of the bank on show, so a machine
+    // with no controller on it still has eight sounds under one hand.
+    for (int pad = 0; pad < Sampler::numPads; ++pad)
     {
-        if (key.isKeyCode ('1' + slot))
+        if (key.isKeyCode ('1' + pad))
         {
-            dispatcher.dispatch ({ Action::samplerTrigger, 0, slot, 1.0f });
+            dispatcher.dispatch ({ Action::samplerTrigger, 0, pad, 1.0f });
             return true;
         }
     }
@@ -682,7 +682,13 @@ void MainComponent::restoreSettings()
         const juce::File file (settings.samplerFiles[(size_t) slot]);
 
         if (file.existsAsFile())
-            engine.loadSampleAsync (slot, file);
+            engine.loadSampleAsync (slot, file, [this, slot, bpm = settings.samplerBpms[(size_t) slot]] (juce::String error)
+            {
+                // A tempo kept from before outranks one found again from the
+                // file: it may have been set by hand or taken from a deck.
+                if (error.isEmpty() && bpm > 0.0)
+                    engine.getSampler().setSlotBpm (slot, bpm);
+            });
     }
 
     // Plugins last, and never the one the previous run died loading: a plugin

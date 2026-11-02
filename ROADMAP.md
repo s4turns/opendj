@@ -96,7 +96,7 @@ in `MusicalKey::toCamelot` that the browser does not yet show.
 
 | Missing | Notes |
 | --- | --- |
-| A deeper sampler (#21) | More pads, banks, recording a sample from a deck, samples locked to tempo |
+| A deeper sampler (#21) | Done: four banks of eight pads, recording a sample from a deck (its loop or whole bars, on the grid), and pads synced to the music's tempo. Sync changes speed and pitch together; it does not yet start a sample on the beat |
 | More from stems (#22) | Separating the library ahead of time, stem pads such as vocal off or drums only, effects on one stem |
 | Library import and metadata (#23) | iTunes and Music and Serato libraries; a tag editor; cover art. rekordbox collections import from their XML (`src/library/RekordboxImport.*`), with grids, hot cues, playlists, colours, ratings and comments, which the library now keeps |
 | Sandbox (#26) | Previewing a later moment in the headphones while the master plays on |
@@ -701,7 +701,9 @@ would say so.
 | `deck.waveform_zoom` | value | Signed rungs of the zoom ladder, positive to zoom in. One zoom for every deck, so no deck is named |
 | `deck.swap` | nothing | Swaps both sides at once. What a single deck-toggle button means |
 | `mixer.crossfader_assign` | `deck`, `slot` | 0 the A side, 1 neither, 2 the B side |
-| `sampler.trigger` | `slot` | Starts that pad; with shift, stops it |
+| `sampler.trigger` | `slot` | Starts that pad of the bank on show; with shift, stops it |
+| `sampler.bank` | `slot` | Puts bank `slot` (0 to 3) on the pads |
+| `sampler.next_bank` | nothing | Puts the next bank on the pads |
 | `sampler.stop` | `slot` | |
 | `sampler.gain` | value | The level of the whole sampler |
 | `pad.mode` | value | The pad mode a controller reports, as the code in its velocity, stored per deck |

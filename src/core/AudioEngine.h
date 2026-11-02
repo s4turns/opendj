@@ -109,6 +109,23 @@ public:
     void loadSampleAsync (int slot, const juce::File& file,
                           std::function<void (juce::String)> onComplete = {});
 
+    /** Records a sample from a deck into a sampler slot: the loop if the deck
+        is looping, otherwise `beats` beats from the beat at or behind the
+        playhead. Taken from the track itself rather than the deck's output,
+        so it is exact to the sample, free of the EQ and effects, and lands on
+        the grid. Written as a WAV into `folder` so it survives a restart, and
+        given the track's tempo so it can be synced. Message thread; the
+        callback runs on the message thread with an empty string on success. */
+    void captureSampleAsync (int slot, int deckIndex, double beats, const juce::File& folder,
+                             std::function<void (juce::String)> onComplete = {});
+
+    /** The tempo the music is at now: the lowest playing deck with a beat
+        grid, at its pitch. 0 when none is. What synced samples follow. */
+    double getMasterTempo() const;
+
+    /** Where captured samples are written unless told otherwise. */
+    static juce::File defaultSampleFolder();
+
     /** Decodes and analyses a file on a background thread, then swaps it onto
         the deck. Decoding a long track and finding its beat grid takes a second
         or two, which is far too long to spend on the message thread. The
