@@ -238,7 +238,8 @@ juce::Result Library::createSchema()
         && addColumnIfMissing ("tracks", "rating", "INTEGER NOT NULL DEFAULT 0")
         && addColumnIfMissing ("tracks", "colour", "INTEGER NOT NULL DEFAULT 0")
         && addColumnIfMissing ("tracks", "comment", "TEXT NOT NULL DEFAULT ''")
-        && addColumnIfMissing ("hot_cues", "name", "TEXT NOT NULL DEFAULT ''");
+        && addColumnIfMissing ("hot_cues", "name", "TEXT NOT NULL DEFAULT ''")
+        && addColumnIfMissing ("tracks", "grid_edited", "INTEGER NOT NULL DEFAULT 0");
 
     if (! upgraded)
         return juce::Result::fail (juce::String ("Could not create the library schema: ") + sqlite3_errmsg (database));
@@ -423,13 +424,19 @@ juce::int64 Library::upsertTrack (const TrackRecord& record)
 
             Statement update (database,
                 record.analysed
+                    // A grid set by hand outranks any analysis or import:
+                    // the person who fixed it has listened to the track.
                     ? "UPDATE tracks SET file_size = ?, file_modified = ?, title = ?, artist = ?, album = ?,"
-                      " genre = ?, key = ?, duration_seconds = ?, bpm = ?, first_beat_seconds = ?,"
-                      " tempo_confidence = ?, analysis_version = ? WHERE id = ?"
+                      " genre = ?, key = ?, duration_seconds = ?,"
+                      " bpm = CASE WHEN grid_edited THEN bpm ELSE ? END,"
+                      " first_beat_seconds = CASE WHEN grid_edited THEN first_beat_seconds ELSE ? END,"
+                      " tempo_confidence = CASE WHEN grid_edited THEN tempo_confidence ELSE ? END,"
+                      " analysis_version = ? WHERE id = ?"
                     : fileChanged
                         ? "UPDATE tracks SET file_size = ?, file_modified = ?, title = ?, artist = ?, album = ?,"
                           " genre = ?, key = ?, duration_seconds = ?, bpm = 0, first_beat_seconds = 0,"
-                          " tempo_confidence = 0, analysis_version = 0 WHERE id = ? AND ? = ? AND ? = ? AND ? = ?"
+                          " tempo_confidence = 0, analysis_version = 0, grid_edited = 0"
+                          " WHERE id = ? AND ? = ? AND ? = ? AND ? = ?"
                         : "UPDATE tracks SET file_size = ?, file_modified = ?, title = ?, artist = ?, album = ?,"
                           " genre = ?, key = ?, duration_seconds = CASE WHEN ? > 0 THEN ? ELSE duration_seconds END"
                           " WHERE id = ? AND ? = ? AND ? = ?");
@@ -970,6 +977,23 @@ void Library::store (const juce::File& file, const TrackAnalysis& analysis, doub
 void Library::storeHotCues (const juce::File& file, const HotCues& cues)
 {
     setHotCues (file, cues);
+}
+
+void Library::storeBeatGrid (const juce::File& file, double bpm, double firstBeatSeconds)
+{
+    {
+        std::lock_guard<std::mutex> lock (mutex);
+
+        Statement update (database,
+            "UPDATE tracks SET bpm = ?, first_beat_seconds = ?, tempo_confidence = 1, grid_edited = 1,"
+            " analysis_version = ? WHERE path = ?");
+        update.bind (1, bpm).bind (2, firstBeatSeconds).bind (3, analysisVersion).bind (4, pathOf (file));
+
+        if (! update.run() || sqlite3_changes (database) == 0)
+            return;
+    }
+
+    changed();   // the browser's BPM column
 }
 
 } // namespace opendj

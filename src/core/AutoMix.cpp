@@ -93,6 +93,12 @@ void AutoMix::planNextMix()
 {
     plan = {};
 
+    if (onAirDeck >= 0)
+    {
+        plannedOutgoing = engine.getDeck (onAirDeck).getAnalysis();
+        plannedIncoming = engine.getDeck (1 - onAirDeck).getAnalysis();
+    }
+
     if (! smart || phase != Phase::playing || ! nextReady || onAirDeck < 0)
         return;
 
@@ -369,6 +375,14 @@ void AutoMix::tick (double nowSeconds)
 {
     if (phase == Phase::idle || phase == Phase::starting)
         return;
+
+    if (phase == Phase::playing && nextReady && onAirDeck >= 0
+        && (plannedOutgoing.lock() != engine.getDeck (onAirDeck).getAnalysis()
+            || plannedIncoming.lock() != engine.getDeck (1 - onAirDeck).getAnalysis()))
+    {
+        planNextMix();
+        changed();
+    }
 
     if (phase == Phase::fading)
     {

@@ -4,6 +4,7 @@
 */
 
 #include "ui/DeckComponent.h"
+#include "ui/BeatGridEditor.h"
 
 #include "ui/HotCueColours.h"
 
@@ -57,6 +58,14 @@ DeckComponent::DeckComponent (AudioEngine& engineToUse, int deckIndex, const juc
     bpmLabel.setColour (juce::Label::textColourId, accentColour);
     bpmLabel.setFont (juce::FontOptions (15.0f, juce::Font::bold));
     bpmLabel.setJustificationType (juce::Justification::centred);
+    bpmLabel.setTooltip ("Click to edit the beat grid: tempo, downbeat and tap tempo");
+    bpmLabel.setMouseCursor (juce::MouseCursor::PointingHandCursor);
+    bpmClick.onClick = [this]
+    {
+        if (deck.isLoaded())
+            BeatGridEditor::showFor (deck, bpmLabel);
+    };
+    bpmLabel.addMouseListener (&bpmClick, false);
     addAndMakeVisible (bpmLabel);
 
     loadButton.onClick = [this] { loadButtonClicked(); };
@@ -281,7 +290,10 @@ DeckComponent::DeckComponent (AudioEngine& engineToUse, int deckIndex, const juc
     refresh();
 }
 
-DeckComponent::~DeckComponent() = default;
+DeckComponent::~DeckComponent()
+{
+    bpmLabel.removeMouseListener (&bpmClick);
+}
 
 void DeckComponent::load (const juce::File& file)
 {

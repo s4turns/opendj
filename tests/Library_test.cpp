@@ -487,3 +487,43 @@ TEST_CASE ("a library made before ratings and hot cues is upgraded in place", "[
 
     folder.deleteRecursively();
 }
+
+TEST_CASE ("a grid set by hand comes back and outranks the analyser", "[library][cache][grid]")
+{
+    Fixture fixture;
+    fixture.library.upsertTrack (fixture.recordFor (fixture.first, "Yeah", "Boys Noize"));
+    fixture.library.store (fixture.first, analysisAt (128.0), 300.0);
+
+    fixture.library.storeBeatGrid (fixture.first, 127.5, 0.4);
+
+    auto known = fixture.library.lookup (fixture.first);
+    REQUIRE (known.has_value());
+    REQUIRE (known->analysed);
+    REQUIRE_THAT (known->bpm, WithinAbs (127.5, 1.0e-9));
+    REQUIRE_THAT (known->firstBeatSeconds, WithinAbs (0.4, 1.0e-9));
+
+    // A later analysis of the same file, or an import, must not undo it.
+    fixture.library.store (fixture.first, analysisAt (64.0), 300.0);
+
+    known = fixture.library.lookup (fixture.first);
+    REQUIRE_THAT (known->bpm, WithinAbs (127.5, 1.0e-9));
+    REQUIRE_THAT (known->firstBeatSeconds, WithinAbs (0.4, 1.0e-9));
+    REQUIRE_THAT (fixture.library.findTrack (fixture.first)->bpm, WithinAbs (127.5, 1.0e-9));
+}
+
+TEST_CASE ("a changed file drops a grid set by hand", "[library][cache][grid]")
+{
+    Fixture fixture;
+    fixture.library.upsertTrack (fixture.recordFor (fixture.first, "Yeah", "Boys Noize"));
+    fixture.library.store (fixture.first, analysisAt (128.0), 300.0);
+    fixture.library.storeBeatGrid (fixture.first, 127.5, 0.4);
+
+    // A different recording now: its own analysis wins again.
+    REQUIRE (fixture.first.replaceWithText ("a different recording altogether"));
+    fixture.library.upsertTrack (fixture.recordFor (fixture.first, "Yeah", "Boys Noize"));
+    fixture.library.store (fixture.first, analysisAt (130.0), 300.0);
+
+    const auto known = fixture.library.lookup (fixture.first);
+    REQUIRE (known.has_value());
+    REQUIRE_THAT (known->bpm, WithinAbs (130.0, 1.0e-9));
+}

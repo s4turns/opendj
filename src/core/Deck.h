@@ -11,6 +11,7 @@
 #include "analysis/AnalysisCache.h"
 #include "analysis/Stems.h"
 #include "analysis/TrackAnalysis.h"
+#include "analysis/TapTempo.h"
 
 #include <array>
 #include <atomic>
@@ -101,6 +102,53 @@ public:
     /** With quantize on, the cue point, a newly set hot cue and the ends of
         a manual loop land on the nearest beat rather than wherever the
         finger was. Needs a beat grid; without one nothing is snapped. */
+    //==========================================================================
+    // Beat grid editing. Message or MIDI thread; never the audio thread.
+    //==========================================================================
+
+    /** The slowest and fastest tempo a grid can be given by hand. */
+    static constexpr double minimumGridBpm = 40.0;
+    static constexpr double maximumGridBpm = 300.0;
+
+    /** Replaces the loaded track's beat grid. The first beat is kept within
+        the first bar, which keeps which beat of the bar is the downbeat.
+        Returns false with nothing loaded or a tempo out of range. Fires
+        onBeatGridChanged so the grid can be kept with the track. */
+    bool setBeatGrid (double bpm, double firstBeatSeconds);
+
+    /** Changes the tempo by `deltaBpm`, keeping the beat nearest the playhead
+        where it is, so the part of the grid being looked at does not slide
+        away. The rest of the grid stretches from there. */
+    bool adjustGridBpm (double deltaBpm);
+
+    /** Multiplies the tempo, for a track detected at half or double speed.
+        The beat nearest the playhead stays put. */
+    bool scaleGridBpm (double factor);
+
+    /** Slides the whole grid later (positive) or earlier, in seconds. */
+    bool shiftGrid (double seconds);
+
+    /** Makes the playhead a downbeat, the first beat of a bar, keeping the
+        tempo. A track with no grid yet needs a tempo first. */
+    bool setDownbeatHere();
+
+    /** One tap of tap tempo at `nowSeconds` on a steady clock. Once there are
+        enough taps the tempo is set from them, around the playhead as
+        adjustGridBpm does, and refined with every further tap. Works on a
+        track with no grid too, starting one at the playhead. Returns the
+        tapped tempo, or 0 while there are too few taps. */
+    double tapTempo (double nowSeconds);
+
+    /** Puts back the grid the track had when it was loaded. */
+    bool revertBeatGrid();
+
+    /** Whether the grid has been changed since the track was loaded. */
+    bool isBeatGridEdited() const;
+
+    /** Called with the loaded file and the new grid after an edit, from
+        whichever thread made it. Set once, before the deck is used. */
+    std::function<void (const juce::File&, double bpm, double firstBeatSeconds)> onBeatGridChanged;
+
     void setQuantize (bool shouldQuantize) { quantize.store (shouldQuantize, std::memory_order_relaxed); }
     void toggleQuantize() { setQuantize (! isQuantizeEnabled()); }
     bool isQuantizeEnabled() const noexcept { return quantize.load (std::memory_order_relaxed); }
@@ -371,6 +419,16 @@ private:
     // runs ahead of the audible readPosition by the stretcher's own delay.
     std::atomic<bool> keyLock { false };
     std::atomic<bool> quantize { false };
+
+    // The grid as loaded, for revert. Written by whichever thread loads.
+    std::atomic<double> loadedBpm { 0.0 };
+    std::atomic<double> loadedFirstBeatSeconds { 0.0 };
+
+    TapTempo taps;                                         // message or MIDI thread
+    std::mutex tapMutex;                                   // the two can both tap
+
+    /** Moves the tempo to `bpm` around the beat nearest the playhead. */
+    bool retempoAroundPlayhead (double bpm);
 
     /** A position snapped to the nearest beat when quantize is on and there
         is a grid, or left alone otherwise. Not for the audio thread. */

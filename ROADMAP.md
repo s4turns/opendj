@@ -85,7 +85,7 @@ in `MusicalKey::toCamelot` that the browser does not yet show.
 | --- | --- | --- |
 | History and smart folders (#11) | Playlists, virtual and filter folders, an automatic history of played tracks, a side list for lining up the next few | Playlists are done. No history: `tracks.last_played_at` exists but nothing writes it. No filter folders |
 | Beat jump and quantize (#13) | Jumps of 1 to 32 beats; cues and loops snap to the grid | Done: beat jump of 1 to 32 beats that carries a running loop, and a quantize button per deck for the cue, hot cues and loop in and out. Jumping to a hot cue does not yet keep the phase |
-| Beat grid editing (#14) | Adjust the BPM, move the downbeat, tap tempo | Detection only, so a wrong grid cannot be corrected |
+| Beat grid editing (#14) | Adjust the BPM, move the downbeat, tap tempo | Done: an editor behind each deck's BPM readout, with tap tempo. Edits are kept with the track and outrank later analysis. No dynamic grids yet: one tempo for the whole track |
 | More effects (#15) | Dozens, including flanger, phaser, gate, bitcrusher, brake, backspin, echo out and stutter, plus reverse and censor buttons | Filter, echo and reverb per channel, and the same three in two master slots, which also take VST3 plugins |
 | Key tools (#16) | Key shift in semitones, key match between decks, Camelot display, harmonic hints in the browser | Detection only |
 | Auto gain (#17) | Tracks levelled by measured loudness | A trim, with no analysis behind it |
@@ -714,6 +714,10 @@ would say so.
 | `deck.beatjump_forward` | `deck`, `slot` | Jumps forward by the length in `loopBeatsForSlot`, carrying a running loop |
 | `deck.beatjump_back` | `deck`, `slot` | The same, backwards |
 | `deck.quantize_toggle` | `deck` | Turns quantize on or off for the deck |
+| `deck.tap_tempo` | `deck` | One tap; four or more set the tempo, around the beat at the playhead |
+| `grid.downbeat_here` | `deck` | The playhead becomes the first beat of a bar |
+| `grid.shift_earlier` | `deck` | Slides the grid 5 ms earlier |
+| `grid.shift_later` | `deck` | Slides the grid 5 ms later |
 
 Plus the loop family: `loop.in`, `loop.out`, `loop.toggle`, `loop.beats`, `loop.roll`,
 `loop.halve`, `loop.double`, `loop.reloop`. `loop.beats` and `loop.roll` take a slot, which

@@ -63,6 +63,16 @@ AudioEngine::AudioEngine()
                     cache->storeHotCues (file, cues);
             });
         };
+
+        // The same for a grid set by hand.
+        decks[(size_t) i]->onBeatGridChanged = [this] (const juce::File& file, double bpm, double firstBeat)
+        {
+            loaderPool.addJob ([this, file, bpm, firstBeat]
+            {
+                if (auto* cache = analysisCache.load (std::memory_order_acquire))
+                    cache->storeBeatGrid (file, bpm, firstBeat);
+            });
+        };
     }
 
     // Every frame the visualiser finishes is offered to the broadcast, which

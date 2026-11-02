@@ -139,6 +139,19 @@ private:
     juce::Label titleLabel;
     juce::Label timeLabel;
     juce::Label bpmLabel;
+
+    /** Opens the beat grid editor when the BPM readout is clicked. */
+    struct BpmClick final : public juce::MouseListener
+    {
+        std::function<void()> onClick;
+        void mouseUp (const juce::MouseEvent& e) override
+        {
+            if (e.mouseWasClicked() && onClick != nullptr)
+                onClick();
+        }
+    };
+
+    BpmClick bpmClick;
     juce::TextButton swapButton;
     juce::TextButton loadButton { "Load" };
     juce::TextButton playButton { "Play" };

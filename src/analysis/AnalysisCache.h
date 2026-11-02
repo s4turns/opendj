@@ -78,6 +78,15 @@ public:
         juce::ignoreUnused (file, cues);
     }
 
+    /** Remembers a beat grid set by hand, so it comes back the next time the
+        track loads and is never replaced by the analyser's guess again.
+        Called on a loader thread. A cache with nowhere to keep it can
+        ignore it. */
+    virtual void storeBeatGrid (const juce::File& file, double bpm, double firstBeatSeconds)
+    {
+        juce::ignoreUnused (file, bpm, firstBeatSeconds);
+    }
+
     /** The names a track's hot cues were given, by slot. Called on the message
         thread when a deck needs them to label its waveform. A cache with none
         returns empty names. */

@@ -146,6 +146,10 @@ private:
     bool vocalAware = true;
     automix::MixPlan plan;
 
+    // The grids the plan was made from. A grid edited since means the phrase
+    // the plan aims for has moved, so it is made again.
+    std::weak_ptr<const TrackAnalysis> plannedOutgoing, plannedIncoming;
+
     int onAirDeck = -1;
     int currentIndex = -1;
 

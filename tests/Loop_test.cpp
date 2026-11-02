@@ -841,3 +841,106 @@ TEST_CASE ("with quantize off, cues stay where they were set", "[loop][quantize]
     fixture.deck->hotCuePressed (0);
     REQUIRE_THAT (fixture.deck->getHotCueSeconds (0), WithinAbs (position, 1.0e-9));
 }
+
+//==============================================================================
+// Beat grid editing
+//==============================================================================
+
+TEST_CASE ("a tempo change keeps the beat nearest the playhead in place", "[grid]")
+{
+    Fixture fixture;
+    const auto before = fixture.deck->getAnalysis();
+    const auto pivot = before->nearestBeatSeconds (12.0);
+
+    fixture.deck->seekToSeconds (pivot + 0.05);
+    fixture.run (1);
+
+    REQUIRE (fixture.deck->adjustGridBpm (1.0));
+
+    const auto after = fixture.deck->getAnalysis();
+    REQUIRE_THAT (after->bpm, WithinAbs (before->bpm + 1.0, 1.0e-9));
+    REQUIRE_THAT (after->nearestBeatSeconds (pivot), WithinAbs (pivot, 1.0e-6));
+    REQUIRE (fixture.deck->isBeatGridEdited());
+}
+
+TEST_CASE ("an edited grid keeps which beat is the downbeat", "[grid]")
+{
+    Fixture fixture;
+    const auto before = fixture.deck->getAnalysis();
+    const auto period = before->secondsPerBeat();
+
+    // A downbeat well into the track, then a whole-beat nudge would be a
+    // different bar phase; a tempo change must not cause one.
+    const auto downbeat = before->firstBeatSeconds + 16.0 * period;
+    fixture.deck->seekToSeconds (downbeat);
+    fixture.run (1);
+
+    REQUIRE (fixture.deck->scaleGridBpm (2.0));
+    const auto after = fixture.deck->getAnalysis();
+
+    const auto barsFromAnchor = (downbeat - after->firstBeatSeconds) / (4.0 * after->secondsPerBeat());
+    REQUIRE_THAT (barsFromAnchor - std::round (barsFromAnchor), WithinAbs (0.0, 1.0e-6));
+    REQUIRE (after->firstBeatSeconds >= 0.0);
+    REQUIRE (after->firstBeatSeconds < 4.0 * after->secondsPerBeat());
+}
+
+TEST_CASE ("the downbeat can be put at the playhead and the grid slid", "[grid]")
+{
+    Fixture fixture;
+    const auto bpm = fixture.deck->getAnalysis()->bpm;
+
+    fixture.deck->seekToSeconds (7.3);
+    fixture.run (1);
+    const auto position = fixture.deck->getPositionSeconds();
+
+    REQUIRE (fixture.deck->setDownbeatHere());
+    auto grid = fixture.deck->getAnalysis();
+    REQUIRE_THAT (grid->bpm, WithinAbs (bpm, 1.0e-9));
+    REQUIRE_THAT (grid->nearestBeatSeconds (position), WithinAbs (position, 1.0e-6));
+
+    REQUIRE (fixture.deck->shiftGrid (0.01));
+    grid = fixture.deck->getAnalysis();
+    REQUIRE_THAT (grid->nearestBeatSeconds (position), WithinAbs (position + 0.01, 1.0e-6));
+
+    REQUIRE (fixture.deck->revertBeatGrid());
+    REQUIRE_FALSE (fixture.deck->isBeatGridEdited());
+}
+
+TEST_CASE ("an edit is reported so it can be kept with the track", "[grid]")
+{
+    Fixture fixture;
+
+    double reportedBpm = 0.0;
+    juce::File reportedFile;
+    fixture.deck->onBeatGridChanged = [&] (const juce::File& file, double bpm, double)
+    {
+        reportedFile = file;
+        reportedBpm = bpm;
+    };
+
+    REQUIRE (fixture.deck->scaleGridBpm (0.5));
+    REQUIRE (reportedFile == fixture.deck->getLoadedFile());
+    REQUIRE_THAT (reportedBpm, WithinAbs (fixture.deck->getAnalysis()->bpm, 1.0e-9));
+}
+
+TEST_CASE ("tap tempo sets the tempo from four taps", "[grid][tap]")
+{
+    Fixture fixture;
+
+    REQUIRE (fixture.deck->tapTempo (100.0) == 0.0);
+    REQUIRE (fixture.deck->tapTempo (100.4) == 0.0);
+    REQUIRE (fixture.deck->tapTempo (100.8) == 0.0);
+    REQUIRE_THAT (fixture.deck->tapTempo (101.2), WithinAbs (150.0, 1.0e-9));
+    REQUIRE_THAT (fixture.deck->getAnalysis()->bpm, WithinAbs (150.0, 1.0e-9));
+}
+
+TEST_CASE ("a tempo outside the range is refused", "[grid]")
+{
+    Fixture fixture;
+    const auto bpm = fixture.deck->getAnalysis()->bpm;
+
+    REQUIRE_FALSE (fixture.deck->setBeatGrid (10.0, 0.0));
+    REQUIRE_FALSE (fixture.deck->setBeatGrid (1000.0, 0.0));
+    REQUIRE_THAT (fixture.deck->getAnalysis()->bpm, WithinAbs (bpm, 1.0e-9));
+    REQUIRE_FALSE (fixture.deck->isBeatGridEdited());
+}

@@ -55,6 +55,13 @@ namespace
     }
 }
 
+namespace
+{
+    /** One press of a grid nudge: small enough to land a kick, five presses
+        to move a whole sixteenth at 128 BPM. */
+    constexpr double gridShiftSeconds = 0.005;
+}
+
 void ActionDispatcher::dispatch (const ActionMessage& message)
 {
     const auto deckIndex = juce::jlimit (0, AudioEngine::numDecks - 1, message.deck);
@@ -251,6 +258,26 @@ void ActionDispatcher::dispatch (const ActionMessage& message)
         case Action::deckQuantizeToggle:
             if (pressed)
                 deck.toggleQuantize();
+            break;
+
+        case Action::deckTapTempo:
+            if (pressed)
+                deck.tapTempo (juce::Time::getMillisecondCounterHiRes() * 0.001);
+            break;
+
+        case Action::gridDownbeatHere:
+            if (pressed)
+                deck.setDownbeatHere();
+            break;
+
+        case Action::gridShiftEarlier:
+            if (pressed)
+                deck.shiftGrid (-gridShiftSeconds);
+            break;
+
+        case Action::gridShiftLater:
+            if (pressed)
+                deck.shiftGrid (gridShiftSeconds);
             break;
 
         case Action::hotCueClear:

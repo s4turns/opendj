@@ -39,6 +39,7 @@ target_sources(opendj-tests PRIVATE
     AutoMix_test.cpp
     MixPoints_test.cpp
     TempoMath_test.cpp
+    TapTempo_test.cpp
     StemModel_test.cpp
     WaveformMath_test.cpp
     StemDsp_test.cpp

@@ -91,6 +91,12 @@ enum class Action
     beatJumpBack,
     deckQuantizeToggle, ///< cues and loops snap to the beat grid
 
+    // Beat grid editing. deck selects the deck.
+    deckTapTempo,       ///< each press is a tap; four or more set the tempo
+    gridDownbeatHere,   ///< the playhead becomes the first beat of a bar
+    gridShiftEarlier,   ///< slides the grid 5 ms earlier
+    gridShiftLater,     ///< slides the grid 5 ms later
+
     // Mixer. deck selects the channel; slot selects the EQ band for deckEq.
     channelFader,
     channelEq,          ///< slot 0 low, 1 mid, 2 high

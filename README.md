@@ -91,6 +91,20 @@ deck stays in phase. The number between them is the size. Click it to step throu
 it on, the cue point, a newly set hot cue, and loop in and out snap to the nearest beat instead
 of landing where the click did. Quantize is remembered per deck.
 
+When the detected grid is wrong, click the deck's BPM readout to edit it:
+
+- **Tempo:** step it by 1, 0.1 or 0.01 BPM, or halve or double a track found at the wrong speed.
+  The beat nearest the playhead stays where it is, and the grid stretches from there.
+- **Phase:** Earlier and Later slide the whole grid by 5 ms, and Downbeat here makes the playhead
+  the first beat of a bar.
+- **Tap:** tap along with the beat. Four taps set the tempo, and every tap after that refines it.
+  Stop for two seconds to start over. Tap also gives a grid to a track that has none.
+- **Revert:** puts back the grid the track had when it was loaded.
+
+Edits apply at once, so the waveform, sync, loops and automix all follow while the editor is
+open. Each edit is saved with the track in the library, and a later analysis or rekordbox import
+won't replace it. If the file itself changes, it gets a fresh analysis.
+
 ## Four decks
 
 There are four decks, A to D, and two of them are on screen at a time. The button beside a

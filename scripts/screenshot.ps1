@@ -120,6 +120,20 @@ try {
     $picture = $whole.Clone($client, $whole.PixelFormat)
     $whole.Dispose()
 
+    # On a scaled display the client area is in physical pixels. Bring it back
+    # to the logical size, so every capture is the same size whatever monitor
+    # the window opened on.
+    if ($picture.Width -ne $Width -or $picture.Height -ne $Height) {
+        $scaled = New-Object System.Drawing.Bitmap $Width, $Height
+        $resample = [System.Drawing.Graphics]::FromImage($scaled)
+        $resample.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+        $resample.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+        $resample.DrawImage($picture, 0, 0, $Width, $Height)
+        $resample.Dispose()
+        $picture.Dispose()
+        $picture = $scaled
+    }
+
     $jpeg = [System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() | Where-Object MimeType -eq 'image/jpeg'
     $encoderParams = New-Object System.Drawing.Imaging.EncoderParameters 1
     $encoderParams.Param[0] = New-Object System.Drawing.Imaging.EncoderParameter ([System.Drawing.Imaging.Encoder]::Quality, [long]$Quality)

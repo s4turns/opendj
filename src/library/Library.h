@@ -189,6 +189,7 @@ public:
     std::optional<KnownTrack> lookup (const juce::File& file) override;
     void store (const juce::File& file, const TrackAnalysis& analysis, double durationSeconds) override;
     void storeHotCues (const juce::File& file, const HotCues& cues) override;
+    void storeBeatGrid (const juce::File& file, double bpm, double firstBeatSeconds) override;
 
 private:
     class Statement;

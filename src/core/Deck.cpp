@@ -216,7 +216,14 @@ bool Deck::loadFile (const juce::File& file, const KnownTrack* known)
         : TrackAnalyser::analyse (track->audio, track->sampleRate);
 
     publish (std::move (track));
+    loadedBpm.store (analysis != nullptr ? analysis->bpm : 0.0, std::memory_order_relaxed);
+    loadedFirstBeatSeconds.store (analysis != nullptr ? analysis->firstBeatSeconds : 0.0, std::memory_order_relaxed);
     std::atomic_store (&analysisData, std::move (analysis));
+
+    {
+        std::lock_guard<std::mutex> lock (tapMutex);
+        taps.reset();
+    }
 
     // After publish(), which empties the pads for the new track.
     if (known != nullptr)
@@ -454,6 +461,138 @@ bool Deck::beatJump (double beats)
 
     seekToSeconds (target);
     return true;
+}
+
+//==============================================================================
+// Beat grid editing
+//==============================================================================
+
+bool Deck::setBeatGrid (double bpm, double firstBeatSeconds)
+{
+    if (! isLoaded() || ! (bpm >= minimumGridBpm && bpm <= maximumGridBpm))
+        return false;
+
+    auto current = getAnalysis();
+
+    if (current == nullptr)
+        return false;
+
+    // Within the first bar, not the first beat: wrapping by a beat would lose
+    // which beat of the bar is the downbeat.
+    const auto bar = 4.0 * 60.0 / bpm;
+    auto first = std::fmod (firstBeatSeconds, bar);
+
+    if (first < 0.0)
+        first += bar;
+
+    auto edited = std::make_shared<TrackAnalysis> (*current);
+    edited->bpm = bpm;
+    edited->firstBeatSeconds = first;
+    edited->confidence = 1.0f;   // a person said so
+
+    // Only over the analysis the edit was made from: if another track loaded
+    // in between, this edit belongs to the one that left and is dropped.
+    std::shared_ptr<const TrackAnalysis> replacement = std::move (edited);
+
+    if (! std::atomic_compare_exchange_strong (&analysisData, &current, replacement))
+        return false;
+
+    if (onBeatGridChanged != nullptr)
+        onBeatGridChanged (getLoadedFile(), bpm, first);
+
+    return true;
+}
+
+bool Deck::retempoAroundPlayhead (double bpm)
+{
+    const auto analysis = getAnalysis();
+
+    if (analysis == nullptr)
+        return false;
+
+    const auto position = getPositionSeconds();
+
+    // A track with no grid yet starts one at the playhead.
+    if (! analysis->hasTempo())
+        return setBeatGrid (bpm, position);
+
+    // Count the beats from the anchor to the one nearest the playhead, and lay
+    // the same count back from it at the new tempo, so that beat stays put and
+    // so does its place in the bar.
+    const auto period = analysis->secondsPerBeat();
+    const auto beats = std::round ((position - analysis->firstBeatSeconds) / period);
+    const auto pivot = analysis->firstBeatSeconds + beats * period;
+
+    return setBeatGrid (bpm, pivot - beats * 60.0 / bpm);
+}
+
+bool Deck::adjustGridBpm (double deltaBpm)
+{
+    const auto analysis = getAnalysis();
+    return analysis != nullptr && analysis->hasTempo() && retempoAroundPlayhead (analysis->bpm + deltaBpm);
+}
+
+bool Deck::scaleGridBpm (double factor)
+{
+    const auto analysis = getAnalysis();
+    return analysis != nullptr && analysis->hasTempo() && factor > 0.0
+        && retempoAroundPlayhead (analysis->bpm * factor);
+}
+
+bool Deck::shiftGrid (double seconds)
+{
+    const auto analysis = getAnalysis();
+    return analysis != nullptr && analysis->hasTempo()
+        && setBeatGrid (analysis->bpm, analysis->firstBeatSeconds + seconds);
+}
+
+bool Deck::setDownbeatHere()
+{
+    const auto analysis = getAnalysis();
+    return analysis != nullptr && analysis->hasTempo()
+        && setBeatGrid (analysis->bpm, getPositionSeconds());
+}
+
+double Deck::tapTempo (double nowSeconds)
+{
+    if (! isLoaded())
+        return 0.0;
+
+    double bpm;
+
+    {
+        std::lock_guard<std::mutex> lock (tapMutex);
+        bpm = taps.tap (nowSeconds);
+    }
+
+    if (bpm <= 0.0)
+        return 0.0;
+
+    // Two decimals is as fine as anyone taps, and it keeps the readout calm.
+    bpm = std::round (juce::jlimit (minimumGridBpm, maximumGridBpm, bpm) * 100.0) / 100.0;
+    retempoAroundPlayhead (bpm);
+    return bpm;
+}
+
+bool Deck::revertBeatGrid()
+{
+    const auto bpm = loadedBpm.load (std::memory_order_relaxed);
+
+    if (bpm <= 0.0)
+        return false;
+
+    return setBeatGrid (bpm, loadedFirstBeatSeconds.load (std::memory_order_relaxed));
+}
+
+bool Deck::isBeatGridEdited() const
+{
+    const auto analysis = getAnalysis();
+
+    if (analysis == nullptr)
+        return false;
+
+    return std::abs (analysis->bpm - loadedBpm.load (std::memory_order_relaxed)) > 1.0e-6
+        || std::abs (analysis->firstBeatSeconds - loadedFirstBeatSeconds.load (std::memory_order_relaxed)) > 1.0e-6;
 }
 
 double Deck::quantized (double seconds) const
