@@ -356,10 +356,15 @@ rather than eight per cent fast.
 
 ## Mic input
 
-A mic from the device's inputs, laid over the mix after the sampler. Up to two inputs are enabled
-in Audio setup; the strip at the end of the sampler row turns the mic on, sets its level, meters
-it, and holds the talkover and routing switches. A controller reaches it through `mic.toggle`,
-`mic.gain` and `mic.talkover`.
+A mic from the device's inputs, laid over the mix after the sampler. Up to eight inputs are
+enabled in Audio setup; the strip at the end of the sampler row turns the mic on, sets its level,
+meters it, picks its input pair, and holds the talkover and routing switches. A controller reaches
+it through `mic.toggle`, `mic.gain` and `mic.talkover`.
+
+An aux line (#46) sits beside it: the same `MicInput` class in stereo, reading its own pair (3 and
+4 by default), with no talkover. It is processed before the mic, so talkover ducks it. When both
+are kept out of the speakers, the aux builds the recording mix and the mic adds itself to it.
+Controllers use `aux.toggle` and `aux.gain`.
 
 | Decision | Why |
 | --- | --- |
@@ -704,6 +709,8 @@ would say so.
 | `mic.toggle` | nothing | Turns the mic on or off |
 | `mic.gain` | value | The mic's level; 0.5 is unity |
 | `mic.talkover` | nothing | Turns talkover on or off |
+| `aux.toggle` | nothing | Turns the aux line on or off |
+| `aux.gain` | value | The aux line's level; 0.5 is unity |
 | `deck.beatjump_forward` | `deck`, `slot` | Jumps forward by the length in `loopBeatsForSlot`, carrying a running loop |
 | `deck.beatjump_back` | `deck`, `slot` | The same, backwards |
 | `deck.quantize_toggle` | `deck` | Turns quantize on or off for the deck |

@@ -269,6 +269,23 @@ void SessionState::captureFrom (const MicInput& mic)
     micGain = mic.getGain();
     micTalkover = mic.isTalkoverEnabled();
     micRouting = mic.getRouting();
+    micInputPair = mic.getInputPair();
+}
+
+void SessionState::captureAuxFrom (const MicInput& aux)
+{
+    auxGain = aux.getGain();
+    auxRouting = aux.getRouting();
+    auxInputPair = aux.getInputPair();
+}
+
+void SessionState::applyAuxTo (MicInput& aux) const
+{
+    aux.setGain (auxGain);
+    aux.setTalkover (false);
+    aux.setRouting (auxRouting);
+    aux.setInputPair (auxInputPair);
+    aux.setEnabled (false);
 }
 
 void SessionState::applyTo (MicInput& mic) const
@@ -276,6 +293,7 @@ void SessionState::applyTo (MicInput& mic) const
     mic.setGain (micGain);
     mic.setTalkover (micTalkover);
     mic.setRouting (micRouting);
+    mic.setInputPair (micInputPair);
     mic.setEnabled (false);
 }
 
@@ -398,6 +416,10 @@ juce::var SessionState::toVar() const
     root->setProperty ("mic_gain", micGain);
     root->setProperty ("mic_talkover", micTalkover);
     root->setProperty ("mic_routing", routingName (micRouting));
+    root->setProperty ("mic_input_pair", micInputPair);
+    root->setProperty ("aux_gain", auxGain);
+    root->setProperty ("aux_routing", routingName (auxRouting));
+    root->setProperty ("aux_input_pair", auxInputPair);
 
     if (windowBounds.isNotEmpty())
         root->setProperty ("window", windowBounds);
@@ -566,6 +588,10 @@ SessionState SessionState::fromVar (const juce::var& source)
     state.micGain = (float) number (source, "mic_gain", state.micGain, 0.0, 2.0);
     state.micTalkover = flag (source, "mic_talkover", state.micTalkover);
     state.micRouting = routingFromName (text (source, "mic_routing"));
+    state.micInputPair = (int) number (source, "mic_input_pair", state.micInputPair, 0.0, 3.0);
+    state.auxGain = (float) number (source, "aux_gain", state.auxGain, 0.0, 2.0);
+    state.auxRouting = routingFromName (text (source, "aux_routing"));
+    state.auxInputPair = (int) number (source, "aux_input_pair", state.auxInputPair, 0.0, 3.0);
 
     state.windowBounds = text (source, "window");
 

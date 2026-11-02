@@ -45,7 +45,7 @@ namespace
 
 //==============================================================================
 
-MicInput::MicInput() { prepare (44100.0); }
+MicInput::MicInput (Source sourceType) : source (sourceType) { prepare (44100.0); }
 
 void MicInput::prepare (double sampleRate)
 {
@@ -73,7 +73,8 @@ void MicInput::setGain (float newGain) noexcept
 bool MicInput::processBlock (const float* const* inputs, int numInputChannels,
                              juce::AudioBuffer<float>& room,
                              juce::AudioBuffer<float>& recording,
-                             int numSamples) noexcept
+                             int numSamples,
+                             bool recordingIsSeparate) noexcept
 {
     if (numSamples <= 0 || room.getNumChannels() < 2 || room.getNumSamples() < numSamples)
         return false;
@@ -83,17 +84,26 @@ bool MicInput::processBlock (const float* const* inputs, int numInputChannels,
 
     if (inputs != nullptr)
     {
+        // Counting only the channels that are there, which is how the device
+        // offers them: the pair is the Nth and N+1th active input.
+        const auto wantedFirst = 2 * inputPair.load (std::memory_order_relaxed);
+        auto active = 0;
+
         for (int ch = 0; ch < numInputChannels && second == nullptr; ++ch)
         {
             if (inputs[ch] == nullptr)
                 continue;
 
-            if (first == nullptr)
+            if (active == wantedFirst)
                 first = inputs[ch];
-            else
+            else if (active == wantedFirst + 1)
                 second = inputs[ch];
+
+            ++active;
         }
     }
+
+    const auto isStereo = source == Source::stereo;
 
     const auto on = enabled.load (std::memory_order_relaxed);
     const auto targetGain = gain.load (std::memory_order_relaxed);
@@ -106,27 +116,33 @@ bool MicInput::processBlock (const float* const* inputs, int numInputChannels,
     // The meter still runs, so a level can be set before the mic goes live.
     const auto idle = ! on && envelope <= 0.0f && duckGain >= 1.0f;
 
-    const auto separate = ! idle && keepOutOfRoom
-                       && recording.getNumChannels() >= 2 && recording.getNumSamples() >= numSamples;
+    const auto recordingUsable = recording.getNumChannels() >= 2 && recording.getNumSamples() >= numSamples;
+    const auto alreadySeparate = recordingIsSeparate && recordingUsable;
+    const auto separate = ! idle && keepOutOfRoom && recordingUsable;
+    const auto writeRecording = ! idle && (separate || alreadySeparate);
 
     auto* roomL = room.getWritePointer (0);
     auto* roomR = room.getWritePointer (1);
-    auto* recordingL = separate ? recording.getWritePointer (0) : nullptr;
-    auto* recordingR = separate ? recording.getWritePointer (1) : nullptr;
+    auto* recordingL = writeRecording ? recording.getWritePointer (0) : nullptr;
+    auto* recordingR = writeRecording ? recording.getWritePointer (1) : nullptr;
 
     auto blockPeak = 0.0f;
 
     for (int i = 0; i < numSamples; ++i)
     {
-        auto voice = 0.0f;
+        const auto a = first != nullptr ? first[i] : 0.0f;
+        const auto b = second != nullptr ? second[i] : 0.0f;
 
-        if (first != nullptr)  voice += first[i];
-        if (second != nullptr) voice += second[i];
+        // A mono source is the pair summed, in the middle. A stereo one keeps
+        // its sides, and a pair with only one channel is that channel in both.
+        auto voiceL = isStereo ? a : a + b;
+        auto voiceR = isStereo ? (second != nullptr ? b : a) : voiceL;
 
         smoothedGain = targetGain > smoothedGain ? juce::jmin (targetGain, smoothedGain + gainStep)
                                                  : juce::jmax (targetGain, smoothedGain - gainStep);
-        voice *= smoothedGain;
-        blockPeak = juce::jmax (blockPeak, std::abs (voice));
+        voiceL *= smoothedGain;
+        voiceR *= smoothedGain;
+        blockPeak = juce::jmax (blockPeak, std::abs (voiceL), std::abs (voiceR));
 
         if (idle)
             continue;
@@ -139,13 +155,21 @@ bool MicInput::processBlock (const float* const* inputs, int numInputChannels,
 
         const auto left = roomL[i] * duckGain;
         const auto right = roomR[i] * duckGain;
-        const auto spoken = voice * envelope;
-        const auto speaking = spoken != 0.0f;
+        const auto spokenL = voiceL * envelope;
+        const auto spokenR = voiceR * envelope;
 
-        const auto withVoiceL = speaking ? softClip (left + spoken) : left;
-        const auto withVoiceR = speaking ? softClip (right + spoken) : right;
+        const auto withVoiceL = spokenL != 0.0f ? softClip (left + spokenL) : left;
+        const auto withVoiceR = spokenR != 0.0f ? softClip (right + spokenR) : right;
 
-        if (separate)
+        if (alreadySeparate)
+        {
+            // An earlier source's own mix: duck it and add to it the same way.
+            const auto recL = recordingL[i] * duckGain;
+            const auto recR = recordingR[i] * duckGain;
+            recordingL[i] = spokenL != 0.0f ? softClip (recL + spokenL) : recL;
+            recordingR[i] = spokenR != 0.0f ? softClip (recR + spokenR) : recR;
+        }
+        else if (separate)
         {
             recordingL[i] = withVoiceL;
             recordingR[i] = withVoiceR;
@@ -162,7 +186,7 @@ bool MicInput::processBlock (const float* const* inputs, int numInputChannels,
     {
     }
 
-    return separate;
+    return separate || alreadySeparate;
 }
 
 } // namespace opendj

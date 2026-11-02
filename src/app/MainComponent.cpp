@@ -175,12 +175,19 @@ MainComponent::MainComponent()
     };
     addAndMakeVisible (*samplerView);
 
-    micView = std::make_unique<MicComponent> (engine);
+    micView = std::make_unique<MicComponent> (engine, engine.getMic(), "Mic");
     micView->onMessage = [this] (const juce::String& message)
     {
         statusLabel.setText (message, juce::dontSendNotification);
     };
     addAndMakeVisible (*micView);
+
+    auxView = std::make_unique<MicComponent> (engine, engine.getAux(), "Aux");
+    auxView->onMessage = [this] (const juce::String& message)
+    {
+        statusLabel.setText (message, juce::dontSendNotification);
+    };
+    addAndMakeVisible (*auxView);
 
     restoreSettings();
 
@@ -651,6 +658,7 @@ void MainComponent::restoreSettings()
 {
     settings.applyTo (engine.getMixer(), engine.getSampler());
     settings.applyTo (engine.getMic());
+    settings.applyAuxTo (engine.getAux());
 
     for (int deck = 0; deck < AudioEngine::numDecks; ++deck)
     {
@@ -704,6 +712,7 @@ void MainComponent::saveSettings()
     auto state = settings;
     state.captureFrom (engine.getMixer(), engine.getSampler());
     state.captureFrom (engine.getMic());
+    state.captureAuxFrom (engine.getAux());
     state.outputMode = engine.getOutputMode();
 
     for (int deck = 0; deck < AudioEngine::numDecks; ++deck)
@@ -794,7 +803,7 @@ void MainComponent::showAudioSettings()
         {
             selector = std::make_unique<juce::AudioDeviceSelectorComponent> (
                 engine.getDeviceManager(),
-                0, 2,      // a mic, from one input or a pair
+                0, AudioEngine::maxInputChannels,   // a pair for the mic, another for the aux
                 2, 8,      // enough outputs for a master pair plus a cue pair
                 false,     // MIDI has its own panel
                 false,
@@ -1666,7 +1675,9 @@ void MainComponent::resized()
     // height whatever else is on screen, and taking it from the browser is
     // cheaper than taking it from a waveform.
     auto samplerRow = area.removeFromBottom (58);
-    micView->setBounds (samplerRow.removeFromRight (300));
+    micView->setBounds (samplerRow.removeFromRight (micView->getPreferredWidth()));
+    samplerRow.removeFromRight (6);
+    auxView->setBounds (samplerRow.removeFromRight (auxView->getPreferredWidth()));
     samplerRow.removeFromRight (8);
     samplerView->setBounds (samplerRow);
     area.removeFromBottom (8);

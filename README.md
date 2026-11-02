@@ -9,7 +9,7 @@
 
 Free and open source DJ software, built in C++ with [JUCE](https://juce.com).
 
-![A strip across the top lining up both decks' beats, decks A and B below it, each with a track loaded and its waveforms coloured by frequency, loop lengths, stem knobs, turntable platter, tempo fader and a button to swap in deck C or D, a four channel mixer between them with every control named on every channel: high, mid and low EQ, filter, echo and its length in beats, reverb, crossfader assignment, a channel fader and cue, the track library underneath showing tempo and key, a row of eight sampler pads with their own level and cue, a mic strip with talkover, and a bottom bar with audio setup, recording, Icecast and RTMP streaming, controller setup, and the audio device running at 10 ms](images/screenshot.jpg)
+![A strip across the top lining up both decks' beats, decks A and B below it, each with a track loaded and its waveforms coloured by frequency, loop lengths, stem knobs, turntable platter, tempo fader and a button to swap in deck C or D, a four channel mixer between them with every control named on every channel: high, mid and low EQ, filter, echo and its length in beats, reverb, crossfader assignment, a channel fader and cue, the track library underneath showing tempo and key, a row of eight sampler pads with their own level and cue, aux and mic strips with talkover on the mic, and a bottom bar with audio setup, recording, Icecast and RTMP streaming, controller setup, and the audio device running at 10 ms](images/screenshot.jpg)
 
 The goal is an application a VirtualDJ user can sit down at and already know how to use:
 the same deck layout, the same workflow, the same muscle memory. The artwork, the naming
@@ -156,6 +156,31 @@ you switch the mic off. Everywhere sends your voice to the speakers, the recordi
 stream. Stream only keeps it out of the speakers but still puts it in the recording and the
 stream, for talking to listeners from a room with the speakers in it. The mic is not sent to the
 headphones.
+
+The `In 1-2` button picks which pair of the device's inputs the mic listens to. Click it to step
+to the next pair. A mic is mono, so the two inputs of its pair are summed, and a mic on either
+one arrives at full level.
+
+## The aux input
+
+Beside the mic is a second strip, Aux, for a stereo line laid over the mix: browser audio, system
+audio, a phone, or a second player. It works like the mic, with On, a level, a meter, and
+Everywhere or Stream only, but it keeps left and right apart and has no talkover. Talkover on the
+mic ducks the aux along with the music. Like the mic, it is always off when OpenDJ opens.
+
+The aux reads inputs 3 and 4 unless you pick another pair, so turn on four inputs in Audio setup:
+the mic's pair and the aux's.
+
+Browser or system audio needs an input to arrive on. Audio setup opens one input device at a time,
+so it has to be the same device the mic is on:
+
+- **Windows:** route the browser into a virtual cable such as VB-Cable or VoiceMeeter, and pick
+  that as the input device. "Stereo Mix", where the sound driver offers it, also works, but it
+  then carries everything the computer plays, including OpenDJ itself.
+- **macOS:** BlackHole or Loopback do the same job.
+- **Linux:** PipeWire and PulseAudio can offer a monitor of any output as an input.
+- **Audio interfaces:** many have a loopback channel pair built in, which is the simplest way to
+  get a mic and the computer's audio on one device.
 
 ## Headphones on a stereo interface
 

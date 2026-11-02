@@ -595,7 +595,7 @@ void AudioEngine::prepareToPlay (double sampleRate, int blockSize)
     masterBuffer.setSize (2, blockSize, false, true, true);
     cueBuffer.setSize (2, blockSize, false, true, true);
     recordingBuffer.setSize (2, blockSize, false, true, true);
-    inputBuffer.setSize (2, blockSize, false, true, true);
+    inputBuffer.setSize (maxInputChannels, blockSize, false, true, true);
 
     for (auto& deck : decks)
         deck->prepare (sampleRate, blockSize);
@@ -603,6 +603,7 @@ void AudioEngine::prepareToPlay (double sampleRate, int blockSize)
     mixer.prepare (sampleRate, blockSize);
     sampler.prepare (sampleRate);
     mic.prepare (sampleRate);
+    aux.prepare (sampleRate);
 }
 
 void AudioEngine::audioDeviceAboutToStart (juce::AudioIODevice* device)
@@ -638,22 +639,22 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputCha
 void AudioEngine::renderNextBlock (float* const* outputs, int numOutputChannels, int numSamples,
                                   const float* const* inputs, int numInputChannels)
 {
-    // The mic's inputs are copied before the outputs are cleared, in case a
-    // backend hands over input and output channels that share memory. Two at
-    // most, which is all the mic reads.
-    const float* micChannels[2] = { nullptr, nullptr };
-    auto numMicChannels = 0;
+    // The inputs are copied before the outputs are cleared, in case a backend
+    // hands over input and output channels that share memory. Only the active
+    // ones, packed together, which is how the mic and aux count their pairs.
+    const float* inputChannels[maxInputChannels] = {};
+    auto numActiveInputs = 0;
 
     if (inputs != nullptr && numSamples > 0 && numSamples <= inputBuffer.getNumSamples())
     {
-        for (int ch = 0; ch < numInputChannels && numMicChannels < 2; ++ch)
+        for (int ch = 0; ch < numInputChannels && numActiveInputs < maxInputChannels; ++ch)
         {
             if (inputs[ch] == nullptr)
                 continue;
 
-            inputBuffer.copyFrom (numMicChannels, 0, inputs[ch], numSamples);
-            micChannels[numMicChannels] = inputBuffer.getReadPointer (numMicChannels);
-            ++numMicChannels;
+            inputBuffer.copyFrom (numActiveInputs, 0, inputs[ch], numSamples);
+            inputChannels[numActiveInputs] = inputBuffer.getReadPointer (numActiveInputs);
+            ++numActiveInputs;
         }
     }
 
@@ -690,11 +691,14 @@ void AudioEngine::renderNextBlock (float* const* outputs, int numOutputChannels,
     // a sound laid over the mix rather than one of the things being mixed.
     sampler.processBlock (masterView, cueView, numSamples);
 
-    // The mic joins last, over the music and the sampler, and ducks them for
-    // talkover. When it is kept out of the speakers it builds the mix to record
-    // and broadcast in a buffer of its own, and the taps below read that.
+    // The aux joins next and the mic last, over the music and the sampler, so
+    // talkover ducks the aux along with everything else. Either can be kept
+    // out of the speakers, and then builds the mix to record and broadcast in
+    // a buffer of its own; the mic adds itself to that one when the aux made
+    // it, and the taps below read it.
     juce::AudioBuffer<float> recordingView (recordingBuffer.getArrayOfWritePointers(), 2, numSamples);
-    const auto& tap = mic.processBlock (micChannels, numMicChannels, masterView, recordingView, numSamples)
+    const auto auxSeparate = aux.processBlock (inputChannels, numActiveInputs, masterView, recordingView, numSamples);
+    const auto& tap = mic.processBlock (inputChannels, numActiveInputs, masterView, recordingView, numSamples, auxSeparate)
                     ? recordingView
                     : masterView;
 

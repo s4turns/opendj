@@ -93,6 +93,16 @@ public:
         sampler, with talkover and a choice of whether the speakers hear it. */
     MicInput& getMic() noexcept { return mic; }
 
+    /** A stereo line from the device's inputs, such as browser or system
+        audio through a loopback device, laid over the mix before the mic so
+        talkover ducks it along with the music. */
+    MicInput& getAux() noexcept { return aux; }
+
+    /** The most device inputs the engine reads: four pairs, enough for a mic
+        and a line on any interface, and a fixed size so the audio thread
+        never has to grow a buffer. */
+    static constexpr int maxInputChannels = 8;
+
     /** Reads a file into a sampler slot on a background thread. The callback
         runs on the message thread, with an empty string on success and the
         reason on failure. */
@@ -327,8 +337,8 @@ private:
     juce::AudioBuffer<float> masterBuffer;
     juce::AudioBuffer<float> cueBuffer;
 
-    // The mix to record and broadcast when the mic is kept out of the speakers,
-    // and the mic's inputs, copied before the outputs are cleared.
+    // The mix to record and broadcast when the mic or aux is kept out of the
+    // speakers, and the device's inputs, copied before the outputs are cleared.
     juce::AudioBuffer<float> recordingBuffer;
     juce::AudioBuffer<float> inputBuffer;
 
@@ -339,6 +349,7 @@ private:
 
     Sampler sampler;
     MicInput mic;
+    MicInput aux { MicInput::Source::stereo };
     SetRecorder recorder;
     Broadcaster broadcaster;
     RtmpBroadcaster rtmpBroadcaster;

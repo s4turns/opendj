@@ -346,6 +346,15 @@ void ActionDispatcher::dispatch (const ActionMessage& message)
                 engine.getMic().setTalkover (! engine.getMic().isTalkoverEnabled());
             break;
 
+        case Action::auxToggle:
+            if (pressed)
+                engine.getAux().setEnabled (! engine.getAux().isEnabled());
+            break;
+
+        case Action::auxGain:
+            engine.getAux().setGain (message.value * 2.0f);
+            break;
+
         case Action::channelFilter:
             mixer.setChannelFilter (deckIndex, message.value);
             break;

@@ -206,6 +206,7 @@ private:
     std::unique_ptr<MasterFxComponent> masterFxView;
     std::unique_ptr<SamplerComponent> samplerView;
     std::unique_ptr<MicComponent> micView;
+    std::unique_ptr<MicComponent> auxView;
 
     juce::StretchableLayoutManager verticalLayout;
     std::unique_ptr<juce::StretchableLayoutResizerBar> resizerBar;

@@ -45,6 +45,10 @@ namespace
         state.micGain = 1.4f;
         state.micTalkover = true;
         state.micRouting = MicInput::Routing::recordingOnly;
+        state.micInputPair = 2;
+        state.auxGain = 0.6f;
+        state.auxRouting = MicInput::Routing::recordingOnly;
+        state.auxInputPair = 3;
 
         state.recording.format = RecordingFormat::flac;
         state.recording.mp3Bitrate = 192;
@@ -105,6 +109,10 @@ namespace
         REQUIRE_THAT (a.micGain, WithinAbs (b.micGain, 1.0e-4f));
         REQUIRE (a.micTalkover == b.micTalkover);
         REQUIRE (a.micRouting == b.micRouting);
+        REQUIRE (a.micInputPair == b.micInputPair);
+        REQUIRE_THAT (a.auxGain, WithinAbs (b.auxGain, 1.0e-4f));
+        REQUIRE (a.auxRouting == b.auxRouting);
+        REQUIRE (a.auxInputPair == b.auxInputPair);
 
         REQUIRE (a.recording.format == b.recording.format);
         REQUIRE (a.recording.mp3Bitrate == b.recording.mp3Bitrate);

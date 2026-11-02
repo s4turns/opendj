@@ -140,6 +140,10 @@ enum class Action
     micGain,            ///< the mic's level; 0.5 is unity, 1 about +6 dB
     micTalkover,        ///< press turns talkover on or off
 
+    // Aux line, such as browser audio. deck and slot are unused.
+    auxToggle,          ///< press turns the aux on or off
+    auxGain,            ///< the aux's level; 0.5 is unity, 1 about +6 dB
+
     // Track browser. deck and slot are unused.
     browseScroll,       ///< value is signed rows to move the selection, not normalised
 

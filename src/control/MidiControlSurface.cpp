@@ -656,6 +656,9 @@ bool MidiControlSurface::feedbackStateFor (const MidiControl& control) const
         case Action::micTalkover:
             return const_cast<AudioEngine&> (engine).getMic().isTalkoverEnabled();
 
+        case Action::auxToggle:
+            return const_cast<AudioEngine&> (engine).getAux().isEnabled();
+
         default:
             return false;
     }

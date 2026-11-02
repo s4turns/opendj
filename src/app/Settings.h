@@ -109,6 +109,14 @@ struct SessionState
     float micGain = 1.0f;
     bool micTalkover = false;
     MicInput::Routing micRouting = MicInput::Routing::everywhere;
+    int micInputPair = 0;
+
+    /** The aux line's level, where it is heard, and which pair of inputs it
+        reads. Not whether it is on, for the same reason as the mic: a line
+        nobody remembers leaving open should not reach the room. */
+    float auxGain = 1.0f;
+    MicInput::Routing auxRouting = MicInput::Routing::everywhere;
+    int auxInputPair = 1;
 
     /** What the record button writes, and where. WAV by default, because a
         recording is a master to work from later rather than something to
@@ -146,6 +154,10 @@ struct SessionState
 
     /** Writes them back and leaves the mic off. */
     void applyTo (MicInput& mic) const;
+
+    /** The same for the aux line: level, routing and input pair, never on. */
+    void captureAuxFrom (const MicInput& aux);
+    void applyAuxTo (MicInput& aux) const;
 
     /** Round trips through JSON. Anything missing keeps its default, so a file
         written by an older build still loads and only the new settings start
