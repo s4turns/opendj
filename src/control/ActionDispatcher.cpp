@@ -238,6 +238,21 @@ void ActionDispatcher::dispatch (const ActionMessage& message)
                 deck.reloop();
             break;
 
+        case Action::beatJumpForward:
+            if (pressed)
+                deck.beatJump (loopBeatsForSlot (message.slot));
+            break;
+
+        case Action::beatJumpBack:
+            if (pressed)
+                deck.beatJump (-loopBeatsForSlot (message.slot));
+            break;
+
+        case Action::deckQuantizeToggle:
+            if (pressed)
+                deck.toggleQuantize();
+            break;
+
         case Action::hotCueClear:
             if (pressed)
                 deck.clearHotCue (message.slot);

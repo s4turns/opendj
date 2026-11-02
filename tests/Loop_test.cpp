@@ -711,3 +711,133 @@ TEST_CASE ("a seek by hand cancels the shadow", "[loop][slip]")
     // Near where it was sent, not back at the shadow around 10 seconds.
     REQUIRE (fixture.deck->getPositionSeconds() > 19.0);
 }
+
+//==============================================================================
+// Beat jump and quantize
+//==============================================================================
+
+TEST_CASE ("a beat jump moves the playhead by whole beats", "[loop][beatjump]")
+{
+    Fixture fixture;
+    const auto beat = fixture.deck->getAnalysis()->secondsPerBeat();
+
+    fixture.deck->seekToSeconds (10.1);
+    fixture.run (1);
+    const auto before = fixture.deck->getPositionSeconds();
+
+    REQUIRE (fixture.deck->beatJump (4.0));
+    fixture.run (1);
+    REQUIRE_THAT (fixture.deck->getPositionSeconds(), WithinAbs (before + 4.0 * beat, 0.002));
+
+    REQUIRE (fixture.deck->beatJump (-8.0));
+    fixture.run (1);
+    REQUIRE_THAT (fixture.deck->getPositionSeconds(), WithinAbs (before - 4.0 * beat, 0.002));
+}
+
+TEST_CASE ("two quick beat jumps add up", "[loop][beatjump]")
+{
+    Fixture fixture;
+    const auto beat = fixture.deck->getAnalysis()->secondsPerBeat();
+
+    fixture.deck->seekToSeconds (10.0);
+    fixture.run (1);
+    const auto before = fixture.deck->getPositionSeconds();
+
+    // Both land before the audio thread has taken the first.
+    REQUIRE (fixture.deck->beatJump (2.0));
+    REQUIRE (fixture.deck->beatJump (2.0));
+    fixture.run (1);
+
+    REQUIRE_THAT (fixture.deck->getPositionSeconds(), WithinAbs (before + 4.0 * beat, 0.002));
+}
+
+TEST_CASE ("a beat jump off either end of the track does nothing", "[loop][beatjump]")
+{
+    Fixture fixture;
+
+    fixture.deck->seekToSeconds (1.0);
+    fixture.run (1);
+    const auto before = fixture.deck->getPositionSeconds();
+
+    REQUIRE_FALSE (fixture.deck->beatJump (-32.0));
+    REQUIRE_FALSE (fixture.deck->beatJump (1000.0));
+    fixture.run (1);
+
+    REQUIRE_THAT (fixture.deck->getPositionSeconds(), WithinAbs (before, 0.002));
+}
+
+TEST_CASE ("a beat jump carries a running loop with it", "[loop][beatjump]")
+{
+    Fixture fixture;
+    const auto beat = fixture.deck->getAnalysis()->secondsPerBeat();
+
+    fixture.deck->seekToSeconds (10.0);
+    fixture.run (1);
+    REQUIRE (fixture.deck->setLoopBeats (4.0));
+
+    const auto start = fixture.deck->getLoopStartSeconds();
+    const auto end = fixture.deck->getLoopEndSeconds();
+
+    REQUIRE (fixture.deck->beatJump (8.0));
+    fixture.run (1);
+
+    REQUIRE (fixture.deck->isLoopEnabled());
+    REQUIRE_THAT (fixture.deck->getLoopStartSeconds(), WithinAbs (start + 8.0 * beat, 1.0e-9));
+    REQUIRE_THAT (fixture.deck->getLoopEndSeconds(), WithinAbs (end + 8.0 * beat, 1.0e-9));
+
+    const auto position = fixture.deck->getPositionSeconds();
+    REQUIRE (position >= fixture.deck->getLoopStartSeconds() - 0.002);
+    REQUIRE (position < fixture.deck->getLoopEndSeconds());
+}
+
+TEST_CASE ("with quantize on, cues and loops land on the beat", "[loop][quantize]")
+{
+    Fixture fixture;
+    const auto analysis = fixture.deck->getAnalysis();
+    const auto beat = analysis->secondsPerBeat();
+    const auto beatTime = analysis->nearestBeatSeconds (10.0);
+
+    fixture.deck->setQuantize (true);
+
+    // A hot cue a fifth of a beat late lands back on the beat.
+    fixture.deck->seekToSeconds (beatTime + beat * 0.2);
+    fixture.run (1);
+    fixture.deck->hotCuePressed (0);
+    REQUIRE_THAT (fixture.deck->getHotCueSeconds (0), WithinAbs (beatTime, 1.0e-9));
+
+    // Loop in a little early and loop out a little late, four beats on.
+    fixture.deck->seekToSeconds (beatTime - beat * 0.1);
+    fixture.run (1);
+    fixture.deck->setLoopIn();
+
+    fixture.deck->seekToSeconds (beatTime + beat * 4.15);
+    fixture.run (1);
+    fixture.deck->setLoopOut();
+
+    REQUIRE (fixture.deck->isLoopEnabled());
+    REQUIRE_THAT (fixture.deck->getLoopStartSeconds(), WithinAbs (beatTime, 1.0e-9));
+    REQUIRE_THAT (fixture.deck->getLoopEndSeconds(), WithinAbs (beatTime + 4.0 * beat, 1.0e-9));
+    fixture.deck->clearLoop();
+
+    // The cue point, set while stopped.
+    fixture.deck->seekToSeconds (beatTime + beat * 8.3);
+    fixture.run (1);
+    fixture.deck->cuePressed();
+    fixture.deck->cueReleased();
+    REQUIRE_THAT (fixture.deck->getCueSeconds(), WithinAbs (beatTime + 8.0 * beat, 1.0e-9));
+}
+
+TEST_CASE ("with quantize off, cues stay where they were set", "[loop][quantize]")
+{
+    Fixture fixture;
+    const auto analysis = fixture.deck->getAnalysis();
+    const auto beatTime = analysis->nearestBeatSeconds (10.0);
+    const auto offset = analysis->secondsPerBeat() * 0.2;
+
+    fixture.deck->seekToSeconds (beatTime + offset);
+    fixture.run (1);
+    const auto position = fixture.deck->getPositionSeconds();
+
+    fixture.deck->hotCuePressed (0);
+    REQUIRE_THAT (fixture.deck->getHotCueSeconds (0), WithinAbs (position, 1.0e-9));
+}

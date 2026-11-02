@@ -85,6 +85,12 @@ enum class Action
     loopDouble,
     loopReloop,
 
+    // Beat jump. slot is an index into loopBeatsForSlot(), so a controller
+    // can have one button per size, as it does for loop lengths.
+    beatJumpForward,
+    beatJumpBack,
+    deckQuantizeToggle, ///< cues and loops snap to the beat grid
+
     // Mixer. deck selects the channel; slot selects the EQ band for deckEq.
     channelFader,
     channelEq,          ///< slot 0 low, 1 mid, 2 high

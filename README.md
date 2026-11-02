@@ -85,6 +85,12 @@ Cue follows the behaviour DJs expect. While the deck is stopped, pressing cue se
 point and previews from it, and releasing returns and stops. While it is playing, pressing
 cue drops straight back to the cue point and stops there.
 
+At the end of each deck's row of hot cue pads, the arrows jump back or forward by whole beats, so a synced
+deck stays in phase. The number between them is the size. Click it to step through 1, 2, 4, 8,
+16 and 32 beats. A running loop moves with the jump. `Q` turns quantize on for that deck. With
+it on, the cue point, a newly set hot cue, and loop in and out snap to the nearest beat instead
+of landing where the click did. Quantize is remembered per deck.
+
 ## Four decks
 
 There are four decks, A to D, and two of them are on screen at a time. The button beside a

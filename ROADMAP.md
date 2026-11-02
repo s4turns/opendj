@@ -84,8 +84,7 @@ in `MusicalKey::toCamelot` that the browser does not yet show.
 | Missing | What VirtualDJ has | Where OpenDJ is |
 | --- | --- | --- |
 | History and smart folders (#11) | Playlists, virtual and filter folders, an automatic history of played tracks, a side list for lining up the next few | Playlists are done. No history: `tracks.last_played_at` exists but nothing writes it. No filter folders |
-| Named hot cues (#12) | Pads per deck with colours and names, and markers on the waveform | Pads and coloured markers are done; a cue cannot be named yet |
-| Beat jump and quantize (#13) | Jumps of 1 to 32 beats; cues and loops snap to the grid | None. Automatic loops already start on the beat |
+| Beat jump and quantize (#13) | Jumps of 1 to 32 beats; cues and loops snap to the grid | Done: beat jump of 1 to 32 beats that carries a running loop, and a quantize button per deck for the cue, hot cues and loop in and out. Jumping to a hot cue does not yet keep the phase |
 | Beat grid editing (#14) | Adjust the BPM, move the downbeat, tap tempo | Detection only, so a wrong grid cannot be corrected |
 | More effects (#15) | Dozens, including flanger, phaser, gate, bitcrusher, brake, backspin, echo out and stutter, plus reverse and censor buttons | Filter, echo and reverb per channel, and the same three in two master slots, which also take VST3 plugins |
 | Key tools (#16) | Key shift in semitones, key match between decks, Camelot display, harmonic hints in the browser | Detection only |
@@ -705,6 +704,9 @@ would say so.
 | `mic.toggle` | nothing | Turns the mic on or off |
 | `mic.gain` | value | The mic's level; 0.5 is unity |
 | `mic.talkover` | nothing | Turns talkover on or off |
+| `deck.beatjump_forward` | `deck`, `slot` | Jumps forward by the length in `loopBeatsForSlot`, carrying a running loop |
+| `deck.beatjump_back` | `deck`, `slot` | The same, backwards |
+| `deck.quantize_toggle` | `deck` | Turns quantize on or off for the deck |
 
 Plus the loop family: `loop.in`, `loop.out`, `loop.toggle`, `loop.beats`, `loop.roll`,
 `loop.halve`, `loop.double`, `loop.reloop`. `loop.beats` and `loop.roll` take a slot, which

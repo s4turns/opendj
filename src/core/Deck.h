@@ -91,6 +91,20 @@ public:
     void seekToSeconds (double seconds);
     void seekToFraction (double proportion);
 
+    /** Moves the playhead a whole number of beats, forward for positive and
+        back for negative, so the deck stays in phase with whatever it was
+        synced to. A running loop moves with it, so the jump is not undone by
+        the loop pulling the playhead back. Returns false when the track has
+        no beat grid. */
+    bool beatJump (double beats);
+
+    /** With quantize on, the cue point, a newly set hot cue and the ends of
+        a manual loop land on the nearest beat rather than wherever the
+        finger was. Needs a beat grid; without one nothing is snapped. */
+    void setQuantize (bool shouldQuantize) { quantize.store (shouldQuantize, std::memory_order_relaxed); }
+    void toggleQuantize() { setQuantize (! isQuantizeEnabled()); }
+    bool isQuantizeEnabled() const noexcept { return quantize.load (std::memory_order_relaxed); }
+
     /** 1.0 plays at the recorded speed. Pitch follows tempo unless key lock is on. */
     void setTempoRatio (double ratio);
     double getTempoRatio() const noexcept { return tempoRatio.load (std::memory_order_relaxed); }
@@ -356,6 +370,11 @@ private:
     // ever uses it and never allocates it. It is fed from feedPosition, which
     // runs ahead of the audible readPosition by the stretcher's own delay.
     std::atomic<bool> keyLock { false };
+    std::atomic<bool> quantize { false };
+
+    /** A position snapped to the nearest beat when quantize is on and there
+        is a grid, or left alone otherwise. Not for the audio thread. */
+    double quantized (double seconds) const;
     std::unique_ptr<RubberBand::RubberBandStretcher> stretcher;
     juce::AudioBuffer<float> stretchInput;                 // one chunk fed to the stretcher
     juce::AudioBuffer<float> stretchDiscard;               // where its warm-up output goes

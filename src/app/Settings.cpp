@@ -290,13 +290,16 @@ juce::var SessionState::toVar() const
     root->setProperty ("cue_mix", cueMix);
     root->setProperty ("crossfader_curve", curveName (crossfaderCurve));
 
-    juce::Array<juce::var> assigns, ranges, visible, files, loops, gains;
+    juce::Array<juce::var> assigns, ranges, quantized, visible, files, loops, gains;
 
     for (const auto assign : crossfaderAssigns)
         assigns.add (assignName (assign));
 
     for (const auto range : tempoRanges)
         ranges.add (range);
+
+    for (const auto on : quantize)
+        quantized.add (on);
 
     for (const auto deck : visibleDecks)
         visible.add (deck);
@@ -310,6 +313,7 @@ juce::var SessionState::toVar() const
 
     root->setProperty ("crossfader_assign", assigns);
     root->setProperty ("tempo_ranges", ranges);
+    root->setProperty ("quantize", quantized);
     root->setProperty ("visible_decks", visible);
     root->setProperty ("waveform_zoom_seconds", waveformZoomSeconds);
 
@@ -412,6 +416,7 @@ SessionState SessionState::fromVar (const juce::var& source)
 
     const auto assigns = arrayOf (source, "crossfader_assign");
     const auto ranges = arrayOf (source, "tempo_ranges");
+    const auto quantized = arrayOf (source, "quantize");
 
     for (int c = 0; c < Mixer::numChannels; ++c)
     {
@@ -420,6 +425,9 @@ SessionState SessionState::fromVar (const juce::var& source)
 
         if (const auto value = element (ranges, c); value.isDouble() || value.isInt())
             state.tempoRanges[(size_t) c] = juce::jlimit (1.0, 100.0, (double) value);
+
+        if (const auto value = element (quantized, c); value.isBool())
+            state.quantize[(size_t) c] = (bool) value;
     }
 
     const auto visible = arrayOf (source, "visible_decks");

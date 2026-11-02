@@ -251,3 +251,28 @@ TEST_CASE ("master effect actions work the unit the deck number names", "[contro
     REQUIRE (isContinuous (Action::masterFxWet));
     REQUIRE_FALSE (isContinuous (Action::masterFxToggle));
 }
+
+TEST_CASE ("the quantize button toggles on the press only", "[control][quantize]")
+{
+    AudioEngine engine;
+    ActionDispatcher dispatcher (engine);
+    auto& deck = engine.getDeck (1);
+
+    REQUIRE_FALSE (deck.isQuantizeEnabled());
+
+    dispatcher.dispatch ({ Action::deckQuantizeToggle, 1, 0, 1.0f });
+    dispatcher.dispatch ({ Action::deckQuantizeToggle, 1, 0, 0.0f });
+    REQUIRE (deck.isQuantizeEnabled());
+    REQUIRE_FALSE (engine.getDeck (0).isQuantizeEnabled());
+
+    dispatcher.dispatch ({ Action::deckQuantizeToggle, 1, 0, 1.0f });
+    REQUIRE_FALSE (deck.isQuantizeEnabled());
+}
+
+TEST_CASE ("beat jump actions have names a mapping file can use", "[control][beatjump]")
+{
+    REQUIRE (actionFromString ("deck.beatjump_forward") == Action::beatJumpForward);
+    REQUIRE (actionFromString ("deck.beatjump_back") == Action::beatJumpBack);
+    REQUIRE (actionFromString ("deck.quantize_toggle") == Action::deckQuantizeToggle);
+    REQUIRE (toString (Action::beatJumpBack) == "deck.beatjump_back");
+}

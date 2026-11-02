@@ -50,6 +50,9 @@ struct SessionState
     /** How far each tempo fader travels, as a percentage either side of zero. */
     std::array<double, Mixer::numChannels> tempoRanges { 8.0, 8.0, 8.0, 8.0 };
 
+    /** Whether each deck snaps cues and loops to the beat grid. */
+    std::array<bool, Mixer::numChannels> quantize {};
+
     /** Which deck is on screen on each side. */
     std::array<int, 2> visibleDecks { 0, 1 };
 

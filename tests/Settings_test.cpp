@@ -34,6 +34,7 @@ namespace
                                     Mixer::CrossfaderAssign::a };
 
         state.tempoRanges = { 16.0, 50.0, 6.0, 100.0 };
+        state.quantize = { true, false, true, false };
         state.visibleDecks = { 2, 3 };
         state.waveformZoomSeconds = 8.0;
 
@@ -93,6 +94,7 @@ namespace
         REQUIRE (a.crossfaderCurve == b.crossfaderCurve);
         REQUIRE (a.crossfaderAssigns == b.crossfaderAssigns);
         REQUIRE (a.tempoRanges == b.tempoRanges);
+        REQUIRE (a.quantize == b.quantize);
         REQUIRE (a.visibleDecks == b.visibleDecks);
         REQUIRE_THAT (a.waveformZoomSeconds, WithinAbs (b.waveformZoomSeconds, 1.0e-9));
         REQUIRE_THAT (a.samplerGain, WithinAbs (b.samplerGain, 1.0e-4f));

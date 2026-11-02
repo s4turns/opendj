@@ -378,7 +378,13 @@ void Deck::cuePressed()
     const auto position = getPositionSeconds();
 
     if (std::abs (position - getCueSeconds()) > 0.001)
-        cuePointSeconds.store (position, std::memory_order_relaxed);
+    {
+        const auto cue = quantized (position);
+        cuePointSeconds.store (cue, std::memory_order_relaxed);
+
+        if (std::abs (cue - position) > 0.0005)
+            seekToSeconds (cue);
+    }
     else
         seekToSeconds (getCueSeconds());
 
@@ -405,6 +411,63 @@ void Deck::seekToSeconds (double seconds)
 void Deck::seekToFraction (double proportion)
 {
     seekToSeconds (juce::jlimit (0.0, 1.0, proportion) * getLengthSeconds());
+}
+
+bool Deck::beatJump (double beats)
+{
+    if (! isLoaded() || beats == 0.0)
+        return false;
+
+    const auto analysis = getAnalysis();
+
+    if (analysis == nullptr || ! analysis->hasTempo())
+        return false;
+
+    const auto offset = beats * analysis->secondsPerBeat();
+    const auto length = getLengthSeconds();
+
+    // A seek that has not reached the audio thread yet is where the playhead
+    // is about to be, so two quick presses add up rather than the second one
+    // being measured from where the first started.
+    const auto pending = pendingSeekSeconds.load (std::memory_order_relaxed);
+    const auto from = pending >= 0.0 ? pending : getPositionSeconds();
+    const auto target = from + offset;
+
+    if (target < 0.0 || target >= length)
+        return false;
+
+    if (isLoopEnabled() && hasLoop())
+    {
+        const auto start = loopStartSeconds.load (std::memory_order_relaxed) + offset;
+        const auto end = loopEndSeconds.load (std::memory_order_relaxed) + offset;
+
+        if (start >= 0.0 && end <= length)
+        {
+            loopStartSeconds.store (start, std::memory_order_relaxed);
+            loopEndSeconds.store (end, std::memory_order_relaxed);
+        }
+        else
+        {
+            loopEnabled.store (false, std::memory_order_relaxed);
+        }
+    }
+
+    seekToSeconds (target);
+    return true;
+}
+
+double Deck::quantized (double seconds) const
+{
+    if (! isQuantizeEnabled())
+        return seconds;
+
+    const auto analysis = getAnalysis();
+
+    if (analysis == nullptr || ! analysis->hasTempo())
+        return seconds;
+
+    return juce::jlimit (0.0, juce::jmax (0.0, getLengthSeconds()),
+                         analysis->nearestBeatSeconds (seconds));
 }
 
 void Deck::setTempoRatio (double ratio)
@@ -440,7 +503,7 @@ void Deck::hotCuePressed (int slot)
 
     if (cue.load (std::memory_order_relaxed) < 0.0)
     {
-        cue.store (getPositionSeconds(), std::memory_order_relaxed);
+        cue.store (quantized (getPositionSeconds()), std::memory_order_relaxed);
 
         if (onHotCuesChanged != nullptr)
             onHotCuesChanged (getLoadedFile(), getHotCues());
@@ -500,7 +563,7 @@ void Deck::setLoopIn()
     if (! isLoaded())
         return;
 
-    loopStartSeconds.store (getPositionSeconds(), std::memory_order_relaxed);
+    loopStartSeconds.store (quantized (getPositionSeconds()), std::memory_order_relaxed);
     loopBeats.store (0.0, std::memory_order_relaxed);
 }
 
@@ -510,7 +573,7 @@ void Deck::setLoopOut()
         return;
 
     const auto start = loopStartSeconds.load (std::memory_order_relaxed);
-    const auto end = getPositionSeconds();
+    const auto end = quantized (getPositionSeconds());
 
     if (start < 0.0 || end - start < minimumLoopSeconds)
         return;
@@ -538,13 +601,7 @@ bool Deck::setLoopBeats (double beats)
     // Snap to the beat at or behind the playhead. Snapping to the nearest beat
     // instead would let a loop start a fraction of a beat late, which is exactly
     // the mistake the button exists to prevent.
-    const auto position = getPositionSeconds();
-    auto start = analysis->nearestBeatSeconds (position);
-
-    if (start > position)
-        start -= analysis->secondsPerBeat();
-
-    start = juce::jmax (0.0, start);
+    const auto start = analysis->beatAtOrBehindSeconds (getPositionSeconds());
 
     loopStartSeconds.store (start, std::memory_order_relaxed);
     loopEndSeconds.store (start + length, std::memory_order_relaxed);

@@ -35,4 +35,19 @@ double TrackAnalysis::nearestBeatSeconds (double seconds) const noexcept
     return firstBeatSeconds + beatsFromAnchor * period;
 }
 
+double TrackAnalysis::beatAtOrBehindSeconds (double seconds) const noexcept
+{
+    const auto period = secondsPerBeat();
+
+    if (period <= 0.0)
+        return seconds;
+
+    auto beat = nearestBeatSeconds (seconds);
+
+    if (beat > seconds)
+        beat -= period;
+
+    return beat < 0.0 ? 0.0 : beat;
+}
+
 } // namespace opendj

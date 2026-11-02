@@ -175,6 +175,17 @@ private:
         rather than a click. Below this it leaves a loop running. */
     static constexpr juce::uint32 holdIsARollMs = 350;
 
+    // Beat jump: back, the size (click to step through 1 to 32 beats), and
+    // forward. Quantize sits beside them, since it changes where the loop
+    // and cue buttons land.
+    juce::TextButton beatJumpBackButton { juce::String::fromUTF8 ("\xe2\x97\x80") };
+    juce::TextButton beatJumpSizeButton;
+    juce::TextButton beatJumpForwardButton { juce::String::fromUTF8 ("\xe2\x96\xb6") };
+    juce::TextButton quantizeButton { "Q" };
+    int beatJumpSlot = 4;   // into loopBeatsForSlot: 4 beats, a bar
+
+    void updateBeatJumpSize();
+
     std::array<juce::uint32, numLoopButtons> loopButtonPressedAt {};
     std::array<bool, numLoopButtons> loopButtonRolling { };
 

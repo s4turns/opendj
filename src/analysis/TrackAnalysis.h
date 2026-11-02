@@ -66,6 +66,10 @@ struct TrackAnalysis
         when there is no grid. */
     double nearestBeatSeconds (double seconds) const noexcept;
 
+    /** The beat at or behind a position, in seconds, never below zero. Returns the
+        position unchanged when there is no grid. */
+    double beatAtOrBehindSeconds (double seconds) const noexcept;
+
     double secondsPerBeat() const noexcept { return bpm > 0.0 ? 60.0 / bpm : 0.0; }
 };
 

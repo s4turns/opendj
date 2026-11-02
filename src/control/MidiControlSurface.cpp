@@ -625,6 +625,9 @@ bool MidiControlSurface::feedbackStateFor (const MidiControl& control) const
         case Action::deckKeyLockToggle:
             return deck.isKeyLockEnabled();
 
+        case Action::deckQuantizeToggle:
+            return deck.isQuantizeEnabled();
+
         case Action::loopIn:
         case Action::loopOut:
         case Action::loopToggle:

@@ -653,7 +653,10 @@ void MainComponent::restoreSettings()
     settings.applyTo (engine.getMic());
 
     for (int deck = 0; deck < AudioEngine::numDecks; ++deck)
+    {
         dispatcher.setTempoRange (deck, settings.tempoRanges[(size_t) deck]);
+        engine.getDeck (deck).setQuantize (settings.quantize[(size_t) deck]);
+    }
 
     showDeck (settings.visibleDecks[0]);
     showDeck (settings.visibleDecks[1]);
@@ -704,7 +707,10 @@ void MainComponent::saveSettings()
     state.outputMode = engine.getOutputMode();
 
     for (int deck = 0; deck < AudioEngine::numDecks; ++deck)
+    {
         state.tempoRanges[(size_t) deck] = dispatcher.getTempoRange (deck);
+        state.quantize[(size_t) deck] = engine.getDeck (deck).isQuantizeEnabled();
+    }
 
     state.visibleDecks = visibleDecks;
     state.waveformZoomSeconds = settings.waveformZoomSeconds;

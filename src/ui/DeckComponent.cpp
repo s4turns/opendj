@@ -180,6 +180,28 @@ DeckComponent::DeckComponent (AudioEngine& engineToUse, int deckIndex, const juc
     loopDoubleButton.onClick = [this] { deck.doubleLoop(); refresh(); };
     addAndMakeVisible (loopDoubleButton);
 
+    beatJumpBackButton.setTooltip ("Jump back by the beat jump size, staying in time");
+    beatJumpBackButton.onClick = [this] { deck.beatJump (-loopBeatsForSlot (beatJumpSlot)); refresh(); };
+    addAndMakeVisible (beatJumpBackButton);
+
+    beatJumpForwardButton.setTooltip ("Jump forward by the beat jump size, staying in time");
+    beatJumpForwardButton.onClick = [this] { deck.beatJump (loopBeatsForSlot (beatJumpSlot)); refresh(); };
+    addAndMakeVisible (beatJumpForwardButton);
+
+    // Steps 1, 2, 4, 8, 16, 32 beats and round again.
+    beatJumpSizeButton.onClick = [this]
+    {
+        beatJumpSlot = beatJumpSlot >= 7 ? 2 : beatJumpSlot + 1;
+        updateBeatJumpSize();
+    };
+    addAndMakeVisible (beatJumpSizeButton);
+    updateBeatJumpSize();
+
+    quantizeButton.setTooltip ("Quantize: the cue point, new hot cues and loop in and out "
+                               "snap to the nearest beat");
+    quantizeButton.onClick = [this] { deck.toggleQuantize(); refresh(); };
+    addAndMakeVisible (quantizeButton);
+
     tempoSlider.setSliderStyle (juce::Slider::LinearVertical);
     tempoSlider.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
     tempoSlider.setRange (-1.0, 1.0, 0.0);
@@ -458,6 +480,14 @@ void DeckComponent::updateSeparateTooltip()
                                       + engine.getStemSeparator().getStatusDescription());
 }
 
+void DeckComponent::updateBeatJumpSize()
+{
+    const auto beats = juce::String (loopBeatsForSlot (beatJumpSlot), 0);
+    beatJumpSizeButton.setButtonText (beats);
+    beatJumpSizeButton.setTooltip ("Beat jump size: " + beats + (beats == "1" ? " beat" : " beats")
+                                   + ". Click to change it");
+}
+
 void DeckComponent::refreshLoopControls()
 {
     const auto hasGrid = shownAnalysis != nullptr && shownAnalysis->hasTempo();
@@ -481,6 +511,13 @@ void DeckComponent::refreshLoopControls()
 
     loopHalveButton.setEnabled (deck.hasLoop());
     loopDoubleButton.setEnabled (deck.hasLoop());
+
+    beatJumpBackButton.setEnabled (hasGrid);
+    beatJumpForwardButton.setEnabled (hasGrid);
+    beatJumpSizeButton.setEnabled (hasGrid);
+    quantizeButton.setColour (juce::TextButton::buttonColourId,
+                              deck.isQuantizeEnabled() ? accentColour.darker (0.4f)
+                                                       : juce::Colour (0xff2c2c34));
 
     const auto start = deck.getLoopStartSeconds();
     const auto end = deck.getLoopEndSeconds();
@@ -634,6 +671,16 @@ void DeckComponent::resized()
     area.removeFromTop (4);
     {
         auto padRow = area.removeFromTop (24);
+
+        // Beat jump and quantize at the far end: the pads only carry a number,
+        // so they can spare the room better than the loop lengths can.
+        quantizeButton.setBounds (padRow.removeFromRight (26).reduced (1));
+        padRow.removeFromRight (4);
+        beatJumpForwardButton.setBounds (padRow.removeFromRight (24).reduced (1));
+        beatJumpSizeButton.setBounds (padRow.removeFromRight (28).reduced (1));
+        beatJumpBackButton.setBounds (padRow.removeFromRight (24).reduced (1));
+        padRow.removeFromRight (6);
+
         const auto padWidth = padRow.getWidth() / Deck::numHotCues;
 
         for (auto& pad : hotCueButtons)
