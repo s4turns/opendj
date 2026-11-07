@@ -547,3 +547,77 @@ TEST_CASE ("the library hands a deck the key it knows", "[library][key]")
     // tags is as good on a track that has never been analysed.
     REQUIRE_FALSE (known->analysed);
 }
+
+TEST_CASE ("loudness is kept with an analysed track", "[library][loudness]")
+{
+    Fixture fixture;
+
+    REQUIRE (fixture.library.getLoudness (fixture.first) == 0.0);
+
+    auto analysis = analysisAt (128.0);
+    analysis.loudnessLufs = -9.5;
+    fixture.library.store (fixture.first, analysis, 300.0);
+
+    REQUIRE_THAT (fixture.library.getLoudness (fixture.first), Catch::Matchers::WithinAbs (-9.5, 1.0e-9));
+
+    const auto known = fixture.library.lookup (fixture.first);
+    REQUIRE (known.has_value());
+    REQUIRE (known->analysed);
+    REQUIRE_THAT (known->loudnessLufs, Catch::Matchers::WithinAbs (-9.5, 1.0e-9));
+}
+
+TEST_CASE ("a track analysed before loudness existed can have it filled in", "[library][loudness]")
+{
+    Fixture fixture;
+
+    fixture.library.store (fixture.first, analysisAt (128.0), 300.0);
+    REQUIRE (fixture.library.lookup (fixture.first)->loudnessLufs == 0.0);
+    REQUIRE (fixture.library.lookup (fixture.first)->analysed);
+
+    fixture.library.storeLoudness (fixture.first, -11.0);
+    REQUIRE_THAT (fixture.library.lookup (fixture.first)->loudnessLufs, Catch::Matchers::WithinAbs (-11.0, 1.0e-9));
+}
+
+TEST_CASE ("a file that changed forgets its loudness", "[library][loudness]")
+{
+    Fixture fixture;
+
+    auto analysis = analysisAt (128.0);
+    analysis.loudnessLufs = -9.5;
+    fixture.library.store (fixture.first, analysis, 300.0);
+
+    // What a rescan does on finding a different file at the same path.
+    auto record = fixture.recordFor (fixture.first, "Yeah", "Boys Noize");
+    record.fileSize += 1000;
+    record.fileModified += 1000;
+    fixture.library.upsertTrack (record);
+
+    REQUIRE (fixture.library.getLoudness (fixture.first) == 0.0);
+}
+
+TEST_CASE ("an older library gains the loudness column and keeps its tracks", "[library][loudness]")
+{
+    Fixture fixture;
+    fixture.library.store (fixture.first, analysisAt (128.0), 300.0);
+
+    const auto file = fixture.folder.getChildFile ("library.sqlite");
+    fixture.library.close();
+
+    // Taken back to how it was before the column, then reopened.
+    {
+        sqlite3* database = nullptr;
+        REQUIRE (sqlite3_open (file.getFullPathName().toRawUTF8(), &database) == SQLITE_OK);
+        REQUIRE (sqlite3_exec (database, "ALTER TABLE tracks DROP COLUMN loudness_lufs", nullptr, nullptr, nullptr) == SQLITE_OK);
+        sqlite3_close (database);
+    }
+
+    REQUIRE (fixture.library.open (file).wasOk());
+
+    const auto known = fixture.library.lookup (fixture.first);
+    REQUIRE (known.has_value());
+    REQUIRE (known->analysed);
+    REQUIRE (known->loudnessLufs == 0.0);
+
+    fixture.library.storeLoudness (fixture.first, -12.0);
+    REQUIRE_THAT (fixture.library.getLoudness (fixture.first), Catch::Matchers::WithinAbs (-12.0, 1.0e-9));
+}

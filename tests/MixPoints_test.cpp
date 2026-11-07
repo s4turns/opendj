@@ -574,3 +574,27 @@ TEST_CASE ("the incoming track is matched to the loudness of the outgoing one", 
     // And nothing to measure is no change.
     REQUIRE_THAT (levelMatch (loud, TrackAnalysis {}), WithinAbs (1.0, 1e-6));
 }
+
+TEST_CASE ("a level match counts gain already applied, rather than correcting twice", "[automix][level]")
+{
+    auto quieter = typicalTrack();
+
+    for (auto& bar : quieter)
+        bar.energy *= 0.5f;
+
+    const auto loud = trackOf (typicalTrack());
+    const auto quiet = trackOf (quieter);
+
+    // Auto gain has already lifted the quiet one by the whole of the difference,
+    // so there is nothing left to match.
+    REQUIRE_THAT (levelMatch (loud, quiet, 1.0f, 2.0f), WithinAbs (1.0, 1e-4));
+
+    // Half of it, and half remains.
+    REQUIRE_THAT (levelMatch (loud, quiet, 1.0f, std::sqrt (2.0f)), WithinAbs (std::sqrt (2.0f), 1e-3));
+
+    // A loud track brought down on the way out counts the same way.
+    REQUIRE_THAT (levelMatch (loud, quiet, 0.5f, 1.0f), WithinAbs (1.0, 1e-4));
+
+    // And the limits still apply to whatever is left.
+    REQUIRE_THAT (levelMatch (loud, quiet, 1.0f, 0.25f), WithinAbs (loudestMatch, 1e-4));
+}

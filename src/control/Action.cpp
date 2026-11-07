@@ -17,7 +17,7 @@ namespace
 
     // One table, read in both directions, so a name can never disagree with
     // itself between the parser and the writer.
-    constexpr std::array<Entry, 78> actionNames
+    constexpr std::array<Entry, 79> actionNames
     {{
         { Action::deckPlayToggle,   "deck.play_toggle" },
         { Action::deckPlay,         "deck.play" },
@@ -71,6 +71,7 @@ namespace
         { Action::channelEcho,      "mixer.echo" },
         { Action::channelReverb,    "mixer.reverb" },
         { Action::channelEchoOutToggle, "mixer.echo_out_toggle" },
+        { Action::autoGainToggle,   "mixer.auto_gain_toggle" },
         { Action::channelFxSelect,  "mixer.fx_select" },
         { Action::channelFxDepth,   "mixer.fx_depth" },
         { Action::channelCrossfaderAssign, "mixer.crossfader_assign" },

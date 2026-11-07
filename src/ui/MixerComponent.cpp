@@ -175,6 +175,11 @@ MixerComponent::MixerComponent (AudioEngine& engineToUse, Mixer& mixerToControl)
     };
     addAndMakeVisible (curveBox);
 
+    autoGainButton.setTooltip ("Level every track by its measured loudness, so they all come in at about the same volume. "
+                               "The trim still works on top of it");
+    autoGainButton.onClick = [this] { engine.setAutoGainEnabled (! engine.isAutoGainEnabled()); };
+    addAndMakeVisible (autoGainButton);
+
     const auto setUpMasterKnob = [this] (juce::Slider& knob, juce::Label& label,
                                          const juce::String& text, double initial,
                                          std::function<void (float)> apply)
@@ -213,6 +218,9 @@ void MixerComponent::configureKnob (juce::Slider& knob)
 
 void MixerComponent::refresh()
 {
+    autoGainButton.setColour (juce::TextButton::buttonColourId,
+                              engine.isAutoGainEnabled() ? juce::Colour (0xff35c2f0).darker (0.4f) : juce::Colour (0xff2c2c34));
+
     for (int ch = 0; ch < 2; ++ch)
     {
         // Fall faster than we rise, so peaks stay readable without holding.
@@ -325,6 +333,7 @@ void MixerComponent::resized()
     auto footer = area.removeFromBottom (46);
     crossfaderLabel.setBounds (footer.removeFromTop (14));
     curveBox.setBounds (footer.removeFromRight (76).reduced (2, 2));
+    autoGainButton.setBounds (footer.removeFromLeft (68).reduced (2, 2));
     crossfader.setBounds (footer.reduced (4, 0));
 
     area.removeFromBottom (6);

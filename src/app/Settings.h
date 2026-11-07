@@ -64,6 +64,10 @@ struct SessionState
     /** Keys shown as Camelot numbers, 8A, rather than as notes, Am. */
     bool camelotKeys = false;
 
+    /** Tracks levelled by their measured loudness. Off to begin with, since it
+        changes how every track in an existing set sounds. */
+    bool autoGain = false;
+
     /** Where the master and cue busses go. Separate pairs by default: a split
         turns the master mono and puts it in one speaker, which nobody should
         get without having asked for it. */

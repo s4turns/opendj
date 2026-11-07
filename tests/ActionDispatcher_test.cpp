@@ -461,3 +461,51 @@ TEST_CASE ("key match shifts to the deck a sync would follow", "[control][key]")
     REQUIRE (follower.getKeyShift() == 3);
     REQUIRE (follower.getEffectiveKey().toString() == "Cm");
 }
+
+TEST_CASE ("auto gain is turned on and off for every deck at once", "[control][autogain]")
+{
+    PadHarness h;
+    REQUIRE_FALSE (h.engine.isAutoGainEnabled());
+
+    h.dispatcher.dispatch ({ actionFromString ("mixer.auto_gain_toggle"), 0, 0, 1.0f });
+    h.dispatcher.dispatch ({ actionFromString ("mixer.auto_gain_toggle"), 0, 0, 0.0f });
+
+    for (int deck = 0; deck < AudioEngine::numDecks; ++deck)
+        REQUIRE (h.engine.getDeck (deck).isAutoGainEnabled());
+
+    h.dispatcher.dispatch ({ actionFromString ("mixer.auto_gain_toggle"), 0, 0, 1.0f });
+    REQUIRE_FALSE (h.engine.isAutoGainEnabled());
+}
+
+TEST_CASE ("a track measured on loading tells the library what it found", "[control][autogain]")
+{
+    struct RecordingCache final : public AnalysisCache
+    {
+        std::optional<KnownTrack> lookup (const juce::File&) override
+        {
+            KnownTrack known;
+            known.analysed = true;
+            known.bpm = 120.0;
+            return known;
+        }
+
+        void store (const juce::File&, const TrackAnalysis&, double) override { ++stored; }
+        void storeLoudness (const juce::File&, double lufs) override { found.store (lufs); }
+
+        std::atomic<int> stored { 0 };
+        std::atomic<double> found { 0.0 };
+    };
+
+    PadHarness h;
+    RecordingCache cache;
+    h.engine.setAnalysisCache (&cache);
+    h.engine.loadTrackAsync (0, h.click.file.getFile());
+
+    for (int i = 0; i < 2000 && h.engine.isDeckLoading (0); ++i)
+        juce::Thread::sleep (5);
+
+    h.engine.setAnalysisCache (nullptr);
+
+    REQUIRE (cache.found.load() < 0.0);
+    REQUIRE (cache.stored.load() == 0);   // the rest was known already, and not written over itself
+}

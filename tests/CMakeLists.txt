@@ -38,6 +38,7 @@ target_sources(opendj-tests PRIVATE
     OverlayMath_test.cpp
     AutoMix_test.cpp
     MixPoints_test.cpp
+    Loudness_test.cpp
     TempoMath_test.cpp
     TapTempo_test.cpp
     StemModel_test.cpp

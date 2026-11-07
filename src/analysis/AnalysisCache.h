@@ -54,6 +54,8 @@ struct KnownTrack
         fields do: a key in the tags outranks anything a detector finds. */
     MusicalKey key;
 
+    double loudnessLufs = 0.0;       ///< 0 when it has not been measured
+
     HotCues hotCues = noHotCues();   ///< restored onto the pads when the track loads
 };
 
@@ -73,6 +75,14 @@ public:
     virtual void store (const juce::File& file,
                         const TrackAnalysis& analysis,
                         double durationSeconds) = 0;
+
+    /** Remembers the loudness of a track whose tempo was already known, which is
+        every track analysed before loudness was measured. Called on a loader
+        thread. A cache with nowhere to keep it can ignore it. */
+    virtual void storeLoudness (const juce::File& file, double lufs)
+    {
+        juce::ignoreUnused (file, lufs);
+    }
 
     /** Remembers a track's hot cues after one is set or cleared, so they are
         there the next time it loads. Called on a loader thread. A cache with

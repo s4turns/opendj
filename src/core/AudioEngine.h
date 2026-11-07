@@ -187,6 +187,10 @@ public:
         nearest, which is what somebody pressing sync means by "the other one". */
     int findSyncLeader (int followerIndex) const;
 
+    /** Levels every deck's track by its measured loudness, or stops doing so. */
+    void setAutoGainEnabled (bool shouldLevel);
+    bool isAutoGainEnabled() const noexcept { return decks[0]->isAutoGainEnabled(); }
+
     /** Shifts one deck the shortest way to the key another is playing in, or to
         its relative, which has the same notes. Leaves the tempo alone, and
         replaces any shift the deck already had. Returns false when either key is

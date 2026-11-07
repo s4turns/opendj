@@ -152,6 +152,13 @@ public:
     // a place in the audio and editing a title does not move it.
     //==========================================================================
 
+    /** A track's integrated loudness in LUFS, 0 when it has not been measured.
+        Separate from the record, like the hot cues, because a person can edit
+        everything else about a track and nothing can edit this. */
+    double getLoudness (const juce::File& file) const;
+    bool setLoudness (const juce::File& file, double lufs);
+    void storeLoudness (const juce::File& file, double lufs) override { setLoudness (file, lufs); }
+
     HotCues getHotCues (const juce::File& file) const;
     bool setHotCues (const juce::File& file, const HotCues& cues);
 

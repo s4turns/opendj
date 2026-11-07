@@ -133,8 +133,14 @@ namespace automix
     float bodyLevel (const TrackAnalysis& analysis);
 
     /** The gain that brings `incoming` to the loudness of `outgoing`, within
-        quietestMatch and loudestMatch. 1 when either cannot be measured. */
-    float levelMatch (const TrackAnalysis& outgoing, const TrackAnalysis& incoming);
+        quietestMatch and loudestMatch. 1 when either cannot be measured.
+
+        The levels come from the track, so any gain already applied to each one
+        has to be counted here too: with auto gain on, a quiet track has been
+        lifted before this ever sees it, and matching it again would count the
+        same difference twice. */
+    float levelMatch (const TrackAnalysis& outgoing, const TrackAnalysis& incoming,
+                      float outgoingGain = 1.0f, float incomingGain = 1.0f);
 
     /** Which bars have singing in them, one entry per bar of the grid, from a
         track's separated vocals. Empty without a tempo. */

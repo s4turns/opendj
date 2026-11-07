@@ -1,7 +1,7 @@
 # OpenDJ roadmap
 
 Where the project is and what to pick up next. Anything ticked has tests or a verified manual
-check behind it, not just code that compiles. The suite is **486 tests** on Linux. Windows runs
+check behind it, not just code that compiles. The suite is **512 tests** on Linux. Windows runs
 one fewer, a stderr test whose stand-in for ffmpeg is a shell script. Anything touching audio is
 tested by measuring the output, not by checking that the code ran. Open work is also tracked as
 issues on [git.interdo.me](https://git.interdo.me/interdome/opendj/issues), and the numbers
@@ -41,6 +41,7 @@ that was listed after it except video.
 | Loops and loop rolls | ✅ | `Deck::setLoopBeats` and friends |
 | Slip mode | ✅ | `Deck::setSlipEnabled`, sharing the roll's shadow playhead |
 | Key detection | ✅ | `src/analysis/KeyDetector.*`, in the browser's Key column |
+| Auto gain | ✅ | `src/analysis/Loudness.*`, `Deck::setAutoGainEnabled`. BS.1770 loudness, kept with the track |
 | Key shift and key match | ✅ | `Deck::setKeyShift`, `AudioEngine::matchDeckKey`, through the key lock stretcher |
 | Effects: filter, echo, reverb | ✅ | `src/core/Mixer.*`, one knob each per channel |
 | Master effects | ✅ | `src/core/MasterEffects.*`: two slots on the whole mix, each echo, reverb, filter, flanger, phaser, gate, bitcrusher or stutter with a wet level and two parameters |
@@ -90,7 +91,7 @@ Some of it is partly there already: pitch bend through the jog wheel's nudge.
 | Beat grid editing (#14) | Adjust the BPM, move the downbeat, tap tempo | Done: an editor behind each deck's BPM readout, with tap tempo. Edits are kept with the track and outrank later analysis. No dynamic grids yet: one tempo for the whole track |
 | More effects (#15) | Dozens, including flanger, phaser, gate, bitcrusher, brake, backspin, echo out and stutter, plus reverse and censor buttons | Done, all of those named: filter, echo and reverb per channel with an echo out, flanger, phaser, gate, bitcrusher and stutter as well in two master slots, which also take VST3 plugins, and brake, backspin, reverse and censor per deck. Not the dozens: the master slots are for what a set needs, and plugins are for the rest. Not heard in a real set yet |
 | Key tools (#16) | Key shift in semitones, key match between decks, Camelot display, harmonic hints in the browser | Done: all four. Hints are colours on the Key column rather than a filter. Measured by counting the pitch that comes out on test tones; not yet heard on music |
-| Auto gain (#17) | Tracks levelled by measured loudness | A trim, with no analysis behind it |
+| Auto gain (#17) | Tracks levelled by measured loudness | Done. Readings agree with ffmpeg's `ebur128` to within 0.05 LU on three test tracks, not yet tried across a real collection |
 | Vocal-aware automix (#37) | Transitions that keep two vocals from overlapping | Vocals are kept apart, levels matched, and sections read from energy and vocals; not yet heard through a whole set. Sections come from energy, not from recognising repeated material, so a verse and a chorus of the same fullness look alike without stems |
 | MIDI learn and more controllers (#19, #4) | Hundreds of controllers mapped out of the box, and a mapper that learns a control from the hardware | One mapping, written by hand |
 
@@ -205,6 +206,23 @@ key in the tags beats detection on a first load as well, which the table above a
 The honest limitation is the relative major: it shares all seven notes with its minor, and a
 progression touching neither leading tone is ambiguous to any method. Camelot notation is
 forgiving here, since a key and its relative share a number and mix anyway.
+
+## Loudness and auto gain
+
+`src/analysis/Loudness.*` is ITU-R BS.1770 as EBU R128 uses it: the K-weighting, 400 ms blocks
+overlapping by 75%, an absolute gate at -70 LUFS and a relative one 10 LU under the result. The check is
+the one EBU Tech 3341 sets, a stereo 997 Hz sine at -23 dBFS reading -23 LUFS to within a tenth, and
+three synthetic tracks read within 0.05 LU of ffmpeg's `ebur128` filter.
+
+| Decision | Why |
+| --- | --- |
+| A gain of its own, not a move of the trim | The trim is the DJ's. A controller's trim knob sends where it physically is, so anything written there would be taken back off by the next touch |
+| Off to begin with | It changes how every track in somebody's set sounds |
+| A target of -14 LUFS | Where a hot club master comes down and an old one comes up, and neither is pushed into the soft clip above 0.7 for being levelled. It is a named constant |
+| Never lifted past its own peak | Being a little quiet is a smaller fault than distortion. A cut does not care |
+| No bump to `analysisVersion` | That would send a whole collection back through tempo and key detection to learn one number. A track measures in one pass as it loads and the answer is kept. A file that changes forgets it |
+| The peak is not kept | It is one pass over a track that has just been decoded, and not worth a column |
+| Automix's level match counts both tracks' auto gain | It reads levels off the track, from before any gain. Without this a track lifted 6 dB by auto gain still looks 6 dB quiet, and gets the same 6 dB again |
 
 ## Key lock
 
@@ -639,7 +657,7 @@ would fail.
 
 | Piece | Notes |
 | --- | --- |
-| SQLite schema | `src/library/Library.cpp`: folders, tracks, tags, tempo, and an analysis version, so a better analyser quietly invalidates old results |
+| SQLite schema | `src/library/Library.cpp`: folders, tracks, tags, tempo, loudness, and an analysis version, so a better analyser quietly invalidates old results |
 | Analyse once | `AnalysisCache`, asked before anything is decoded. `Deck::loadFile` takes a `KnownTrack` and skips the tempo pass |
 | Scanning | A quick tag pass so the browser fills in seconds, then analysis at low priority, written as it goes so it can be stopped and resumed. Up to four tracks are analysed at once, one per core with one core left over, since each worker holds a whole decoded track |
 | Tag reading | `TagReader.cpp` parses ID3v2.2 to 2.4 and ID3v1 directly, plus MP3 length from the Xing header. Opening a decoder for 13,000 files just to ask their length is far too slow |
@@ -726,7 +744,7 @@ audio device in JUCE's own `audio-device.xml` next to it.
 | Master, phones and cue mix levels | The channel faders and the crossfader |
 | Crossfader curve and per-channel assignment | EQ, filter, echo and reverb settings |
 | Tempo fader ranges, which decks are on screen | |
-| The waveform zoom, and whether keys show as Camelot | |
+| The waveform zoom, whether keys show as Camelot, and auto gain | |
 | The sampler pads, their files, loops and gains | |
 | The mic's level, talkover and routing | Whether the mic was on |
 | The window's size and position | |
@@ -760,6 +778,7 @@ would say so.
 | `deck.reverse_toggle` | `deck` | Plays backwards until pressed again |
 | `deck.censor` | `deck` | Backwards while held, landing back on time |
 | `mixer.echo_out_toggle` | `deck` | Takes the track away and leaves its echo |
+| `mixer.auto_gain_toggle` | nothing | Turns levelling by loudness on or off, for every deck |
 | `master_fx.type` | `deck`, `slot` | Picks an effect for unit `deck`: 0 echo, 1 reverb, 2 filter, 3 plugin, 4 flanger, 5 phaser, 6 gate, 7 bitcrusher, 8 stutter |
 | `deck.swap` | nothing | Swaps both sides at once. What a single deck-toggle button means |
 | `mixer.crossfader_assign` | `deck`, `slot` | 0 the A side, 1 neither, 2 the B side |

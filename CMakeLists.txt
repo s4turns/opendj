@@ -314,6 +314,7 @@ set(OPENDJ_ENGINE_SOURCES
     ${CMAKE_SOURCE_DIR}/src/core/SetRecorder.cpp
     ${CMAKE_SOURCE_DIR}/src/core/Mp3Writer.cpp
     ${CMAKE_SOURCE_DIR}/src/analysis/KeyDetector.cpp
+    ${CMAKE_SOURCE_DIR}/src/analysis/Loudness.cpp
     ${CMAKE_SOURCE_DIR}/src/analysis/TrackAnalysis.cpp
     ${CMAKE_SOURCE_DIR}/src/analysis/TrackAnalyser.cpp
     ${CMAKE_SOURCE_DIR}/src/analysis/TrackDecoder.cpp

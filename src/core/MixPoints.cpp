@@ -263,10 +263,11 @@ float bodyLevel (const TrackAnalysis& analysis)
     return bodyOf (std::move (levels));
 }
 
-float levelMatch (const TrackAnalysis& outgoing, const TrackAnalysis& incoming)
+float levelMatch (const TrackAnalysis& outgoing, const TrackAnalysis& incoming,
+                  float outgoingGain, float incomingGain)
 {
-    const auto out = bodyLevel (outgoing);
-    const auto in = bodyLevel (incoming);
+    const auto out = bodyLevel (outgoing) * outgoingGain;
+    const auto in = bodyLevel (incoming) * incomingGain;
 
     if (out <= 0.0f || in <= 0.0f)
         return 1.0f;

@@ -350,6 +350,7 @@ juce::var SessionState::toVar() const
     root->setProperty ("visible_decks", visible);
     root->setProperty ("waveform_zoom_seconds", waveformZoomSeconds);
     root->setProperty ("camelot_keys", camelotKeys);
+    root->setProperty ("auto_gain", autoGain);
 
     root->setProperty ("output_mode", opendj::toString (outputMode));
 
@@ -488,6 +489,7 @@ SessionState SessionState::fromVar (const juce::var& source)
                 waveform::zoomLevels.front(), waveform::zoomLevels.back()));
 
     state.camelotKeys = flag (source, "camelot_keys", state.camelotKeys);
+    state.autoGain = flag (source, "auto_gain", state.autoGain);
 
     state.outputMode = outputModeFromString (text (source, "output_mode"));
 

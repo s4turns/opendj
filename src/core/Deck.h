@@ -181,6 +181,18 @@ public:
     void setTrim (float linearGain);
     float getTrim() const noexcept { return trimGain.load (std::memory_order_relaxed); }
 
+    /** Levels each track by its measured loudness. A gain of its own rather than
+        a move of the trim, which stays the DJ's: a controller's knob sends where
+        it physically is, and would otherwise take this straight back off. */
+    void setAutoGainEnabled (bool shouldLevel);
+    bool isAutoGainEnabled() const noexcept { return autoGainEnabled.load (std::memory_order_relaxed); }
+
+    /** What the loaded track would be given, whether the level is on or not. */
+    float getTrackAutoGain() const noexcept { return trackAutoGain.load (std::memory_order_relaxed); }
+
+    /** What is being applied now: the above with auto gain on, otherwise 1. */
+    float getAutoGain() const noexcept { return isAutoGainEnabled() ? getTrackAutoGain() : 1.0f; }
+
     //==========================================================================
     // Stems
     //==========================================================================
@@ -425,6 +437,9 @@ private:
     std::atomic<double> positionSeconds { 0.0 };
     std::atomic<double> lengthSeconds { 0.0 };
     std::atomic<float> trimGain { 1.0f };
+    std::atomic<bool> autoGainEnabled { false };
+    std::atomic<float> trackAutoGain { 1.0f };
+    juce::SmoothedValue<float> autoGainRamp { 1.0f };   // audio thread, so turning it on mid-track cannot click
     std::atomic<float> peakLevel { 0.0f };
     std::atomic<juce::uint32> blocksProcessed { 0 };
 

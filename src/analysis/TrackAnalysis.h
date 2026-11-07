@@ -58,6 +58,7 @@ struct TrackAnalysis
     float confidence = 0.0f;         ///< 0 to 1, how clear the tempo peak was
 
     MusicalKey key;                  ///< invalid when nothing tonal was found
+    double loudnessLufs = 0.0;       ///< integrated loudness; 0 when there was nothing to measure
 
     bool hasTempo() const noexcept { return bpm > 0.0; }
     bool hasKey() const noexcept { return key.isValid(); }

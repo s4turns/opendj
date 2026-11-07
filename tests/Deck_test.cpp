@@ -1302,3 +1302,200 @@ TEST_CASE ("with no key in the tags, a first load detects one as before", "[deck
     REQUIRE (fixture.deck->loadFile (fixture.temporaryFile.getFile()));
     REQUIRE (fixture.deck->getAnalysis()->key.toString() == detected.toString());
 }
+
+//==============================================================================
+// Auto gain
+//==============================================================================
+
+namespace
+{
+    /** A deck playing a tone written at the given level, its own file and all. */
+    struct LevelledDeck
+    {
+        explicit LevelledDeck (float amplitude)
+        {
+            formatManager.registerBasicFormats();
+
+            constexpr double rate = 48000.0;
+            juce::AudioBuffer<float> content (2, (int) (6.0 * rate));
+            const auto delta = juce::MathConstants<double>::twoPi * 997.0 / rate;
+
+            for (int i = 0; i < content.getNumSamples(); ++i)
+            {
+                const auto value = (float) std::sin (delta * i) * amplitude;
+                content.setSample (0, i, value);
+                content.setSample (1, i, value);
+            }
+
+            juce::WavAudioFormat wav;
+            auto stream = std::make_unique<juce::FileOutputStream> (file.getFile());
+            REQUIRE (stream->openedOk());
+            std::unique_ptr<juce::AudioFormatWriter> writer (wav.createWriterFor (stream.release(), rate, 2, 24, {}, 0));
+            REQUIRE (writer != nullptr);
+            REQUIRE (writer->writeFromAudioSampleBuffer (content, 0, content.getNumSamples()));
+            writer.reset();
+
+            deck = std::make_unique<opendj::Deck> (0, formatManager);
+            deck->prepare (deviceSampleRate, blockSize);
+            REQUIRE (deck->loadFile (file.getFile()));
+            buffer.setSize (2, blockSize);
+        }
+
+        float levelAfterSettling()
+        {
+            for (int b = 0; b < 40; ++b)
+                deck->processBlock (buffer);
+
+            return buffer.getRMSLevel (0, 0, blockSize);
+        }
+
+        juce::AudioFormatManager formatManager;
+        juce::TemporaryFile file { ".wav" };
+        std::unique_ptr<opendj::Deck> deck;
+        juce::AudioBuffer<float> buffer;
+    };
+}
+
+TEST_CASE ("auto gain brings tracks of different levels to the same level", "[deck][autogain]")
+{
+    // Ten dB apart as written.
+    LevelledDeck loud (0.5f), quiet (0.158f);
+    loud.deck->play();
+    quiet.deck->play();
+
+    const auto loudBefore = loud.levelAfterSettling();
+    const auto quietBefore = quiet.levelAfterSettling();
+    REQUIRE_THAT (juce::Decibels::gainToDecibels (loudBefore / quietBefore), WithinAbs (10.0, 0.3));
+
+    loud.deck->setAutoGainEnabled (true);
+    quiet.deck->setAutoGainEnabled (true);
+
+    const auto loudAfter = loud.levelAfterSettling();
+    const auto quietAfter = quiet.levelAfterSettling();
+
+    INFO ("loud " << loudAfter << ", quiet " << quietAfter);
+    REQUIRE_THAT (juce::Decibels::gainToDecibels (loudAfter / quietAfter), WithinAbs (0.0, 0.3));
+}
+
+TEST_CASE ("auto gain levels to the target itself", "[deck][autogain]")
+{
+    LevelledDeck deck (0.5f);
+    deck.deck->setAutoGainEnabled (true);
+    deck.deck->play();
+
+    // A stereo sine's RMS is 3 dB under its peak, and -14 LUFS at 997 Hz has its
+    // peak at -14 dBFS.
+    const auto expected = juce::Decibels::decibelsToGain (-14.0f) / std::sqrt (2.0f);
+    REQUIRE_THAT (deck.levelAfterSettling(), WithinAbs (expected, expected * 0.03f));
+}
+
+TEST_CASE ("with auto gain off the output is what it always was", "[deck][autogain]")
+{
+    LevelledDeck plain (0.5f), levelled (0.5f);
+    REQUIRE (plain.deck->getTrackAutoGain() < 0.9f);
+
+    plain.deck->play();
+    levelled.deck->setAutoGainEnabled (true);
+    levelled.deck->setAutoGainEnabled (false);
+    levelled.deck->play();
+
+    for (int b = 0; b < 40; ++b)
+    {
+        plain.deck->processBlock (plain.buffer);
+        levelled.deck->processBlock (levelled.buffer);
+
+        for (int i = 0; i < blockSize; ++i)
+            REQUIRE (plain.buffer.getSample (0, i) == levelled.buffer.getSample (0, i));
+    }
+}
+
+TEST_CASE ("the trim stays the DJ's, on top of auto gain", "[deck][autogain]")
+{
+    LevelledDeck deck (0.5f);
+    deck.deck->setAutoGainEnabled (true);
+    deck.deck->play();
+
+    const auto level = deck.levelAfterSettling();
+    REQUIRE (deck.deck->getTrim() == 1.0f);
+
+    deck.deck->setTrim (0.5f);
+    REQUIRE_THAT (deck.levelAfterSettling(), WithinAbs (level * 0.5f, level * 0.02f));
+}
+
+TEST_CASE ("turning auto gain on under a playing track does not click", "[deck][autogain]")
+{
+    LevelledDeck deck (0.5f);
+    deck.deck->play();
+    deck.levelAfterSettling();
+
+    deck.deck->setAutoGainEnabled (true);
+
+    // The tone's own largest step between samples.
+    const auto toneStep = 0.5f * (float) (juce::MathConstants<double>::twoPi * 997.0 / deviceSampleRate);
+    auto previous = deck.buffer.getSample (0, blockSize - 1);
+    auto largest = 0.0f;
+
+    for (int b = 0; b < 10; ++b)
+    {
+        deck.deck->processBlock (deck.buffer);
+
+        for (int i = 0; i < blockSize; ++i)
+        {
+            largest = juce::jmax (largest, std::abs (deck.buffer.getSample (0, i) - previous));
+            previous = deck.buffer.getSample (0, i);
+        }
+    }
+
+    REQUIRE (largest < toneStep * 1.2f);
+}
+
+TEST_CASE ("a quiet track is lifted only as far as its peak allows", "[deck][autogain]")
+{
+    // With plenty of headroom, it gets all it asks for: this tone reads -20 LUFS.
+    LevelledDeck roomy (0.1f);
+    REQUIRE_THAT (roomy.deck->getTrackAutoGain(), WithinAbs (juce::Decibels::decibelsToGain (6.0f), 0.05f));
+
+    // The library says this is 16 dB under the target, and the file peaks at 0.5,
+    // which leaves 6 dB. A file that quiet with peaks that high is all transients.
+    LevelledDeck peaky (0.5f);
+
+    opendj::KnownTrack known;
+    known.analysed = true;
+    known.bpm = 120.0;
+    known.loudnessLufs = -30.0;
+
+    REQUIRE (peaky.deck->loadFile (peaky.file.getFile(), &known));
+    REQUIRE_THAT (peaky.deck->getTrackAutoGain(), WithinAbs (2.0, 0.01));
+
+    // And what comes out does not go over full scale.
+    peaky.deck->setAutoGainEnabled (true);
+    peaky.deck->play();
+    peaky.levelAfterSettling();
+    REQUIRE (peaky.buffer.getMagnitude (0, 0, blockSize) <= 1.01f);
+}
+
+TEST_CASE ("a known loudness is used rather than measured again", "[deck][autogain]")
+{
+    LevelledDeck deck (0.5f);
+
+    opendj::KnownTrack known;
+    known.analysed = true;
+    known.bpm = 120.0;
+    known.loudnessLufs = -14.0;
+
+    REQUIRE (deck.deck->loadFile (deck.file.getFile(), &known));
+    REQUIRE_THAT (deck.deck->getAnalysis()->loudnessLufs, WithinAbs (-14.0, 1.0e-9));
+    REQUIRE_THAT (deck.deck->getTrackAutoGain(), WithinAbs (1.0, 1.0e-5));
+}
+
+TEST_CASE ("a track analysed before loudness existed is measured as it loads", "[deck][autogain]")
+{
+    LevelledDeck deck (0.5f);
+
+    opendj::KnownTrack known;
+    known.analysed = true;
+    known.bpm = 120.0;
+
+    REQUIRE (deck.deck->loadFile (deck.file.getFile(), &known));
+    REQUIRE_THAT (deck.deck->getAnalysis()->loudnessLufs, WithinAbs (-6.0, 0.2));
+}

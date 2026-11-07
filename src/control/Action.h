@@ -116,6 +116,7 @@ enum class Action
     channelEcho,        ///< 0 is off, a beat-synced echo above that
     channelReverb,      ///< 0 is off, a wash of tail above that
     channelEchoOutToggle, ///< press takes the track away and leaves its echo
+    autoGainToggle,     ///< press turns levelling by loudness on or off, for every deck
 
     /** Arms echo or reverb as the effect a shared depth knob controls next.
         slot picks it: 0 echo, 1 reverb. For a controller with one FX knob

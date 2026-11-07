@@ -147,6 +147,17 @@ While a deck plays, the library shows what would mix with it. A key in bright gr
 and pale green is its relative or a step round the wheel. The key it goes by is the one being played
 after any shift, from the deck the room is hearing or, with every fader down, a playing deck.
 
+## Auto gain
+
+**Auto gain**, at the left of the crossfader, levels every track by its measured loudness, so they all
+come in at about the same volume. It's off until you turn it on, and it's remembered. Tracks are
+brought to -14 LUFS, by no more than 12 dB either way, and a quiet track is never lifted past its own
+peak. The trim works on top of it, as it always did. Hover over a deck's title to see the track's
+loudness and what auto gain does to it.
+
+Loudness is measured as part of analysis. A track that was analysed before this existed is measured the
+first time it loads, and kept from then on.
+
 ## Four decks
 
 There are four decks, A to D, and two of them are on screen at a time. The button beside a

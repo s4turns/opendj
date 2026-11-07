@@ -87,7 +87,7 @@ namespace
 
     // 2: rating, colour and comment columns, and the hot_cues table.
     // 3: a name column on hot_cues.
-    constexpr int schemaVersion = 3;
+    constexpr int schemaVersion = 4;
 
     juce::String pathOf (const juce::File& file)
     {
@@ -239,7 +239,8 @@ juce::Result Library::createSchema()
         && addColumnIfMissing ("tracks", "colour", "INTEGER NOT NULL DEFAULT 0")
         && addColumnIfMissing ("tracks", "comment", "TEXT NOT NULL DEFAULT ''")
         && addColumnIfMissing ("hot_cues", "name", "TEXT NOT NULL DEFAULT ''")
-        && addColumnIfMissing ("tracks", "grid_edited", "INTEGER NOT NULL DEFAULT 0");
+        && addColumnIfMissing ("tracks", "grid_edited", "INTEGER NOT NULL DEFAULT 0")
+        && addColumnIfMissing ("tracks", "loudness_lufs", "REAL NOT NULL DEFAULT 0");
 
     if (! upgraded)
         return juce::Result::fail (juce::String ("Could not create the library schema: ") + sqlite3_errmsg (database));
@@ -435,7 +436,7 @@ juce::int64 Library::upsertTrack (const TrackRecord& record)
                     : fileChanged
                         ? "UPDATE tracks SET file_size = ?, file_modified = ?, title = ?, artist = ?, album = ?,"
                           " genre = ?, key = ?, duration_seconds = ?, bpm = 0, first_beat_seconds = 0,"
-                          " tempo_confidence = 0, analysis_version = 0, grid_edited = 0"
+                          " tempo_confidence = 0, analysis_version = 0, grid_edited = 0, loudness_lufs = 0"
                           " WHERE id = ? AND ? = ? AND ? = ? AND ? = ?"
                         : "UPDATE tracks SET file_size = ?, file_modified = ?, title = ?, artist = ?, album = ?,"
                           " genre = ?, key = ?, duration_seconds = CASE WHEN ? > 0 THEN ? ELSE duration_seconds END"
@@ -937,6 +938,7 @@ std::optional<KnownTrack> Library::lookup (const juce::File& file)
     known.firstBeatSeconds = record->firstBeatSeconds;
     known.tempoConfidence = record->tempoConfidence;
     known.key = MusicalKey::fromString (record->key);
+    known.loudnessLufs = known.analysed ? getLoudness (file) : 0.0;
     known.hotCues = getHotCues (file);
 
     return known;
@@ -973,6 +975,27 @@ void Library::store (const juce::File& file, const TrackAnalysis& analysis, doub
     record.analysed = true;
 
     upsertTrack (record);
+    setLoudness (file, analysis.loudnessLufs);
+}
+
+double Library::getLoudness (const juce::File& file) const
+{
+    std::lock_guard<std::mutex> lock (mutex);
+
+    Statement select (database, "SELECT loudness_lufs FROM tracks WHERE path = ?");
+    select.bind (1, pathOf (file));
+
+    return select.step() ? select.getDouble (0) : 0.0;
+}
+
+bool Library::setLoudness (const juce::File& file, double lufs)
+{
+    std::lock_guard<std::mutex> lock (mutex);
+
+    Statement update (database, "UPDATE tracks SET loudness_lufs = ? WHERE path = ?");
+    update.bind (1, lufs).bind (2, pathOf (file));
+
+    return update.run();
 }
 
 void Library::storeHotCues (const juce::File& file, const HotCues& cues)

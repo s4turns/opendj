@@ -333,7 +333,8 @@ void AutoMix::beginFade (double nowSeconds, int outgoing, int incoming)
                 trimBefore[(size_t) incoming] = deck.getTrim();
 
             deck.setTrim (engine.getDeck (outgoing).getTrim()
-                          * automix::levelMatch (*outAnalysis, *inAnalysis));
+                          * automix::levelMatch (*outAnalysis, *inAnalysis,
+                                                 engine.getDeck (outgoing).getAutoGain(), deck.getAutoGain()));
         }
     }
 

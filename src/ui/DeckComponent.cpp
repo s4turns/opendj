@@ -498,6 +498,19 @@ void DeckComponent::refresh()
                                : (deck.isLoaded() ? deck.getTrackTitle() : juce::String ("empty"));
 
     titleLabel.setText ("Deck " + name + "  |  " + title, juce::dontSendNotification);
+
+    // What the level is doing to this track, for the one person who will wonder.
+    if (shownAnalysis != nullptr && shownAnalysis->loudnessLufs < 0.0)
+    {
+        const auto db = juce::Decibels::gainToDecibels (deck.getTrackAutoGain());
+        titleLabel.setTooltip (title + "\n" + juce::String (shownAnalysis->loudnessLufs, 1) + " LUFS. Auto gain "
+                               + (deck.isAutoGainEnabled() ? "is giving it " : "would give it ")
+                               + (db >= 0.0f ? "+" : "") + juce::String (db, 1) + " dB");
+    }
+    else
+    {
+        titleLabel.setTooltip ({});
+    }
     timeLabel.setText (formatTime (position) + " / " + formatTime (length), juce::dontSendNotification);
 
     playButton.setButtonText (deck.isPlaying() ? "Pause" : "Play");

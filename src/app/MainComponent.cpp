@@ -703,6 +703,8 @@ void MainComponent::restoreSettings()
     for (auto& view : deckViews)
         view->setKeyNotation (settings.camelotKeys);
 
+    engine.setAutoGainEnabled (settings.autoGain);
+
     updateRecordingTooltip();
 
     // Pads are reloaded rather than remembered, because the audio behind them
@@ -761,6 +763,7 @@ void MainComponent::saveSettings()
     state.visibleDecks = visibleDecks;
     state.waveformZoomSeconds = settings.waveformZoomSeconds;
     state.camelotKeys = settings.camelotKeys;
+    state.autoGain = engine.isAutoGainEnabled();
 
     if (masterFxView != nullptr)
         state.vstPluginDirectory = masterFxView->getPluginDirectory();

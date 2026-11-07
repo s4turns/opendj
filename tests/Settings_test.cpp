@@ -38,6 +38,7 @@ namespace
         state.visibleDecks = { 2, 3 };
         state.waveformZoomSeconds = 8.0;
         state.camelotKeys = true;
+        state.autoGain = true;
 
         state.samplerGain = 0.55f;
         state.samplerCue = true;
@@ -107,6 +108,7 @@ namespace
         REQUIRE (a.visibleDecks == b.visibleDecks);
         REQUIRE_THAT (a.waveformZoomSeconds, WithinAbs (b.waveformZoomSeconds, 1.0e-9));
         REQUIRE (a.camelotKeys == b.camelotKeys);
+        REQUIRE (a.autoGain == b.autoGain);
         REQUIRE_THAT (a.samplerGain, WithinAbs (b.samplerGain, 1.0e-4f));
         REQUIRE (a.samplerCue == b.samplerCue);
         REQUIRE (a.samplerFiles == b.samplerFiles);

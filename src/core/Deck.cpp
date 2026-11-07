@@ -5,6 +5,7 @@
 
 #include "core/Deck.h"
 
+#include "analysis/Loudness.h"
 #include "analysis/TrackAnalyser.h"
 #include "analysis/TrackDecoder.h"
 
@@ -219,7 +220,7 @@ bool Deck::loadFile (const juce::File& file, const KnownTrack* known)
     auto analysis = known != nullptr && known->analysed
         ? TrackAnalyser::withKnownTempo (track->audio, track->sampleRate,
                                          known->bpm, known->firstBeatSeconds,
-                                         known->tempoConfidence, {}, known->key)
+                                         known->tempoConfidence, {}, known->key, known->loudnessLufs)
         : TrackAnalyser::analyse (track->audio, track->sampleRate);
 
     // A first analysis detects a key whether or not the tags already have one.
@@ -231,7 +232,13 @@ bool Deck::loadFile (const juce::File& file, const KnownTrack* known)
         analysis = std::move (withTaggedKey);
     }
 
+    // Measured off the audio every time, since this is one pass and the headroom
+    // is not worth a column in the library. Before publish() can hand it over.
+    const auto peak = track->audio.getMagnitude (0, track->audio.getNumSamples());
+    const auto loudnessGain = analysis != nullptr ? loudness::gainForLoudness (analysis->loudnessLufs, peak) : 1.0f;
+
     publish (std::move (track));
+    trackAutoGain.store (loudnessGain, std::memory_order_relaxed);
     loadedBpm.store (analysis != nullptr ? analysis->bpm : 0.0, std::memory_order_relaxed);
     loadedFirstBeatSeconds.store (analysis != nullptr ? analysis->firstBeatSeconds : 0.0, std::memory_order_relaxed);
     std::atomic_store (&analysisData, std::move (analysis));
@@ -378,6 +385,11 @@ void Deck::play()
         spinRequest.store (spinCancel, std::memory_order_relaxed);
 
     playing.store (true, std::memory_order_relaxed);
+}
+
+void Deck::setAutoGainEnabled (bool shouldLevel)
+{
+    autoGainEnabled.store (shouldLevel, std::memory_order_relaxed);
 }
 
 void Deck::setKeyShift (int semitones)
@@ -999,6 +1011,8 @@ void Deck::prepare (double sampleRate, int)
     deviceSampleRate = sampleRate > 0.0 ? sampleRate : 44100.0;
     transportGain.reset (deviceSampleRate, gainRampSeconds);
     transportGain.setCurrentAndTargetValue (0.0f);
+    autoGainRamp.reset (deviceSampleRate, 0.02);
+    autoGainRamp.setCurrentAndTargetValue (getAutoGain());
 
     for (size_t i = 0; i < numStems; ++i)
     {
@@ -1051,6 +1065,7 @@ void Deck::processBlock (juce::AudioBuffer<float>& destination)
     const auto wantPlay = playing.load (std::memory_order_relaxed);
     const auto audible = wantPlay || scratching;
     transportGain.setTargetValue (audible ? 1.0f : 0.0f);
+    autoGainRamp.setTargetValue (getAutoGain());
 
     const auto spinFadeSamples = spinFadeSeconds * deviceSampleRate;
 
@@ -1084,6 +1099,9 @@ void Deck::processBlock (juce::AudioBuffer<float>& destination)
     // Once stopped and fully faded, hold position and cost nothing.
     if (! audible && transportGain.getCurrentValue() <= 0.0f)
     {
+        // Nothing is being heard, so a new track need not glide to its own level.
+        autoGainRamp.setCurrentAndTargetValue (getAutoGain());
+
         pitchBend = 0.0;
         stretchPrimed = false;
         scratchTargetValid = false;
@@ -1246,7 +1264,7 @@ void Deck::processBlock (juce::AudioBuffer<float>& destination)
         const auto landingFade = landingNext
             ? static_cast<float> (juce::jmin (1.0, static_cast<double> (blockSize - 1 - i) / landingFadeSamples))
             : 1.0f;
-        const auto gain = transportGain.getNextValue() * trim * spinFade * landingFade;
+        const auto gain = transportGain.getNextValue() * autoGainRamp.getNextValue() * trim * spinFade * landingFade;
         const auto inRange = position >= 0.0 && position < static_cast<double> (numSamples);
 
         for (size_t stem = 0; stem < numStems; ++stem)

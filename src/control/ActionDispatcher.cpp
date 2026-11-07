@@ -455,6 +455,11 @@ void ActionDispatcher::dispatch (const ActionMessage& message)
                 mixer.setChannelEchoOut (deckIndex, ! mixer.isChannelEchoOut (deckIndex));
             break;
 
+        case Action::autoGainToggle:
+            if (pressed)
+                engine.setAutoGainEnabled (! engine.isAutoGainEnabled());
+            break;
+
         case Action::channelFxSelect:
             // A select button decides where the depth knob goes next; it never
             // touches the mixer itself, so there is nothing here for the shell

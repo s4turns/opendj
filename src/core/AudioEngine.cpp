@@ -316,6 +316,12 @@ void AudioEngine::loadTrackAsync (int deckIndex, const juce::File& file,
             if (const auto analysis = deck.getAnalysis(); analysis != nullptr)
                 cache->store (file, *analysis, deck.getLengthSeconds());
 
+        // A track analysed before loudness was measured has just been measured,
+        // and that is the one part of this load worth keeping.
+        if (succeeded && cache != nullptr && known.has_value() && known->analysed && known->loudnessLufs >= 0.0)
+            if (const auto analysis = deck.getAnalysis(); analysis != nullptr && analysis->loudnessLufs < 0.0)
+                cache->storeLoudness (file, analysis->loudnessLufs);
+
         // A track separated on some earlier day costs only a decode, so the
         // stems are there the moment it starts playing.
         if (succeeded && stemSeparator.isAvailable())
@@ -517,6 +523,12 @@ juce::File AudioEngine::defaultSampleFolder()
 {
     return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
                .getChildFile ("OpenDJ").getChildFile ("Samples");
+}
+
+void AudioEngine::setAutoGainEnabled (bool shouldLevel)
+{
+    for (auto& deck : decks)
+        deck->setAutoGainEnabled (shouldLevel);
 }
 
 bool AudioEngine::matchDeckKey (int followerIndex, int leaderIndex)
