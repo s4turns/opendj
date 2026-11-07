@@ -281,6 +281,43 @@ public:
     double getSlipPositionSeconds() const noexcept { return slipPositionSeconds.load (std::memory_order_relaxed); }
 
     //==========================================================================
+    // Brake, backspin, reverse and censor
+    //==========================================================================
+
+    static constexpr double brakeSeconds = 1.0;
+    static constexpr double backspinSeconds = 1.5;
+    static constexpr double backspinSpeed = 4.0;    ///< how fast it starts, against the tempo
+
+    /** The platter's power cut: the deck slows to a stop over brakeSeconds and
+        the pitch falls with it. Only a playing deck can be braked. With slip on
+        the music runs on underneath, and the deck drops back in on time instead
+        of stopping. */
+    void brake();
+
+    /** A hand flinging the record backwards: it starts backspinSpeed times as
+        fast the wrong way and dies away over backspinSeconds. Slip treats it
+        as it treats a brake. */
+    void backspin();
+
+    /** True while a brake or a backspin is running. Pressing play ends one and
+        puts the deck back at its tempo; a hand on the platter or a pause ends
+        one too. */
+    bool isSpinningDown() const noexcept { return spinActive.load (std::memory_order_relaxed); }
+
+    /** Plays backwards at the tempo until turned off. Running off the front of
+        the track stops the deck and turns this off. With slip on the music
+        carries on forwards underneath, and turning it off lands there. */
+    void setReverse (bool shouldReverse);
+    void toggleReverse();
+    bool isReverseEnabled() const noexcept { return reverseEnabled.load (std::memory_order_relaxed); }
+
+    /** The button radio DJs use for a word that cannot go out: backwards for as
+        long as it is held, always with the music running on underneath, so
+        letting go lands exactly where the track would have been. */
+    void setCensor (bool shouldCensor);
+    bool isCensorHeld() const noexcept { return censorHeld.load (std::memory_order_relaxed); }
+
+    //==========================================================================
     // Jog wheel
     //==========================================================================
 
@@ -402,6 +439,18 @@ private:
     double slipPosition = 0.0;                             // audio thread, file samples
     bool slipValid = false;                                // audio thread only
     std::atomic<double> slipPositionSeconds { -1.0 };      // for the interface
+
+    // A brake or backspin is asked for through `spinRequest` and then belongs to
+    // the audio thread, which walks the playback rate to zero a sample at a time.
+    enum SpinRequest : int { spinNone, spinBrake, spinBackspin, spinCancel };
+    std::atomic<int> spinRequest { spinNone };
+    std::atomic<bool> spinActive { false };
+    std::atomic<bool> reverseEnabled { false };
+    std::atomic<bool> censorHeld { false };
+    double spinRate = 0.0;                                 // audio thread, file samples per device sample
+    double spinRateStep = 0.0;                             // audio thread
+    juce::int64 spinSamplesLeft = 0;                       // audio thread
+    bool motionSlip = false;                               // audio thread: the shadow head is running for one of these
 
     /** Wraps a read head back to the loop start when it runs past the end.
         Returns true when it moved. Audio thread only. */

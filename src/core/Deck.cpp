@@ -47,6 +47,13 @@ namespace
 
     constexpr double gainRampSeconds = 0.005;
 
+    // The level falls over the end of a brake or backspin. A rate close to zero
+    // is far below anything a speaker can play, and would otherwise be heard
+    // only as the thump of the signal stopping wherever it happened to be.
+    constexpr double spinFadeSeconds = 0.1;
+
+    constexpr double landingFadeSeconds = 0.005;
+
     /** One channel of the track at a fractional position: the recorded mix, or
         the stems weighted by their gains when the track has been separated.
         Summing the stems at unity gives the mix back, so the two paths agree;
@@ -262,6 +269,9 @@ void Deck::publish (std::unique_ptr<Track> newTrack)
     // trap the new track between two positions that mean nothing in it.
     rollActive.store (false, std::memory_order_relaxed);
     slipPositionSeconds.store (-1.0, std::memory_order_relaxed);
+    reverseEnabled.store (false, std::memory_order_relaxed);
+    censorHeld.store (false, std::memory_order_relaxed);
+    spinRequest.store (spinNone, std::memory_order_relaxed);
     loopEnabled.store (false, std::memory_order_relaxed);
     loopStartSeconds.store (-1.0, std::memory_order_relaxed);
     loopEndSeconds.store (-1.0, std::memory_order_relaxed);
@@ -350,8 +360,41 @@ juce::String Deck::getTrackTitle() const
 
 void Deck::play()
 {
-    if (isLoaded())
-        playing.store (true, std::memory_order_relaxed);
+    if (! isLoaded())
+        return;
+
+    // Play during a brake catches the record again.
+    if (isSpinningDown())
+        spinRequest.store (spinCancel, std::memory_order_relaxed);
+
+    playing.store (true, std::memory_order_relaxed);
+}
+
+void Deck::brake()
+{
+    if (isPlaying() && ! isSpinningDown())
+        spinRequest.store (spinBrake, std::memory_order_relaxed);
+}
+
+void Deck::backspin()
+{
+    if (isPlaying() && ! isSpinningDown())
+        spinRequest.store (spinBackspin, std::memory_order_relaxed);
+}
+
+void Deck::setReverse (bool shouldReverse)
+{
+    reverseEnabled.store (shouldReverse && isLoaded(), std::memory_order_relaxed);
+}
+
+void Deck::toggleReverse()
+{
+    setReverse (! isReverseEnabled());
+}
+
+void Deck::setCensor (bool shouldCensor)
+{
+    censorHeld.store (shouldCensor && isLoaded(), std::memory_order_relaxed);
 }
 
 void Deck::pause()
@@ -955,9 +998,11 @@ void Deck::processBlock (juce::AudioBuffer<float>& destination)
     blocksProcessed.fetch_add (1, std::memory_order_relaxed);
 
     auto* track = activeTrack.load (std::memory_order_acquire);
+    const auto spinAsked = spinRequest.exchange (spinNone, std::memory_order_relaxed);
 
     if (track == nullptr)
     {
+        spinActive.store (false, std::memory_order_relaxed);
         transportGain.setCurrentAndTargetValue (0.0f);
         peakLevel.store (0.0f, std::memory_order_relaxed);
         stretchPrimed = false;
@@ -976,6 +1021,19 @@ void Deck::processBlock (juce::AudioBuffer<float>& destination)
     const auto wantPlay = playing.load (std::memory_order_relaxed);
     const auto audible = wantPlay || scratching;
     transportGain.setTargetValue (audible ? 1.0f : 0.0f);
+
+    const auto spinFadeSamples = spinFadeSeconds * deviceSampleRate;
+
+    // Anything that takes the deck back ends a brake or backspin. The level
+    // carries on from wherever the fade had reached, so it cannot click.
+    if (spinActive.load (std::memory_order_relaxed)
+        && (spinAsked == spinCancel || ! wantPlay || scratching))
+    {
+        const auto fade = static_cast<float> (juce::jmin (1.0, static_cast<double> (spinSamplesLeft) / spinFadeSamples));
+        transportGain.setCurrentAndTargetValue (juce::jmin (transportGain.getCurrentValue(), fade));
+        transportGain.setTargetValue (audible ? 1.0f : 0.0f);
+        spinActive.store (false, std::memory_order_relaxed);
+    }
 
     // A seek that arrives mid fade-out waits for the fade to finish. Pressing
     // cue while playing should cut the audio where it is and only then send the
@@ -999,6 +1057,17 @@ void Deck::processBlock (juce::AudioBuffer<float>& destination)
         pitchBend = 0.0;
         stretchPrimed = false;
         scratchTargetValid = false;
+
+        // A stopped deck has no music running under it. A shadow head left over
+        // from a censor would otherwise pull the next press of play back to
+        // wherever the track had reached before it stopped.
+        if (motionSlip)
+        {
+            motionSlip = false;
+            slipValid = false;
+            slipPositionSeconds.store (-1.0, std::memory_order_relaxed);
+        }
+
         positionSeconds.store (readPosition / track->sampleRate, std::memory_order_relaxed);
         peakLevel.store (0.0f, std::memory_order_relaxed);
         return;
@@ -1048,6 +1117,34 @@ void Deck::processBlock (juce::AudioBuffer<float>& destination)
         rate = tempoRate * (1.0 + pitchBend);
     }
 
+    const auto reverseOn = reverseEnabled.load (std::memory_order_relaxed);
+    const auto censoring = censorHeld.load (std::memory_order_relaxed) && wantPlay && ! scratching;
+    const auto reversed = ! scratching && (reverseOn || censoring);
+
+    if (reversed)
+        rate = -rate;
+
+    // A brake starts from the speed the deck is running at, in whichever
+    // direction, and a backspin starts faster and the other way. Either walks
+    // the rate to zero a sample at a time, because a step a block is heard as
+    // the pitch moving in stairs.
+    if ((spinAsked == spinBrake || spinAsked == spinBackspin)
+        && wantPlay && ! scratching && ! spinActive.load (std::memory_order_relaxed))
+    {
+        const auto isBrake = spinAsked == spinBrake;
+        const auto seconds = isBrake ? brakeSeconds : backspinSeconds;
+
+        spinRate = isBrake ? rate : -rate * backspinSpeed;
+        spinSamplesLeft = juce::jmax<juce::int64> (1, static_cast<juce::int64> (seconds * deviceSampleRate));
+        spinRateStep = -spinRate / static_cast<double> (spinSamplesLeft);
+        spinActive.store (true, std::memory_order_relaxed);
+    }
+
+    const auto spinning = spinActive.load (std::memory_order_relaxed);
+
+    if (spinning)
+        rate = spinRate;
+
     const auto trim = trimGain.load (std::memory_order_relaxed);
     const auto outChannels = juce::jmin (2, destination.getNumChannels());
 
@@ -1072,9 +1169,13 @@ void Deck::processBlock (juce::AudioBuffer<float>& destination)
 
     // Key lock is bypassed on the platter, and if it would have nothing to do:
     // at exactly the recorded speed the stretcher is a delay line, and a delay
-    // that comes and goes with the fader is worse than a pitch that does.
+    // that comes and goes with the fader is worse than a pitch that does. A
+    // stretcher cannot run backwards or follow a brake either, and the falling
+    // pitch is what a brake is.
     const auto stretching = keyLock.load (std::memory_order_relaxed)
                          && ! scratching
+                         && ! reversed
+                         && ! spinning
                          && stretcher != nullptr
                          && outChannels == 2
                          && std::abs (rate - fileToDevice) > 1.0e-6;
@@ -1087,9 +1188,27 @@ void Deck::processBlock (juce::AudioBuffer<float>& destination)
     auto position = readPosition;
     auto peak = 0.0f;
 
+    // Whether this is the last block before a censor, a reverse or a backspin
+    // lands back on the timeline. Landing is a jump to another part of the track,
+    // so the level comes down over the end of this block and back up after it,
+    // rather than leaving a step in the waveform to be heard as a tick.
+    const auto slipOn = slipEnabled.load (std::memory_order_relaxed);
+    const auto landingNext = motionSlip && slipValid && ! censoring
+                          && ! (slipOn && (reverseOn || spinning))
+                          && ! rollActive.load (std::memory_order_relaxed)
+                          && ! (slipOn && (scratching || loopEnabled.load (std::memory_order_relaxed)));
+    const auto landingFadeSamples = juce::jmax (1.0, juce::jmin (static_cast<double> (blockSize),
+                                                                 landingFadeSeconds * deviceSampleRate));
+
     for (int i = 0; i < blockSize; ++i)
     {
-        const auto gain = transportGain.getNextValue() * trim;
+        const auto spinFade = spinning
+            ? static_cast<float> (juce::jmin (1.0, static_cast<double> (spinSamplesLeft) / spinFadeSamples))
+            : 1.0f;
+        const auto landingFade = landingNext
+            ? static_cast<float> (juce::jmin (1.0, static_cast<double> (blockSize - 1 - i) / landingFadeSamples))
+            : 1.0f;
+        const auto gain = transportGain.getNextValue() * trim * spinFade * landingFade;
         const auto inRange = position >= 0.0 && position < static_cast<double> (numSamples);
 
         for (size_t stem = 0; stem < numStems; ++stem)
@@ -1112,6 +1231,29 @@ void Deck::processBlock (juce::AudioBuffer<float>& destination)
         // be fenced in by something set earlier.
         if (! scratching)
             wrapIntoLoop (position, rate, *track);
+
+        if (spinning && spinSamplesLeft > 0)
+        {
+            rate = --spinSamplesLeft > 0 ? rate + spinRateStep : 0.0;
+        }
+    }
+
+    if (spinning)
+    {
+        spinRate = rate;
+
+        // Finished, and already silent from the fade. The ordinary fade-out
+        // would run at full speed, which is a chirp at the end of a brake, so
+        // the level is simply left at zero: a stopped deck stays quiet, and one
+        // dropping back in with slip fades up from nothing.
+        if (spinSamplesLeft <= 0)
+        {
+            spinActive.store (false, std::memory_order_relaxed);
+            transportGain.setCurrentAndTargetValue (0.0f);
+
+            if (! slipEnabled.load (std::memory_order_relaxed))
+                playing.store (false, std::memory_order_relaxed);
+        }
     }
 
     // While a roll is held, the track carries on underneath it. This is the
@@ -1121,9 +1263,18 @@ void Deck::processBlock (juce::AudioBuffer<float>& destination)
     // underneath at the tempo fader's rate, which is where the music would have
     // been. A roll always does this, because that is what a roll is; with slip
     // mode on, a hand on the platter and a running loop do it too.
+    //
+    // A censor always does too, since landing back on time is what it is for.
+    // With slip on, a brake, a backspin and reverse join them.
+    const auto motionOffTimeline = censoring
+                                || (slipOn && ! scratching
+                                    && (reverseOn || spinActive.load (std::memory_order_relaxed)));
     const auto offTimeline = rollActive.load (std::memory_order_relaxed)
-                          || (slipEnabled.load (std::memory_order_relaxed)
-                              && (scratching || loopEnabled.load (std::memory_order_relaxed)));
+                          || motionOffTimeline
+                          || (slipOn && (scratching || loopEnabled.load (std::memory_order_relaxed)));
+
+    if (motionOffTimeline)
+        motionSlip = true;
 
     if (offTimeline)
     {
@@ -1145,14 +1296,22 @@ void Deck::processBlock (juce::AudioBuffer<float>& destination)
         // where the hand or the loop left off, so a scratch or a roll can be
         // dropped in mid-phrase without losing the mix. Off the end of the
         // track it simply stops, as playing off the end always does.
-        position = juce::jlimit (0.0, static_cast<double> (numSamples), slipPosition);
+        //
+        // The shadow has not been moved for this block, and the music has.
+        position = juce::jlimit (0.0, static_cast<double> (numSamples), slipPosition + tempoRate * blockSize);
         slipValid = false;
+
+        if (landingNext)
+            transportGain.setCurrentAndTargetValue (0.0f);   // and up again from here
+
+        motionSlip = false;
         stretchPrimed = false;
         slipPositionSeconds.store (-1.0, std::memory_order_relaxed);
     }
 
     // Running off either end stops playback rather than looping. Scratching
-    // just stops at the edge, since the hand is still on the platter.
+    // just stops at the edge, since the hand is still on the platter, and so
+    // does a censor, which comes back to the music when it is let go.
     if (position >= static_cast<double> (numSamples))
     {
         position = static_cast<double> (numSamples);
@@ -1164,8 +1323,17 @@ void Deck::processBlock (juce::AudioBuffer<float>& destination)
     {
         position = 0.0;
 
-        if (! scratching)
+        if (! scratching && ! censoring)
+        {
             playing.store (false, std::memory_order_relaxed);
+
+            // Left on, the next press of play would stop straight away.
+            reverseEnabled.store (false, std::memory_order_relaxed);
+
+            // Off the front is already silence, and the ordinary fade-out would
+            // play a block of the opening forwards.
+            transportGain.setCurrentAndTargetValue (0.0f);
+        }
     }
 
     readPosition = position;

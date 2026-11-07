@@ -159,6 +159,13 @@ private:
     juce::TextButton keyLockButton { "Key" };
     juce::TextButton slipButton { "Slip" };
 
+    // The deck's performance effects, a row of their own under the hot cues.
+    juce::TextButton brakeButton { "Brake" };
+    juce::TextButton backspinButton { "Spin" };
+    juce::TextButton reverseButton { "Rev" };
+    MomentaryButton censorButton { "Censor" };
+    juce::TextButton echoOutButton { "Echo out" };
+
     /** One knob per part of the track, and the button that asks for them. The
         knobs stay dead until a separation exists, since turning down a stem
         that is not there would do nothing and look broken. */

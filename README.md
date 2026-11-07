@@ -17,7 +17,7 @@ and the code are entirely original and entirely open.
 
 **Status: early development, but it mixes.** Four decks with turntable platters you can scratch,
 waveforms, beat grids, automatic BPM and key detection, sync, key lock, beat-locked loops and
-rolls, stem separation with a knob per stem, a mixer with a filter, a beat-synced echo and a reverb per channel, hot cues, an eight slot sampler, a
+rolls, stem separation with a knob per stem, a mixer with a filter, a beat-synced echo and a reverb per channel, two master effect units, brake, backspin, reverse and censor, hot cues, an eight slot sampler, a
 searchable track library, set recording to WAV, FLAC or MP3 with a tracklist, broadcasting to Icecast, and Roland
 DJ-202 support including its own audio interface and its platters.
 
@@ -104,6 +104,30 @@ When the detected grid is wrong, click the deck's BPM readout to edit it:
 Edits apply at once, so the waveform, sync, loops and automix all follow while the editor is
 open. Each edit is saved with the track in the library, and a later analysis or rekordbox import
 won't replace it. If the file itself changes, it gets a fresh analysis.
+
+## Performance effects
+
+The row of buttons under the hot cues works on that deck:
+
+- **Brake** slows the deck to a stop in a second, with the pitch falling, the way a turntable does when the power is cut.
+- **Spin** flings the record backwards at four times its speed and lets it die away over a second and a half.
+- **Rev** plays backwards until you press it again.
+- **Censor** plays backwards for as long as you hold it. The track keeps running underneath, so letting go lands where it would have reached.
+- **Echo out** takes the track away and leaves its echo dying out, wherever the Echo knob is. Press it again to bring the track back. Loading a new track also turns it off.
+
+With **Slip** on, Brake and Spin drop back in on time instead of stopping the deck, and Rev lands where the track would have reached when you turn it off. Pressing Play during a Brake or Spin puts the deck straight back at its tempo.
+
+The two master units over the whole mix hold an echo, reverb or filter, a VST3 plugin, or one of these:
+
+| Effect | First knob | Second knob |
+| --- | --- | --- |
+| Flanger | One sweep every 1 to 32 beats | Feedback |
+| Phaser | One sweep every 1 to 32 beats | Depth |
+| Gate | Chops the mix every 1/8 of a beat to 4 beats | How long it stays open in each cycle |
+| Bitcrusher | Bits, from 16 down to 2 | How many samples it holds each value for |
+| Stutter | Repeats the last 1/8 of a beat to 4 beats while on | How fast the repeats fade |
+
+The gate and the sweeps follow the beat grid of the deck the room is hearing, so they land with the music whenever you switch them on.
 
 ## Four decks
 

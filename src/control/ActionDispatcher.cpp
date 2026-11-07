@@ -121,6 +121,26 @@ void ActionDispatcher::dispatch (const ActionMessage& message)
                 deck.toggleKeyLock();
             break;
 
+        case Action::deckBrake:
+            if (pressed)
+                deck.brake();
+            break;
+
+        case Action::deckBackspin:
+            if (pressed)
+                deck.backspin();
+            break;
+
+        case Action::deckReverseToggle:
+            if (pressed)
+                deck.toggleReverse();
+            break;
+
+        case Action::deckCensor:
+            // Momentary, like a roll: letting go is what brings the music back.
+            deck.setCensor (pressed);
+            break;
+
         case Action::deckSelect:
             if (pressed && deckSelectHandler != nullptr)
                 deckSelectHandler (deckIndex);
@@ -407,6 +427,11 @@ void ActionDispatcher::dispatch (const ActionMessage& message)
 
         case Action::channelReverb:
             mixer.setChannelReverb (deckIndex, message.value);
+            break;
+
+        case Action::channelEchoOutToggle:
+            if (pressed)
+                mixer.setChannelEchoOut (deckIndex, ! mixer.isChannelEchoOut (deckIndex));
             break;
 
         case Action::channelFxSelect:

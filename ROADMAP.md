@@ -1,7 +1,7 @@
 # OpenDJ roadmap
 
 Where the project is and what to pick up next. Anything ticked has tests or a verified manual
-check behind it, not just code that compiles. The suite is **371 tests** on Linux. Windows runs
+check behind it, not just code that compiles. The suite is **468 tests** on Linux. Windows runs
 one fewer, a stderr test whose stand-in for ffmpeg is a shell script. Anything touching audio is
 tested by measuring the output, not by checking that the code ran. Open work is also tracked as
 issues on [git.interdo.me](https://git.interdo.me/interdome/opendj/issues), and the numbers
@@ -42,7 +42,9 @@ that was listed after it except video.
 | Slip mode | ✅ | `Deck::setSlipEnabled`, sharing the roll's shadow playhead |
 | Key detection | ✅ | `src/analysis/KeyDetector.*`, in the browser's Key column |
 | Effects: filter, echo, reverb | ✅ | `src/core/Mixer.*`, one knob each per channel |
-| Master effects | ✅ | `src/core/MasterEffects.*`: two slots on the whole mix, each echo, reverb or filter with a wet level and two parameters |
+| Master effects | ✅ | `src/core/MasterEffects.*`: two slots on the whole mix, each echo, reverb, filter, flanger, phaser, gate, bitcrusher or stutter with a wet level and two parameters |
+| Brake, backspin, reverse, censor | ✅ | `Deck::brake` and friends, on a row of their own under the hot cues |
+| Echo out | ✅ | `Mixer::setChannelEchoOut` |
 | VST3 effect plugins | ✅ | `src/core/PluginHost.*`: scanned in the background, loaded into a master slot with its own window and two knobs mapped to its parameters |
 | Sampler | ✅ | `src/core/Sampler.*`, eight pads |
 | Playlists | ✅ | `Library` playlist tables, `src/ui/PlaylistComponent.*`: built from the browser by selection or drag, reordered, renamed |
@@ -86,7 +88,7 @@ in `MusicalKey::toCamelot` that the browser does not yet show.
 | History and smart folders (#11) | Playlists, virtual and filter folders, an automatic history of played tracks, a side list for lining up the next few | Playlists are done. No history: `tracks.last_played_at` exists but nothing writes it. No filter folders |
 | Beat jump and quantize (#13) | Jumps of 1 to 32 beats; cues and loops snap to the grid | Done: beat jump of 1 to 32 beats that carries a running loop, and a quantize button per deck for the cue, hot cues and loop in and out. Jumping to a hot cue does not yet keep the phase |
 | Beat grid editing (#14) | Adjust the BPM, move the downbeat, tap tempo | Done: an editor behind each deck's BPM readout, with tap tempo. Edits are kept with the track and outrank later analysis. No dynamic grids yet: one tempo for the whole track |
-| More effects (#15) | Dozens, including flanger, phaser, gate, bitcrusher, brake, backspin, echo out and stutter, plus reverse and censor buttons | Filter, echo and reverb per channel, and the same three in two master slots, which also take VST3 plugins |
+| More effects (#15) | Dozens, including flanger, phaser, gate, bitcrusher, brake, backspin, echo out and stutter, plus reverse and censor buttons | Done, all of those named: filter, echo and reverb per channel with an echo out, flanger, phaser, gate, bitcrusher and stutter as well in two master slots, which also take VST3 plugins, and brake, backspin, reverse and censor per deck. Not the dozens: the master slots are for what a set needs, and plugins are for the rest. Not heard in a real set yet |
 | Key tools (#16) | Key shift in semitones, key match between decks, Camelot display, harmonic hints in the browser | Detection only |
 | Auto gain (#17) | Tracks levelled by measured loudness | A trim, with no analysis behind it |
 | Vocal-aware automix (#37) | Transitions that keep two vocals from overlapping | Vocals are kept apart, levels matched, and sections read from energy and vocals; not yet heard through a whole set. Sections come from energy, not from recognising repeated material, so a verse and a chorus of the same fullness look alike without stems |
@@ -283,6 +285,39 @@ already turns an effect off at zero.
 | The selection lives in `ActionDispatcher`, one small integer per channel, alongside `shiftHeld` and `tempoRangePercent` | It is exactly that kind of state: not audio, not persisted, read by the next action rather than stored on a deck or the mixer |
 | Binding only CC 0x00 of the DEPTH knob | Measured on real hardware: the knob broadcasts the same value on 0x00, 0x01 and 0x02 at once, so binding all three would write the mapping three times for one hand movement |
 | FX3 and FX ON/TAP left unmapped | OpenDJ has two effects, not three, and a continuous knob already has an off position; inventing a use for either button would be design bolted onto a limitation the hardware does not actually have on this engine |
+
+**Brake, backspin, reverse and censor** are the deck's, not the mixer's, because they move the
+playhead. Everything else in this section changes the sound of a track that keeps its place.
+
+| Decision | Why |
+| --- | --- |
+| The rate walks to zero a sample at a time | A step a block is heard as the pitch moving in stairs |
+| The level falls over the last 100 ms of a brake or backspin | A rate near zero is far below anything a speaker can play, so all that is left to hear is the thump of the signal stopping wherever it was |
+| The level is then left at zero rather than faded out | The ordinary fade-out renders at the tempo, which at the end of a brake is a chirp. Running off the front in reverse is the same |
+| Key lock steps aside for all four | A stretcher cannot run backwards, and the falling pitch is what a brake is |
+| With slip on, a brake or backspin drops back in on time rather than stopping | Stopping the deck is what they do because nothing else is running. With the music running underneath, landing on it is what slip already means |
+| Censor always uses the shadow playhead, whatever slip says | Landing back on time is what a censor is for |
+| Only these landings fade, over 5 ms either side | Landing is a jump to another part of the waveform, and a censor is the one effect that exists to be clean. Rolls and slip landed with a hard jump before these came along and still do |
+
+Landing used to arrive one block late for everything that uses the shadow playhead: it had not
+been moved for the block in which the landing happened. At 512 samples that is 10.7 ms.
+
+**Echo out** cuts the channel before the delay, so nothing new goes in, and raises the wet level and
+feedback to at least 0.85 and 0.7. It never lowers them from where the knob is. With it off the path
+is bit for bit what it was, which the existing unity tests hold it to.
+
+**The master slots** gained five effects. `Type` keeps its numbers, since a mapping can name one in
+`master_fx.type`, and settings name them in words; `menuOrder` is what the menu and `stepType` follow,
+so Plugin stays last.
+
+| Decision | Why |
+| --- | --- |
+| A beat clock in `MasterEffects`, sent the position by the engine's timer | A gate that starts wherever the button was pressed is out of time with the music. The timer is every 500 ms, so the clock runs on its own between visits |
+| A small difference eased out, a large one jumped to | A sliver is jitter between two threads, and must never be heard. Over a quarter of a beat is a seek, and the effect should be where the music now is |
+| The clock wraps at 64 beats | Every division fits a whole number of times, so wrapping never moves a gate or a sweep |
+| The stutter repeats what has just played | Recording the next slice would answer a slice late, and it is a button pressed in time |
+| Its ring stops being written while a slice is held | A long hold could otherwise overwrite what it is playing. It is four seconds, allocated in `prepare` |
+| Flanger and phaser feedback stops at 0.7, mixed half and half | Deep enough for the notches to be heard, and a test holds both under 2.0 for ten seconds of tone at full feedback |
 
 ## Waveforms
 
@@ -699,6 +734,12 @@ would say so.
 | --- | --- | --- |
 | `deck.select` | `deck` | Puts that deck on screen in place of the one it shares a side with |
 | `deck.waveform_zoom` | value | Signed rungs of the zoom ladder, positive to zoom in. One zoom for every deck, so no deck is named |
+| `deck.brake` | `deck` | Slows the deck to a stop |
+| `deck.backspin` | `deck` | Flings the record backwards to a stop |
+| `deck.reverse_toggle` | `deck` | Plays backwards until pressed again |
+| `deck.censor` | `deck` | Backwards while held, landing back on time |
+| `mixer.echo_out_toggle` | `deck` | Takes the track away and leaves its echo |
+| `master_fx.type` | `deck`, `slot` | Picks an effect for unit `deck`: 0 echo, 1 reverb, 2 filter, 3 plugin, 4 flanger, 5 phaser, 6 gate, 7 bitcrusher, 8 stutter |
 | `deck.swap` | nothing | Swaps both sides at once. What a single deck-toggle button means |
 | `mixer.crossfader_assign` | `deck`, `slot` | 0 the A side, 1 neither, 2 the B side |
 | `sampler.trigger` | `slot` | Starts that pad of the bank on show; with shift, stops it |

@@ -241,7 +241,7 @@ TEST_CASE ("master effect actions work the unit the deck number names", "[contro
     REQUIRE_THAT (fx.getParamFor (0, MasterEffects::Type::filter, 1), Catch::Matchers::WithinAbs (0.9, 0.0001));
 
     dispatcher.dispatch ({ Action::masterFxNextType, 0, 0, 1.0f });
-    REQUIRE (fx.getType (0) == MasterEffects::Type::echo);
+    REQUIRE (fx.getType (0) == MasterEffects::Type::flanger);
 
     // A third unit does not exist, and must not fall through to the second.
     dispatcher.dispatch ({ Action::masterFxToggle, 2, 0, 1.0f });
@@ -298,4 +298,113 @@ TEST_CASE ("a sampler pad triggers the slot of the bank on show", "[control][sam
     dispatcher.dispatch ({ Action::samplerBank, 0, 3, 1.0f });
     REQUIRE (sampler.getBank() == 3);
     REQUIRE (actionFromString ("sampler.bank") == Action::samplerBank);
+}
+
+TEST_CASE ("the deck's performance effects are reachable by name", "[control][performance]")
+{
+    PadHarness h;
+    auto& deck = h.engine.getDeck (0);
+    juce::AudioBuffer<float> buffer (2, 512);
+
+    deck.play();
+    deck.processBlock (buffer);
+
+    // Only the press acts: a release is what follows it on any real button.
+    h.dispatcher.dispatch ({ actionFromString ("deck.brake"), 0, 0, 0.0f });
+    deck.processBlock (buffer);
+    REQUIRE_FALSE (deck.isSpinningDown());
+
+    h.dispatcher.dispatch ({ actionFromString ("deck.brake"), 0, 0, 1.0f });
+    deck.processBlock (buffer);
+    REQUIRE (deck.isSpinningDown());
+
+    deck.play();
+    deck.processBlock (buffer);
+    REQUIRE_FALSE (deck.isSpinningDown());
+
+    h.dispatcher.dispatch ({ actionFromString ("deck.backspin"), 0, 0, 1.0f });
+    deck.processBlock (buffer);
+    REQUIRE (deck.isSpinningDown());
+
+    deck.play();
+    deck.processBlock (buffer);
+
+    h.dispatcher.dispatch ({ actionFromString ("deck.reverse_toggle"), 0, 0, 1.0f });
+    REQUIRE (deck.isReverseEnabled());
+    h.dispatcher.dispatch ({ actionFromString ("deck.reverse_toggle"), 0, 0, 0.0f });
+    REQUIRE (deck.isReverseEnabled());
+    h.dispatcher.dispatch ({ actionFromString ("deck.reverse_toggle"), 0, 0, 1.0f });
+    REQUIRE_FALSE (deck.isReverseEnabled());
+
+    // A censor is held, so the release counts as much as the press.
+    h.dispatcher.dispatch ({ actionFromString ("deck.censor"), 0, 0, 1.0f });
+    REQUIRE (deck.isCensorHeld());
+    h.dispatcher.dispatch ({ actionFromString ("deck.censor"), 0, 0, 0.0f });
+    REQUIRE_FALSE (deck.isCensorHeld());
+}
+
+TEST_CASE ("an echo out is a toggle on the channel, and loading a track ends it", "[control][echo]")
+{
+    PadHarness h;
+    auto& mixer = h.engine.getMixer();
+
+    h.dispatcher.dispatch ({ actionFromString ("mixer.echo_out_toggle"), 1, 0, 1.0f });
+    REQUIRE (mixer.isChannelEchoOut (1));
+    REQUIRE_FALSE (mixer.isChannelEchoOut (0));
+
+    h.dispatcher.dispatch ({ actionFromString ("mixer.echo_out_toggle"), 1, 0, 0.0f });
+    REQUIRE (mixer.isChannelEchoOut (1));
+
+    h.dispatcher.dispatch ({ actionFromString ("mixer.echo_out_toggle"), 1, 0, 1.0f });
+    REQUIRE_FALSE (mixer.isChannelEchoOut (1));
+
+    h.dispatcher.dispatch ({ actionFromString ("mixer.echo_out_toggle"), 0, 0, 1.0f });
+    REQUIRE (mixer.isChannelEchoOut (0));
+
+    h.engine.loadTrackAsync (0, h.click.file.getFile());
+    REQUIRE_FALSE (mixer.isChannelEchoOut (0));
+
+    // The load runs on the engine's own pool; let it finish before the harness goes.
+    for (int i = 0; i < 2000 && h.engine.isDeckLoading (0); ++i)
+        juce::Thread::sleep (5);
+}
+
+TEST_CASE ("a master effect slot can be asked for each new effect by number", "[control][masterfx]")
+{
+    PadHarness h;
+    auto& fx = h.engine.getMixer().getMasterEffects();
+
+    for (const auto type : { MasterEffects::Type::flanger, MasterEffects::Type::phaser, MasterEffects::Type::gate,
+                             MasterEffects::Type::bitcrusher, MasterEffects::Type::stutter })
+    {
+        h.dispatcher.dispatch ({ Action::masterFxType, 0, (int) type, 1.0f });
+        REQUIRE (fx.getType (0) == type);
+    }
+}
+
+TEST_CASE ("the engine tells the master effects where the music is", "[control][masterfx]")
+{
+    PadHarness h;
+    auto& deck = h.engine.getDeck (0);
+    auto& fx = h.engine.getMixer().getMasterEffects();
+    const auto analysis = deck.getAnalysis();
+    REQUIRE (analysis->hasTempo());
+
+    // Audible and on the grid, seventeen and a quarter beats in.
+    const auto seconds = analysis->firstBeatSeconds + 17.25 * analysis->secondsPerBeat();
+    juce::AudioBuffer<float> deckBuffer (2, 512), fxBuffer (2, 512);
+
+    deck.seekToSeconds (seconds);
+    deck.processBlock (deckBuffer);
+    deck.play();
+    deck.processBlock (deckBuffer);
+
+    h.engine.setEchoBeats (0, 1.0);    // which asks the engine to bring every tempo up to date
+
+    fxBuffer.clear();
+    fx.process (fxBuffer, 512);
+
+    // Measured against the clock after the one block of position it moved.
+    REQUIRE (std::abs (fx.getBeatClock() - (deck.getPositionSeconds() - analysis->firstBeatSeconds)
+                                               / analysis->secondsPerBeat()) < 0.1);
 }

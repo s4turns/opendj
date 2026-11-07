@@ -96,6 +96,33 @@ DeckComponent::DeckComponent (AudioEngine& engineToUse, int deckIndex, const juc
     keyLockButton.onClick = [this] { deck.toggleKeyLock(); refresh(); };
     addAndMakeVisible (keyLockButton);
 
+    brakeButton.setTooltip ("Brake: slow to a stop, pitch falling. With Slip on, drops back in on time");
+    brakeButton.onClick = [this] { deck.brake(); refresh(); };
+    addAndMakeVisible (brakeButton);
+
+    backspinButton.setTooltip ("Backspin: fling the record backwards to a stop. With Slip on, drops back in on time");
+    backspinButton.onClick = [this] { deck.backspin(); refresh(); };
+    addAndMakeVisible (backspinButton);
+
+    reverseButton.setTooltip ("Reverse: play backwards until pressed again");
+    reverseButton.onClick = [this] { deck.toggleReverse(); refresh(); };
+    addAndMakeVisible (reverseButton);
+
+    censorButton.setTooltip ("Censor: backwards while held, and letting go lands where the track would have been");
+    censorButton.onPress = [this] { deck.setCensor (true); refresh(); };
+    censorButton.onRelease = [this] { deck.setCensor (false); refresh(); };
+    addAndMakeVisible (censorButton);
+
+    echoOutButton.setTooltip ("Echo out: take the track away and leave its echo dying out. "
+                              "Press again to bring it back");
+    echoOutButton.onClick = [this]
+    {
+        auto& mixer = engine.getMixer();
+        mixer.setChannelEchoOut (index, ! mixer.isChannelEchoOut (index));
+        refresh();
+    };
+    addAndMakeVisible (echoOutButton);
+
     // Loop lengths. A click sets a loop of that many beats and leaves it
     // running; holding turns the same button into a roll, which repeats while
     // it is down and then drops you where the track would have reached. One
@@ -418,6 +445,17 @@ void DeckComponent::refresh()
     keyLockButton.setColour (juce::TextButton::buttonColourId,
                              deck.isKeyLockEnabled() ? accentColour.darker (0.4f) : juce::Colour (0xff2c2c34));
 
+    const auto lit = [] (juce::Button& button, bool on, juce::Colour colour)
+    {
+        button.setColour (juce::TextButton::buttonColourId, on ? colour : juce::Colour (0xff2c2c34));
+    };
+
+    lit (brakeButton, deck.isSpinningDown(), cueColour.darker (0.2f));
+    lit (backspinButton, deck.isSpinningDown(), cueColour.darker (0.2f));
+    lit (reverseButton, deck.isReverseEnabled(), cueColour.darker (0.2f));
+    lit (censorButton, deck.isCensorHeld(), cueColour.darker (0.2f));
+    lit (echoOutButton, engine.getMixer().isChannelEchoOut (index), accentColour.darker (0.4f));
+
     // The stem controls follow the engine: dead until a separation exists, and
     // the button says what it is doing while one is running.
     const auto separating = engine.isDeckSeparating (index);
@@ -704,6 +742,19 @@ void DeckComponent::resized()
                                             .getUnion (hotCueButtons.back().getBounds()));
     }
 
+    // The performance effects, shared out evenly.
+    area.removeFromTop (4);
+    {
+        auto effectRow = area.removeFromTop (24);
+        const auto buttons = { static_cast<juce::Button*> (&brakeButton), static_cast<juce::Button*> (&backspinButton),
+                               static_cast<juce::Button*> (&reverseButton), static_cast<juce::Button*> (&censorButton),
+                               static_cast<juce::Button*> (&echoOutButton) };
+        const auto width = effectRow.getWidth() / (int) buttons.size();
+
+        for (auto* button : buttons)
+            button->setBounds (effectRow.removeFromLeft (width).reduced (1));
+    }
+
     // Then the stems: the button that asks for a separation, and a knob per part.
     area.removeFromTop (6);
     {
@@ -750,21 +801,28 @@ void DeckComponent::resized()
         platter.setVisible (false);
     }
 
-    auto transport = area.removeFromLeft (juce::jmin (transportWidth, area.getWidth()));
+    // Two columns where there is room for them, since six buttons in one do not
+    // fit beside a platter this size. Load, Cue and Play stay down the left,
+    // where they have always been.
+    auto transport = area;
 
-    // Spelled out, because the cue button is a different type to the others.
-    const std::initializer_list<juce::Button*> transportButtons
+    const std::array<juce::Button*, 6> transportButtons
     {
         &loadButton, &cueButton, &playButton, &syncButton, &keyLockButton, &slipButton
     };
 
-    for (auto* button : transportButtons)
-    {
-        button->setBounds (transport.removeFromTop (36).reduced (0, 3));
+    constexpr int columnGap = 4, narrowestColumn = 72;
 
-        if (transport.getHeight() <= 0)
-            break;
-    }
+    const auto columns = transport.getWidth() >= narrowestColumn * 2 + columnGap ? 2 : 1;
+    const auto rows = (int) transportButtons.size() / columns;
+    const auto rowHeight = juce::jmin (36, transport.getHeight() / juce::jmax (1, rows));
+    const auto columnWidth = juce::jmin (transportWidth, (transport.getWidth() - (columns - 1) * columnGap) / columns);
+
+    for (int i = 0; i < (int) transportButtons.size(); ++i)
+        transportButtons[(size_t) i]->setBounds (transport.getX() + (i / rows) * (columnWidth + columnGap),
+                                                 transport.getY() + (i % rows) * rowHeight + 3,
+                                                 columnWidth,
+                                                 juce::jmax (0, rowHeight - 6));
 }
 
 } // namespace opendj

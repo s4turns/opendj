@@ -357,12 +357,12 @@ TEST_CASE ("A plugin wanting more than two channels is turned away", "[masterfx]
 TEST_CASE ("Stepping through effects skips an empty plugin slot", "[masterfx][plugin]")
 {
     opendj::MasterEffects fx;
-    fx.setType (0, Type::filter);
+    fx.setType (0, Type::stutter);
     fx.stepType (0);
     CHECK (fx.getType (0) == Type::echo);
 
     REQUIRE (fx.setPlugin (0, std::make_unique<HalfGain>()));
-    fx.setType (0, Type::filter);
+    fx.setType (0, Type::stutter);
     fx.stepType (0);
     CHECK (fx.getType (0) == Type::plugin);
 }

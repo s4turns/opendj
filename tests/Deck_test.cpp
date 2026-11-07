@@ -797,3 +797,338 @@ TEST_CASE ("loading another track drops the stems with it", "[deck][stems]")
     REQUIRE (fixture.deck->loadFile (fixture.temporaryFile.getFile()));
     REQUIRE_FALSE (fixture.deck->hasStems());
 }
+
+//==============================================================================
+// Brake, backspin, reverse and censor
+//==============================================================================
+
+namespace
+{
+    int blocksFor (double seconds) { return (int) std::ceil (seconds * deviceSampleRate / blockSize); }
+
+    /** Plays from the given position until the playhead has really got there. */
+    void playFrom (Fixture& fixture, double seconds)
+    {
+        fixture.deck->seekToSeconds (seconds);
+        fixture.deck->play();
+        fixture.run (4);
+    }
+
+    float largestStepIn (const std::vector<float>& samples)
+    {
+        auto largest = 0.0f;
+
+        for (size_t i = 1; i < samples.size(); ++i)
+            largest = juce::jmax (largest, std::abs (samples[i] - samples[i - 1]));
+
+        return largest;
+    }
+}
+
+TEST_CASE ("a brake lowers the pitch and stops the deck", "[deck][performance]")
+{
+    Fixture fixture;
+    playFrom (fixture, 1.0);
+
+    const auto start = fixture.deck->getPositionSeconds();
+    fixture.deck->brake();
+    fixture.run (1);
+    REQUIRE (fixture.deck->isSpinningDown());
+
+    // Counting crossings shows the pitch itself fell, not only that the
+    // position slowed down. A linear ramp halves it by half way.
+    const auto quarter = blocksFor (opendj::Deck::brakeSeconds * 0.25);
+    const auto early = measureFrequency (fixture.capture (quarter), deviceSampleRate);
+    fixture.run (quarter);
+    const auto late = measureFrequency (fixture.capture (quarter), deviceSampleRate);
+
+    INFO ("early " << early << " Hz, late " << late << " Hz");
+    REQUIRE (early > 330.0);
+    REQUIRE (early < 440.0);
+    REQUIRE (late < early * 0.6);
+
+    fixture.run (quarter + 4);
+
+    REQUIRE_FALSE (fixture.deck->isSpinningDown());
+    REQUIRE_FALSE (fixture.deck->isPlaying());
+
+    // From full speed to nothing at an even rate covers half the distance.
+    REQUIRE_THAT (fixture.deck->getPositionSeconds() - start, WithinAbs (opendj::Deck::brakeSeconds * 0.5, 0.02));
+}
+
+TEST_CASE ("a brake ends in silence, with no chirp from the ordinary fade", "[deck][performance]")
+{
+    Fixture fixture;
+    playFrom (fixture, 1.0);
+    fixture.deck->brake();
+
+    fixture.run (blocksFor (opendj::Deck::brakeSeconds * 0.5));
+    const auto tail = fixture.capture (blocksFor (opendj::Deck::brakeSeconds * 0.6));
+
+    // Without the fade the last stretch is a DC level that stops dead, and
+    // without keeping the level at zero the fade-out plays at full speed.
+    REQUIRE (largestStepIn (tail) < 0.03f);
+    REQUIRE (std::abs (tail.back()) < 1.0e-6f);
+
+    fixture.run (2);
+    REQUIRE (fixture.buffer.getMagnitude (0, 0, blockSize) < 1.0e-6f);
+}
+
+TEST_CASE ("a brake falls in pitch with key lock on", "[deck][performance][keylock]")
+{
+    Fixture fixture;
+    fixture.deck->setKeyLock (true);
+    fixture.deck->setTempoRatio (1.08);
+    playFrom (fixture, 1.0);
+    fixture.run (blocksFor (0.5));
+
+    fixture.deck->brake();
+    fixture.run (blocksFor (opendj::Deck::brakeSeconds * 0.55));
+
+    // The stretcher would hold this at 440 had it stayed in the path.
+    const auto late = measureFrequency (fixture.capture (blocksFor (0.1)), deviceSampleRate);
+
+    INFO ("late " << late << " Hz");
+    REQUIRE (late < 300.0);
+}
+
+TEST_CASE ("a stopped deck cannot be braked or spun back", "[deck][performance]")
+{
+    Fixture fixture;
+
+    fixture.deck->brake();
+    fixture.run (2);
+    REQUIRE_FALSE (fixture.deck->isSpinningDown());
+
+    fixture.deck->backspin();
+    fixture.run (2);
+    REQUIRE_FALSE (fixture.deck->isSpinningDown());
+    REQUIRE_THAT (fixture.deck->getPositionSeconds(), WithinAbs (0.0, 1.0e-6));
+}
+
+TEST_CASE ("play catches a brake, without a click", "[deck][performance]")
+{
+    Fixture fixture;
+    playFrom (fixture, 1.0);
+    fixture.deck->brake();
+
+    // Far enough in that the level is on its way down.
+    fixture.run (blocksFor (opendj::Deck::brakeSeconds * 0.95));
+    REQUIRE (fixture.deck->isSpinningDown());
+
+    fixture.deck->play();
+    const auto after = fixture.capture (10);
+
+    REQUIRE_FALSE (fixture.deck->isSpinningDown());
+    REQUIRE (fixture.deck->isPlaying());
+    REQUIRE (largestStepIn (after) < 0.1f);
+
+    // Back at the tempo: a whole block's worth of position for a block.
+    const auto before = fixture.deck->getPositionSeconds();
+    fixture.run (10);
+    REQUIRE_THAT (fixture.deck->getPositionSeconds() - before, WithinAbs (10 * fixture.secondsPerBlock(), 0.001));
+}
+
+TEST_CASE ("with slip on, a brake lands back on time and keeps playing", "[deck][performance][slip]")
+{
+    Fixture fixture;
+    playFrom (fixture, 1.0);
+    fixture.deck->setSlipEnabled (true);
+
+    const auto start = fixture.deck->getPositionSeconds();
+    fixture.deck->brake();
+
+    const auto blocks = blocksFor (opendj::Deck::brakeSeconds + 0.1);
+    fixture.run (blocks);
+
+    REQUIRE_FALSE (fixture.deck->isSpinningDown());
+    REQUIRE (fixture.deck->isPlaying());
+    REQUIRE_THAT (fixture.deck->getPositionSeconds() - start, WithinAbs (blocks * fixture.secondsPerBlock(), 0.03));
+
+    // And it can be heard again.
+    fixture.run (4);
+    REQUIRE (fixture.buffer.getMagnitude (0, 0, blockSize) > 0.4f);
+}
+
+TEST_CASE ("a backspin runs backwards fast, then stops", "[deck][performance]")
+{
+    Fixture fixture;
+    playFrom (fixture, 5.0);
+
+    const auto start = fixture.deck->getPositionSeconds();
+    fixture.deck->backspin();
+    fixture.run (blocksFor (0.1));
+
+    // Close to the full speed for a tenth of a second, the wrong way.
+    REQUIRE_THAT (fixture.deck->getPositionSeconds() - start, WithinAbs (-0.1 * opendj::Deck::backspinSpeed, 0.08));
+
+    fixture.run (blocksFor (opendj::Deck::backspinSeconds));
+
+    REQUIRE_FALSE (fixture.deck->isPlaying());
+    REQUIRE_THAT (fixture.deck->getPositionSeconds() - start,
+                  WithinAbs (-opendj::Deck::backspinSpeed * opendj::Deck::backspinSeconds * 0.5, 0.05));
+}
+
+TEST_CASE ("reverse plays backwards at the tempo and at the same pitch", "[deck][performance]")
+{
+    Fixture fixture;
+    playFrom (fixture, 4.0);
+
+    const auto start = fixture.deck->getPositionSeconds();
+    fixture.deck->setReverse (true);
+
+    const auto blocks = blocksFor (1.0);
+    const auto samples = fixture.capture (blocks);
+
+    REQUIRE_THAT (fixture.deck->getPositionSeconds() - start, WithinAbs (-blocks * fixture.secondsPerBlock(), 0.005));
+    REQUIRE_THAT (measureFrequency (samples, deviceSampleRate), WithinAbs (440.0, 3.0));
+
+    // Forwards again from wherever it has reached.
+    fixture.deck->toggleReverse();
+    const auto turned = fixture.deck->getPositionSeconds();
+    fixture.run (blocks);
+    REQUIRE_THAT (fixture.deck->getPositionSeconds() - turned, WithinAbs (blocks * fixture.secondsPerBlock(), 0.005));
+}
+
+TEST_CASE ("reverse off the front of the track stops the deck and turns itself off", "[deck][performance]")
+{
+    Fixture fixture;
+    playFrom (fixture, 0.2);
+    fixture.deck->setReverse (true);
+
+    fixture.run (blocksFor (0.5));
+
+    REQUIRE_FALSE (fixture.deck->isPlaying());
+    REQUIRE_FALSE (fixture.deck->isReverseEnabled());
+    REQUIRE_THAT (fixture.deck->getPositionSeconds(), WithinAbs (0.0, 1.0e-6));
+
+    // Play now means play, rather than stopping again straight away.
+    fixture.deck->play();
+    fixture.run (blocksFor (0.1));
+    REQUIRE (fixture.deck->isPlaying());
+    REQUIRE (fixture.deck->getPositionSeconds() > 0.05);
+}
+
+TEST_CASE ("with slip on, reverse lands where the track would have reached", "[deck][performance][slip]")
+{
+    Fixture fixture;
+    playFrom (fixture, 3.0);
+    fixture.deck->setSlipEnabled (true);
+
+    const auto start = fixture.deck->getPositionSeconds();
+    fixture.deck->setReverse (true);
+
+    const auto blocks = blocksFor (0.5);
+    fixture.run (blocks);
+    fixture.deck->setReverse (false);
+    fixture.run (1);
+
+    REQUIRE_THAT (fixture.deck->getPositionSeconds() - start,
+                  WithinAbs ((blocks + 1) * fixture.secondsPerBlock(), 0.01));
+}
+
+TEST_CASE ("censor runs backwards while held and lands back on time", "[deck][performance]")
+{
+    Fixture fixture;
+    playFrom (fixture, 3.0);
+
+    const auto start = fixture.deck->getPositionSeconds();
+    fixture.deck->setCensor (true);
+
+    const auto blocks = blocksFor (0.5);
+    fixture.run (blocks);
+
+    REQUIRE_THAT (fixture.deck->getPositionSeconds() - start, WithinAbs (-blocks * fixture.secondsPerBlock(), 0.005));
+    REQUIRE (fixture.deck->getSlipPositionSeconds() > start);
+
+    // Slip is off, and the deck lands on time anyway: that is the feature.
+    fixture.deck->setCensor (false);
+    fixture.run (1);
+
+    REQUIRE_THAT (fixture.deck->getPositionSeconds() - start,
+                  WithinAbs ((blocks + 1) * fixture.secondsPerBlock(), 0.01));
+    REQUIRE (fixture.deck->getSlipPositionSeconds() < 0.0);
+}
+
+TEST_CASE ("letting go of a censor does not tick", "[deck][performance]")
+{
+    Fixture fixture;
+    playFrom (fixture, 3.0);
+
+    fixture.deck->setCensor (true);
+    fixture.run (blocksFor (0.3));
+    fixture.deck->setCensor (false);
+
+    // Landing is a jump to a different part of the waveform. A 440 Hz sine at
+    // half level moves by about 0.03 a sample; a jump is many times that.
+    const auto around = fixture.capture (6);
+
+    REQUIRE (largestStepIn (around) < 0.05f);
+}
+
+TEST_CASE ("a censor held against the start of the track does not stop the deck", "[deck][performance]")
+{
+    Fixture fixture;
+    playFrom (fixture, 0.1);
+
+    const auto start = fixture.deck->getPositionSeconds();
+    fixture.deck->setCensor (true);
+
+    const auto blocks = blocksFor (0.5);
+    fixture.run (blocks);
+    REQUIRE (fixture.deck->isPlaying());
+
+    fixture.deck->setCensor (false);
+    fixture.run (1);
+
+    REQUIRE (fixture.deck->isPlaying());
+    REQUIRE_THAT (fixture.deck->getPositionSeconds() - start,
+                  WithinAbs ((blocks + 1) * fixture.secondsPerBlock(), 0.01));
+}
+
+TEST_CASE ("pausing during a censor leaves nothing to jump back to", "[deck][performance]")
+{
+    Fixture fixture;
+    playFrom (fixture, 3.0);
+
+    fixture.deck->setCensor (true);
+    fixture.run (blocksFor (0.5));
+
+    fixture.deck->pause();
+    fixture.run (blocksFor (0.1));
+    fixture.deck->setCensor (false);
+
+    const auto stoppedAt = fixture.deck->getPositionSeconds();
+
+    fixture.deck->play();
+    fixture.run (2);
+
+    REQUIRE_THAT (fixture.deck->getPositionSeconds() - stoppedAt, WithinAbs (2 * fixture.secondsPerBlock(), 0.005));
+}
+
+TEST_CASE ("a hand on the platter ends a brake", "[deck][performance]")
+{
+    Fixture fixture;
+    playFrom (fixture, 1.0);
+    fixture.deck->brake();
+    fixture.run (blocksFor (0.2));
+    REQUIRE (fixture.deck->isSpinningDown());
+
+    fixture.deck->setJogTouched (true);
+    fixture.run (2);
+
+    REQUIRE_FALSE (fixture.deck->isSpinningDown());
+    REQUIRE (fixture.deck->isPlaying());
+}
+
+TEST_CASE ("loading a track clears reverse and censor", "[deck][performance]")
+{
+    Fixture fixture;
+    fixture.deck->setReverse (true);
+    fixture.deck->setCensor (true);
+
+    REQUIRE (fixture.deck->loadFile (fixture.temporaryFile.getFile()));
+
+    REQUIRE_FALSE (fixture.deck->isReverseEnabled());
+    REQUIRE_FALSE (fixture.deck->isCensorHeld());
+}

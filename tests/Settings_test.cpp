@@ -74,10 +74,10 @@ namespace
         for (size_t fx = 0; fx < MasterEffects::numSlots; ++fx)
             for (size_t t = 0; t < MasterEffects::numTypes; ++t)
             {
-                state.masterFx[fx].wet[t] = 0.11f + 0.1f * (float) (fx * 3 + t);
+                state.masterFx[fx].wet[t] = 0.11f + 0.03f * (float) (fx * MasterEffects::numTypes + t);
 
                 for (size_t p = 0; p < MasterEffects::numParams; ++p)
-                    state.masterFx[fx].params[t][p] = 0.07f + 0.05f * (float) (fx * 6 + t * 2 + p);
+                    state.masterFx[fx].params[t][p] = 0.07f + 0.02f * (float) (fx * MasterEffects::numTypes * 2 + t * 2 + p);
             }
 
         for (int slot = 0; slot < Sampler::numSlots; ++slot)

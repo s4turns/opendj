@@ -84,6 +84,13 @@ public:
     void setChannelEcho (int channel, float amount);
     float getChannelEcho (int channel) const noexcept;
 
+    /** Takes the track away and leaves its echo: the channel stops feeding the
+        delay and its dry signal goes, and what is already in the delay repeats
+        until it dies away, whatever the echo knob is set to. Stays on until it
+        is turned off, or the deck loads another track. */
+    void setChannelEchoOut (int channel, bool shouldEchoOut);
+    bool isChannelEchoOut (int channel) const noexcept;
+
     /** How long one repeat lasts, in seconds. Set from the deck's beat length
         by the engine, since the mixer has no idea what tempo anything is. */
     void setChannelEchoTime (int channel, double seconds);
@@ -161,8 +168,9 @@ private:
         // clicking, which is an effect in its own right and the one DJs expect.
         juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Linear> echo { 1 };
         juce::SmoothedValue<float> echoDelaySamples;
-        juce::SmoothedValue<float> echoWet, echoFeedback;
+        juce::SmoothedValue<float> echoWet, echoFeedback, echoOutAmount;
 
+        std::atomic<bool> echoOut { false };
         std::atomic<float> echoAmount { 0.0f };
         std::atomic<double> echoSeconds { 0.5 };
 

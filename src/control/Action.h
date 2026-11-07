@@ -31,6 +31,11 @@ enum class Action
 
     deckKeyLockToggle,  ///< tempo changes stop shifting the pitch
 
+    deckBrake,          ///< press slows the deck to a stop
+    deckBackspin,       ///< press flings the record backwards to a stop
+    deckReverseToggle,  ///< plays backwards until pressed again
+    deckCensor,         ///< backwards while held, landing back on time
+
     /** Brings a deck on screen in place of the one it shares a side with.
         `deck` names the deck to show; a press with no deck named swaps
         whichever side that control belongs to, which is what a controller's
@@ -105,6 +110,7 @@ enum class Action
     channelFilter,      ///< 0.5 is out of the way, down is a low pass, up a high pass
     channelEcho,        ///< 0 is off, a beat-synced echo above that
     channelReverb,      ///< 0 is off, a wash of tail above that
+    channelEchoOutToggle, ///< press takes the track away and leaves its echo
 
     /** Arms echo or reverb as the effect a shared depth knob controls next.
         slot picks it: 0 echo, 1 reverb. For a controller with one FX knob
@@ -132,7 +138,7 @@ enum class Action
     masterFxOn,         ///< on while the value is above half, for a held button
     masterFxWet,        ///< how much of the effect is heard
     masterFxParam,      ///< slot picks the parameter, 0 or 1, of the current effect
-    masterFxType,       ///< press picks an effect: slot 0 echo, 1 reverb, 2 filter, 3 plugin
+    masterFxType,       ///< press picks an effect: slot 0 echo, 1 reverb, 2 filter, 3 plugin, 4 flanger, 5 phaser, 6 gate, 7 bitcrusher, 8 stutter
     masterFxNextType,   ///< press steps on to the next effect
 
     // Sampler. slot selects the pad, 0 to 7; deck is unused, because the

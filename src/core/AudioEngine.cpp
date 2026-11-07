@@ -299,6 +299,9 @@ void AudioEngine::loadTrackAsync (int deckIndex, const juce::File& file,
     if (loading[(size_t) deckIndex].exchange (true, std::memory_order_relaxed))
         return;
 
+    // Left on, the new track would come up silent with nothing to say why.
+    mixer.setChannelEchoOut (deckIndex, false);
+
     loaderPool.addJob ([this, deckIndex, file, onComplete = std::move (onComplete)]
     {
         auto& deck = *decks[(size_t) deckIndex];
@@ -904,6 +907,17 @@ void AudioEngine::updateEchoTimes()
 
     const auto tempoDeck = findMasterTempoDeck();
     mixer.getMasterEffects().setBeatSeconds (tempoDeck >= 0 ? 60.0 / getEffectiveBpm (tempoDeck) : 0.5);
+
+    // With nothing to follow, the gate and the sweeps carry on from their own
+    // clock at whatever tempo they were told last.
+    if (tempoDeck >= 0)
+    {
+        const auto& deck = *decks[(size_t) tempoDeck];
+
+        if (const auto analysis = deck.getAnalysis(); analysis != nullptr && analysis->hasTempo())
+            mixer.getMasterEffects().setBeatPosition ((deck.getPositionSeconds() - analysis->firstBeatSeconds)
+                                                      / analysis->secondsPerBeat());
+    }
 }
 
 int AudioEngine::findMasterTempoDeck() const
