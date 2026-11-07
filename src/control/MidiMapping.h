@@ -28,7 +28,11 @@ enum class ValueMode
         than stopping at either end: a platter, in other words. Movement is the
         difference between one reading and the last, so the first reading after
         a hand lands only establishes where the platter was. */
-    absolutePosition14
+    absolutePosition14,
+
+    /** A 14-bit position sent as pitch bend that does stop at its ends: a tempo
+        fader, on the many controllers that send one this way. */
+    pitchBend14
 };
 
 /** One physical control and what it does. */
@@ -107,6 +111,18 @@ public:
     static juce::Result loadFromJson (const juce::var& json,
                                       MidiMapping& destination,
                                       juce::StringArray& warnings);
+
+    /** The mapping in the form a file holds it, readable by loadFromJson. */
+    juce::var toJson() const;
+
+    /** Writes the mapping out, through a temporary file so that a failed write
+        leaves the last good copy where it was. */
+    juce::Result saveToFile (const juce::File& file) const;
+
+    /** Puts a control in, in place of any that answers to the same message with
+        the same shift. A message can only do one thing. Returns the name of the
+        control it replaced, or an empty string. */
+    juce::String addOrReplace (const MidiControl& control);
 
     /** Finds the control a message belongs to, honouring the shift modifier.
         A shifted control wins over an unshifted one on the same message. */

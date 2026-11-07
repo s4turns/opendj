@@ -335,6 +335,19 @@ warning shown in that panel, so one typo costs you one button rather than the wh
 
 A recognised controller is opened automatically at startup.
 
+**Learn** teaches a mapping from the hardware. With the controller open, choose an action, the deck
+and slot if it uses them, press Learn, and press or move the control. A button is taken at once. A
+fader or knob takes a moment longer, or whenever you stop moving it, since OpenDJ works out what kind
+of control it is from what it sends: a plain or 14-bit position, a relative encoder, or pitch bend.
+Hold Shift while you touch a control to learn it for the shifted layer.
+
+Each learned control works straight away and is saved to your own copy of the mapping, in
+`~/.local/share/opendj/mappings` on Linux or `OpenDJ/mappings` in your application data folder on
+Windows and macOS. Your copy takes the place of a shipped mapping with the same name, and the shipped
+file is never changed. Learning over a control that already does something replaces it, and Undo puts
+back the last one. Delete your copy to go back to the shipped mapping. With no mapping chosen, the first
+control you learn starts a new one named after the controller.
+
 ## Building
 
 You need a C++20 compiler, CMake 3.22 or newer, and git. JUCE and Catch2 are fetched into

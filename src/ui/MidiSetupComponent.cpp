@@ -5,6 +5,8 @@
 
 #include "ui/MidiSetupComponent.h"
 
+#include <map>
+
 namespace opendj
 {
 
@@ -77,8 +79,68 @@ MidiSetupComponent::MidiSetupComponent (MidiControlSurface& surfaceToUse)
     warningsBox.setFont (juce::FontOptions (juce::Font::getDefaultMonospacedFontName(), 12.0f, 0));
     addAndMakeVisible (warningsBox);
 
+    setUpLabel (learnLabel, "Learn");
+
+    learnStatus.setColour (juce::Label::textColourId, mappedColour);
+    learnStatus.setFont (juce::FontOptions (12.0f));
+    addAndMakeVisible (learnStatus);
+
+    // A list of nearly eighty is only usable in groups, and the first word of
+    // each action's name is already the group it belongs to.
+    {
+        std::map<juce::String, juce::PopupMenu> groups;
+
+        for (int i = 1; i <= (int) lastAction; ++i)
+            groups[toString ((Action) i).upToFirstOccurrenceOf (".", false, false)]
+                .addItem (i, toString ((Action) i));
+
+        for (auto& [group, menu] : groups)
+            actionBox.getRootMenu()->addSubMenu (group, menu);
+    }
+
+    actionBox.setTextWhenNothingSelected ("Choose what to learn...");
+    actionBox.onChange = [this] { refreshLearnControls(); };
+    addAndMakeVisible (actionBox);
+
+    for (int deck = 0; deck < AudioEngine::numDecks; ++deck)
+        learnDeckBox.addItem (juce::String::charToString ((juce::juce_wchar) ('A' + deck)), deck + 1);
+
+    learnDeckBox.setSelectedId (1, juce::dontSendNotification);
+    learnDeckBox.setTooltip ("Which deck it works on. For a master effect, A is FX 1 and B is FX 2");
+    addAndMakeVisible (learnDeckBox);
+
+    for (int slot = 0; slot < 8; ++slot)
+        learnSlotBox.addItem (juce::String (slot + 1), slot + 1);
+
+    learnSlotBox.setSelectedId (1, juce::dontSendNotification);
+    learnSlotBox.setTooltip ("Which one of several: a hot cue, a pad, a loop length, an EQ band");
+    addAndMakeVisible (learnSlotBox);
+
+    learnButton.setTooltip ("Then press or move the control on the hardware. It is saved straight away");
+    learnButton.onClick = [this]
+    {
+        if (surface.isLearning())
+            surface.cancelLearning();
+        else
+            surface.startLearning (chosenTarget());
+
+        refreshLearnControls();
+    };
+    addAndMakeVisible (learnButton);
+
+    undoButton.setTooltip ("Put the mapping back as it was before the last learn");
+    undoButton.onClick = [this]
+    {
+        surface.undoLearn();
+        learnStatus.setText ("Put back as it was", juce::dontSendNotification);
+        refreshMappingList();
+        refreshLearnControls();
+    };
+    addAndMakeVisible (undoButton);
+
     refreshDeviceList();
     refreshMappingList();
+    refreshLearnControls();
 
     const auto warnings = surface.getWarnings();
     warningsBox.setText (warnings.isEmpty() ? "All mappings loaded cleanly."
@@ -86,12 +148,38 @@ MidiSetupComponent::MidiSetupComponent (MidiControlSurface& surfaceToUse)
                          false);
 
     startTimerHz (10);
-    setSize (620, 520);
+    setSize (620, 580);
 }
 
 MidiSetupComponent::~MidiSetupComponent()
 {
     stopTimer();
+
+    // Going on learning with nobody watching would swallow the next message.
+    surface.cancelLearning();
+}
+
+LearnTarget MidiSetupComponent::chosenTarget() const
+{
+    LearnTarget target;
+    target.action = (Action) actionBox.getSelectedId();
+    target.deck = actionTakesDeck (target.action) ? learnDeckBox.getSelectedId() - 1 : 0;
+    target.slot = actionTakesSlot (target.action) ? learnSlotBox.getSelectedId() - 1 : 0;
+    return target;
+}
+
+void MidiSetupComponent::refreshLearnControls()
+{
+    const auto learning = surface.isLearning();
+    const auto action = (Action) actionBox.getSelectedId();
+    const auto chosen = action != Action::none;
+
+    actionBox.setEnabled (! learning);
+    learnDeckBox.setEnabled (! learning && chosen && actionTakesDeck (action));
+    learnSlotBox.setEnabled (! learning && chosen && actionTakesSlot (action));
+    learnButton.setEnabled (learning || (chosen && surface.isOpen()));
+    learnButton.setButtonText (learning ? "Cancel" : "Learn");
+    undoButton.setEnabled (! learning && surface.canUndoLearn());
 }
 
 void MidiSetupComponent::refreshDeviceList()
@@ -139,6 +227,19 @@ void MidiSetupComponent::timerCallback()
     entries = surface.getRecentMessages();
     messageList.updateContent();
     messageList.repaint();
+
+    if (const auto result = surface.takeLearnResult(); result.isNotEmpty())
+    {
+        learnStatus.setText (result, juce::dontSendNotification);
+        refreshMappingList();
+    }
+    else if (surface.isLearning())
+    {
+        learnStatus.setText ("Press or move the control for " + nameForLearnedControl (chosenTarget()) + "...",
+                             juce::dontSendNotification);
+    }
+
+    refreshLearnControls();
 
     juce::String status;
 
@@ -196,6 +297,22 @@ void MidiSetupComponent::resized()
     mappingBox.setBounds (row);
 
     area.removeFromTop (6);
+
+    row = area.removeFromTop (26);
+    learnLabel.setBounds (row.removeFromLeft (76));
+    undoButton.setBounds (row.removeFromRight (56));
+    row.removeFromRight (6);
+    learnButton.setBounds (row.removeFromRight (70));
+    row.removeFromRight (6);
+    learnSlotBox.setBounds (row.removeFromRight (52));
+    row.removeFromRight (4);
+    learnDeckBox.setBounds (row.removeFromRight (52));
+    row.removeFromRight (6);
+    actionBox.setBounds (row);
+
+    learnStatus.setBounds (area.removeFromTop (20).withTrimmedLeft (76));
+
+    area.removeFromTop (2);
     statusLabel.setBounds (area.removeFromTop (20));
     area.removeFromTop (6);
 

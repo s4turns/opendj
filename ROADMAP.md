@@ -1,7 +1,7 @@
 # OpenDJ roadmap
 
 Where the project is and what to pick up next. Anything ticked has tests or a verified manual
-check behind it, not just code that compiles. The suite is **512 tests** on Linux. Windows runs
+check behind it, not just code that compiles. The suite is **539 tests** on Linux. Windows runs
 one fewer, a stderr test whose stand-in for ffmpeg is a shell script. Anything touching audio is
 tested by measuring the output, not by checking that the code ran. Open work is also tracked as
 issues on [git.interdo.me](https://git.interdo.me/interdome/opendj/issues), and the numbers
@@ -31,7 +31,7 @@ that was listed after it except video.
 | 9 | Sync: tempo and beat phase | ✅ | `AudioEngine::syncDeck` |
 | 10 | Turntable platters, mouse drivable | ✅ | `src/ui/PlatterComponent.*`, `src/ui/AngleMath.h` |
 | 11 | Hot cues | ✅ | `Deck::hotCuePressed` and friends. Eight coloured pads per deck (click sets or jumps, right-click clears) and matching markers on both waveforms, `src/ui/HotCueColours.h`. Kept with the track in the library and back on the pads when it is loaded again (#24) |
-| 12 | MIDI mapping engine, monitor, device picker | ✅ | `src/control/`, `src/ui/MidiSetupComponent.*` |
+| 12 | MIDI mapping engine, monitor, device picker, learn | ✅ | `src/control/`, `src/ui/MidiSetupComponent.*` |
 | 13 | Roland DJ-202 mapping | ✅ | `mappings/roland-dj-202.json`, verified on hardware |
 | 14 | Track browser and library database | ✅ | `src/library/`, `src/ui/BrowserComponent.*` |
 
@@ -93,7 +93,7 @@ Some of it is partly there already: pitch bend through the jog wheel's nudge.
 | Key tools (#16) | Key shift in semitones, key match between decks, Camelot display, harmonic hints in the browser | Done: all four. Hints are colours on the Key column rather than a filter. Measured by counting the pitch that comes out on test tones; not yet heard on music |
 | Auto gain (#17) | Tracks levelled by measured loudness | Done. Readings agree with ffmpeg's `ebur128` to within 0.05 LU on three test tracks, not yet tried across a real collection |
 | Vocal-aware automix (#37) | Transitions that keep two vocals from overlapping | Vocals are kept apart, levels matched, and sections read from energy and vocals; not yet heard through a whole set. Sections come from energy, not from recognising repeated material, so a verse and a chorus of the same fullness look alike without stems |
-| MIDI learn and more controllers (#19, #4) | Hundreds of controllers mapped out of the box, and a mapper that learns a control from the hardware | One mapping, written by hand |
+| MIDI learn and more controllers (#19, #4) | Hundreds of controllers mapped out of the box, and a mapper that learns a control from the hardware | Learn is done, from the Controller panel, tested with messages fed in at the point a device delivers them and not yet on a controller. One mapping ships, written by hand |
 
 ### Expected by regular users
 
@@ -757,6 +757,33 @@ audio device in JUCE's own `audio-device.xml` next to it.
 | Pads reload from their files | A file that moved leaves its pad empty, which is the truth, rather than a pad that looks loaded and plays nothing |
 | Written to a temporary file and moved into place | An interrupted write leaves the previous settings, not half of the new ones |
 | Plain JSON | A setting can be corrected by hand before an interface for it exists |
+
+## MIDI learn
+
+`MidiLearner` works out what a control is from its messages, with no device and no threads, so it is
+tested message by message. `MidiControlSurface` feeds it, and applies and saves what it finds.
+
+| Message | Learned as |
+| --- | --- |
+| Note on | A button, at once, with the same note to light it. `pad.mode` keeps its velocity |
+| Pitch bend | `position14` for a jog wheel, the new `pitch14` for anything else continuous, a button for the rest |
+| Control change, for a press | A button, on its first value above zero |
+| Control change, for a position | `absolute` after six messages, or `absolute14` if number n and n + 32 both arrive |
+| Control change, for movement | `relative_offset` if its values stay near 64, otherwise `relative_twos` |
+
+| Decision | Why |
+| --- | --- |
+| Saved over the name, in the user's folder | Folders are already searched in order of precedence, so that copy replaces the shipped one and nothing else had to change. The shipped file stays as it was, and deleting the copy gets it back |
+| The mapping's Shift still works while learning | It is the only way to teach a shifted control. Learning Shift itself takes it like anything else |
+| What the action is decides how a control is read | A relative encoder and a fader can send the same bytes for a moment. Asked to go to a position, a control is a position |
+| A note lights itself, and a control change does not | Most controllers light a button with the note it sends, and a controller without that light ignores it |
+| Stops when the control stops, after 400 ms | A knob turned a little never sends six messages |
+| A learned control can be undone once | Learning over the wrong button takes away what it did, and a mistake with a controller in hand should not need a text editor |
+
+Mappings used to be fixed once loaded, so the MIDI thread read them with no lock. Learning changes them,
+so a mutex now covers that thread's lookup and dispatch, and every write. The audio thread never takes it.
+Each write was checked by reading the code, and a stress test feeds messages from a second thread while
+learning, but this has not been run under ThreadSanitizer: `tests/MidiLearn_test.cpp` is ready for it.
 
 ## What a mapping can reach
 

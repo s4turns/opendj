@@ -324,6 +324,7 @@ set(OPENDJ_ENGINE_SOURCES
     ${CMAKE_SOURCE_DIR}/src/control/Action.cpp
     ${CMAKE_SOURCE_DIR}/src/control/ActionDispatcher.cpp
     ${CMAKE_SOURCE_DIR}/src/control/MidiMapping.cpp
+    ${CMAKE_SOURCE_DIR}/src/control/MidiLearn.cpp
     ${CMAKE_SOURCE_DIR}/src/control/MidiControlSurface.cpp
     ${CMAKE_SOURCE_DIR}/src/control/AlsaMidiCompat.cpp
     ${CMAKE_SOURCE_DIR}/src/library/Library.cpp

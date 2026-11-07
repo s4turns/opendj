@@ -66,6 +66,8 @@ MainComponent::MainComponent()
         });
     };
 
+    midi.setUserMappingFolder (userDataFolder ("mappings"));
+
     for (const auto& folder : findDataFolders ("mappings"))
     {
         const auto loaded = midi.loadMappingsFromFolder (folder);
@@ -342,6 +344,21 @@ void MainComponent::loadOntoDeck (const juce::File& file, int deckIndex)
 
     if (juce::isPositiveAndBelow (deckIndex, AudioEngine::numDecks))
         deckViews[(size_t) deckIndex]->load (file);
+}
+
+juce::File MainComponent::userDataFolder (const juce::String& name) const
+{
+   #if JUCE_LINUX || JUCE_BSD
+    const auto dataHome = juce::SystemStats::getEnvironmentVariable ("XDG_DATA_HOME", {});
+
+    return (dataHome.isNotEmpty() ? juce::File (dataHome)
+                                  : juce::File::getSpecialLocation (juce::File::userHomeDirectory)
+                                        .getChildFile (".local/share"))
+               .getChildFile ("opendj/" + name);
+   #else
+    return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+               .getChildFile ("OpenDJ").getChildFile (name);
+   #endif
 }
 
 juce::Array<juce::File> MainComponent::findDataFolders (const juce::String& name) const

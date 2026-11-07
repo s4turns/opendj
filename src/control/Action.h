@@ -195,4 +195,12 @@ Action actionFromString (const juce::String& name);
 /** True when the action carries a continuous value rather than a press. */
 bool isContinuous (Action action);
 
+/** Whether a deck or a slot means anything to an action, so that an interface
+    need only ask for what it uses. Master effects take a unit as their deck. */
+bool actionTakesDeck (Action action);
+bool actionTakesSlot (Action action);
+
+/** The last action there is, for walking all of them. */
+inline constexpr Action lastAction = Action::shift;
+
 } // namespace opendj

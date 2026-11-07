@@ -33,6 +33,8 @@ private:
     void timerCallback() override;
     void refreshDeviceList();
     void refreshMappingList();
+    void refreshLearnControls();
+    LearnTarget chosenTarget() const;
 
     int getNumRows() override;
     void paintListBoxItem (int row, juce::Graphics& g, int width, int height, bool selected) override;
@@ -45,6 +47,11 @@ private:
     juce::TextButton clearButton { "Clear log" };
     juce::ListBox messageList { "MIDI messages", this };
     juce::TextEditor warningsBox;
+
+    juce::Label learnLabel, learnStatus;
+    juce::ComboBox actionBox, learnDeckBox, learnSlotBox;
+    juce::TextButton learnButton { "Learn" };
+    juce::TextButton undoButton { "Undo" };
 
     juce::Array<juce::MidiDeviceInfo> devices;
     std::vector<MidiControlSurface::LogEntry> entries;

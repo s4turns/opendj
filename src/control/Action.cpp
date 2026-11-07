@@ -129,6 +129,65 @@ double loopBeatsForSlot (int slot)
     return lengths[juce::jlimit (0, count - 1, slot)];
 }
 
+bool actionTakesDeck (Action action)
+{
+    switch (action)
+    {
+        case Action::none:
+        case Action::shift:
+        case Action::deckSwap:
+        case Action::deckWaveformZoom:
+        case Action::crossfader:
+        case Action::masterGain:
+        case Action::cueGain:
+        case Action::cueMix:
+        case Action::autoGainToggle:
+        case Action::samplerTrigger:
+        case Action::samplerStop:
+        case Action::samplerBank:
+        case Action::samplerNextBank:
+        case Action::samplerGain:
+        case Action::micToggle:
+        case Action::micGain:
+        case Action::micTalkover:
+        case Action::auxToggle:
+        case Action::auxGain:
+        case Action::browseScroll:
+            return false;
+
+        default:
+            return true;
+    }
+}
+
+bool actionTakesSlot (Action action)
+{
+    switch (action)
+    {
+        case Action::deckStem:
+        case Action::deckStemToggle:
+        case Action::hotCue:
+        case Action::hotCueClear:
+        case Action::padLoop:
+        case Action::loopBeats:
+        case Action::loopRoll:
+        case Action::beatJumpForward:
+        case Action::beatJumpBack:
+        case Action::channelEq:
+        case Action::channelFxSelect:
+        case Action::channelCrossfaderAssign:
+        case Action::masterFxParam:
+        case Action::masterFxType:
+        case Action::samplerTrigger:
+        case Action::samplerStop:
+        case Action::samplerBank:
+            return true;
+
+        default:
+            return false;
+    }
+}
+
 bool isContinuous (Action action)
 {
     switch (action)

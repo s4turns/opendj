@@ -34,6 +34,7 @@ target_sources(opendj-tests PRIVATE
     TrackAnalyser_test.cpp
     KeyDetector_test.cpp
     MidiMapping_test.cpp
+    MidiLearn_test.cpp
     AngleMath_test.cpp
     OverlayMath_test.cpp
     AutoMix_test.cpp

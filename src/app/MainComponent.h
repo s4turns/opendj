@@ -157,6 +157,9 @@ private:
     juce::Array<juce::File> findTextureFolders() const;
 
     void loadOntoDeck (const juce::File& file, int deckIndex);
+    /** Where the user's own files of a kind go, whether it exists yet or not. */
+    juce::File userDataFolder (const juce::String& name) const;
+
     /** Every folder that may hold a kind of data file -- "mappings", or
         "presets" for the visualiser -- in precedence order: the user's own
         under their data home, then beside the executable while developing,
