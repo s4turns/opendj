@@ -165,6 +165,19 @@ public:
     void toggleKeyLock();
     bool isKeyLockEnabled() const noexcept { return keyLock.load (std::memory_order_relaxed); }
 
+    /** Moves the pitch by whole semitones through the same stretcher key lock
+        uses, leaving the tempo alone. Added to whatever the tempo fader is doing
+        to the pitch, which is nothing with key lock on. Goes back to zero when a
+        track loads, as the tempo does. */
+    static constexpr int maximumKeyShift = 12;
+    void setKeyShift (int semitones);
+    int getKeyShift() const noexcept { return keyShift.load (std::memory_order_relaxed); }
+
+    /** The key the deck is playing in now: the track's own, moved by the key
+        shift and, with key lock off, by however far the tempo has taken it to
+        the nearest semitone. Invalid when the track's key is not known. */
+    MusicalKey getEffectiveKey() const;
+
     void setTrim (float linearGain);
     float getTrim() const noexcept { return trimGain.load (std::memory_order_relaxed); }
 
@@ -467,6 +480,7 @@ private:
     // ever uses it and never allocates it. It is fed from feedPosition, which
     // runs ahead of the audible readPosition by the stretcher's own delay.
     std::atomic<bool> keyLock { false };
+    std::atomic<int> keyShift { 0 };
     std::atomic<bool> quantize { false };
 
     // The grid as loaded, for revert. Written by whichever thread loads.
@@ -489,7 +503,7 @@ private:
     bool stretchPrimed = false;                            // audio thread only
 
     void renderStretched (const Track& track, juce::AudioBuffer<float>& destination,
-                          double rate, double fileToDevice,
+                          double rate, double fileToDevice, double pitchScale,
                           const SeparatedTrack* separation, const float* stemGains);
     void feedStretcher (const Track& track, double fileToDevice,
                         const SeparatedTrack* separation, const float* stemGains);

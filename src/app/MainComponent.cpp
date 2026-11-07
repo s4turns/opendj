@@ -199,6 +199,17 @@ MainComponent::MainComponent()
 
     browser->onPlaylistsChanged = [this] { playlistView->refresh(); };
 
+    // Here rather than with the rest of the settings, which are restored before
+    // the browser exists.
+    browser->setKeyNotation (settings.camelotKeys);
+    browser->onKeyNotationChanged = [this] (bool camelot)
+    {
+        settings.camelotKeys = camelot;
+
+        for (auto& view : deckViews)
+            view->setKeyNotation (camelot);
+    };
+
     browserTabs = std::make_unique<juce::TabbedComponent> (juce::TabbedButtonBar::TabsAtTop);
     browserTabs->setTabBarDepth (26);
     browserTabs->setOutline (0);
@@ -430,6 +441,23 @@ void MainComponent::timerCallback()
 
     for (auto& view : deckViews)
         view->refresh();
+
+    // The key the room is hearing is what the browser's hints are measured from.
+    // With every fader down, whatever is playing: that is somebody finding the
+    // next track in the headphones, who wants to know what goes with it.
+    if (browser != nullptr)
+    {
+        auto reference = MusicalKey();
+
+        if (const auto heard = engine.findMasterTempoDeck(); heard >= 0)
+            reference = engine.getDeck (heard).getEffectiveKey();
+
+        for (int i = 0; i < AudioEngine::numDecks && ! reference.isValid(); ++i)
+            if (engine.getDeck (i).isPlaying())
+                reference = engine.getDeck (i).getEffectiveKey();
+
+        browser->setHarmonicReference (reference);
+    }
 
     beatStrip->refresh();
     mixerView->refresh();
@@ -672,6 +700,9 @@ void MainComponent::restoreSettings()
     settings.waveformZoomSeconds = waveform::nearestZoom (settings.waveformZoomSeconds);
     applyWaveformZoom();
 
+    for (auto& view : deckViews)
+        view->setKeyNotation (settings.camelotKeys);
+
     updateRecordingTooltip();
 
     // Pads are reloaded rather than remembered, because the audio behind them
@@ -729,6 +760,7 @@ void MainComponent::saveSettings()
 
     state.visibleDecks = visibleDecks;
     state.waveformZoomSeconds = settings.waveformZoomSeconds;
+    state.camelotKeys = settings.camelotKeys;
 
     if (masterFxView != nullptr)
         state.vstPluginDirectory = masterFxView->getPluginDirectory();

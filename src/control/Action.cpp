@@ -17,7 +17,7 @@ namespace
 
     // One table, read in both directions, so a name can never disagree with
     // itself between the parser and the writer.
-    constexpr std::array<Entry, 74> actionNames
+    constexpr std::array<Entry, 78> actionNames
     {{
         { Action::deckPlayToggle,   "deck.play_toggle" },
         { Action::deckPlay,         "deck.play" },
@@ -27,6 +27,10 @@ namespace
         { Action::deckLoadSelected, "deck.load" },
         { Action::deckKeyLockToggle, "deck.keylock_toggle" },
         { Action::deckSlipToggle,   "deck.slip_toggle" },
+        { Action::deckKeyUp,        "deck.key_up" },
+        { Action::deckKeyDown,      "deck.key_down" },
+        { Action::deckKeyReset,     "deck.key_reset" },
+        { Action::deckKeyMatch,     "deck.key_match" },
         { Action::deckBrake,        "deck.brake" },
         { Action::deckBackspin,     "deck.backspin" },
         { Action::deckReverseToggle, "deck.reverse_toggle" },

@@ -698,12 +698,15 @@ std::shared_ptr<const TrackAnalysis> TrackAnalyser::withKnownTempo (const juce::
                                                                     double bpm,
                                                                     double firstBeatSeconds,
                                                                     float confidence,
-                                                                    Options options)
+                                                                    Options options,
+                                                                    MusicalKey key)
 {
     auto analysis = std::make_shared<TrackAnalysis>();
 
     if (! buildWaveforms (*analysis, audio, sampleRate, options))
         return analysis;
+
+    analysis->key = key;
 
     if (bpm > 0.0)
     {

@@ -37,6 +37,7 @@ namespace
         state.quantize = { true, false, true, false };
         state.visibleDecks = { 2, 3 };
         state.waveformZoomSeconds = 8.0;
+        state.camelotKeys = true;
 
         state.samplerGain = 0.55f;
         state.samplerCue = true;
@@ -105,6 +106,7 @@ namespace
         REQUIRE (a.quantize == b.quantize);
         REQUIRE (a.visibleDecks == b.visibleDecks);
         REQUIRE_THAT (a.waveformZoomSeconds, WithinAbs (b.waveformZoomSeconds, 1.0e-9));
+        REQUIRE (a.camelotKeys == b.camelotKeys);
         REQUIRE_THAT (a.samplerGain, WithinAbs (b.samplerGain, 1.0e-4f));
         REQUIRE (a.samplerCue == b.samplerCue);
         REQUIRE (a.samplerFiles == b.samplerFiles);

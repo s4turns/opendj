@@ -61,6 +61,9 @@ struct SessionState
         there to be compared, and two scales make that harder. */
     double waveformZoomSeconds = waveform::defaultZoomSeconds;
 
+    /** Keys shown as Camelot numbers, 8A, rather than as notes, Am. */
+    bool camelotKeys = false;
+
     /** Where the master and cue busses go. Separate pairs by default: a split
         turns the master mono and puts it in one speaker, which nobody should
         get without having asked for it. */

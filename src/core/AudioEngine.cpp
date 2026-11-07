@@ -519,6 +519,25 @@ juce::File AudioEngine::defaultSampleFolder()
                .getChildFile ("OpenDJ").getChildFile ("Samples");
 }
 
+bool AudioEngine::matchDeckKey (int followerIndex, int leaderIndex)
+{
+    if (! juce::isPositiveAndBelow (followerIndex, numDecks) || ! juce::isPositiveAndBelow (leaderIndex, numDecks)
+        || followerIndex == leaderIndex)
+        return false;
+
+    auto& follower = *decks[(size_t) followerIndex];
+    const auto target = decks[(size_t) leaderIndex]->getEffectiveKey();
+    const auto current = follower.getEffectiveKey();
+
+    if (! target.isValid() || ! current.isValid())
+        return false;
+
+    // From where it would be with no shift at all, so that matching twice gives
+    // the same answer and a shift already there is not added to.
+    follower.setKeyShift (current.transposed (-follower.getKeyShift()).semitonesToMatch (target));
+    return true;
+}
+
 double AudioEngine::getEffectiveBpm (int deckIndex) const
 {
     if (! juce::isPositiveAndBelow (deckIndex, numDecks))

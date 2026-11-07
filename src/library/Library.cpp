@@ -936,6 +936,7 @@ std::optional<KnownTrack> Library::lookup (const juce::File& file)
     known.bpm = record->bpm;
     known.firstBeatSeconds = record->firstBeatSeconds;
     known.tempoConfidence = record->tempoConfidence;
+    known.key = MusicalKey::fromString (record->key);
     known.hotCues = getHotCues (file);
 
     return known;

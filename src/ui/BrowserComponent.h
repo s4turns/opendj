@@ -47,6 +47,16 @@ public:
     /** Moves the highlight by a number of rows, negative for up. Message thread. */
     void moveSelection (int rows);
 
+    /** Shows keys as Camelot numbers, 8A, or as notes, Am. */
+    void setKeyNotation (bool camelot);
+
+    /** Told when the Camelot button is pressed, so the decks can follow. */
+    std::function<void (bool camelot)> onKeyNotationChanged;
+
+    /** Colours each row's key by how it would mix with this one. An invalid key
+        means nothing is playing, and the colours go. */
+    void setHarmonicReference (const MusicalKey& key);
+
     void paint (juce::Graphics& g) override;
     void resized() override;
 
@@ -59,6 +69,7 @@ private:
     void cellDoubleClicked (int row, int columnId, const juce::MouseEvent&) override;
     void cellClicked (int row, int columnId, const juce::MouseEvent&) override;
     void selectedRowsChanged (int lastRowSelected) override;
+    juce::String getCellTooltip (int row, int columnId) override;
     juce::var getDragSourceDescription (const juce::SparseSet<int>& selectedRows) override;
 
     // Folder list. Its own model object, because ListBoxModel and
@@ -94,7 +105,16 @@ private:
     juce::TextButton removeFolderButton { "Remove" };
     juce::TextButton rescanButton { "Rescan" };
     juce::TextButton importButton { "Import..." };
+    juce::TextButton camelotButton { "Camelot" };
     juce::Label statusLabel;
+
+    bool camelotKeys = false;
+    MusicalKey harmonicReference;
+
+    // The library has the key as text, and the wheel's order is not that of any
+    // text, so this sort is done here rather than in the query.
+    bool sortByKey = false;
+    bool keySortForwards = true;
 
     FolderListModel folderModel { *this };
     juce::ListBox folderList;

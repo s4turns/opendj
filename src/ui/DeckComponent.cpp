@@ -123,6 +123,23 @@ DeckComponent::DeckComponent (AudioEngine& engineToUse, int deckIndex, const juc
     };
     addAndMakeVisible (echoOutButton);
 
+    keyLabel.setJustificationType (juce::Justification::centred);
+    keyLabel.setFont (juce::FontOptions (13.0f, juce::Font::bold));
+    keyLabel.setColour (juce::Label::textColourId, juce::Colours::lightgrey);
+    keyLabel.setTooltip ("The key this deck is playing in. Click to match another deck's key");
+    keyLabel.setMouseCursor (juce::MouseCursor::PointingHandCursor);
+    keyClick.onClick = [this] { showKeyMenu(); };
+    keyLabel.addMouseListener (&keyClick, false);
+    addAndMakeVisible (keyLabel);
+
+    keyDownButton.setTooltip ("Down a semitone, without changing the tempo");
+    keyDownButton.onClick = [this] { deck.setKeyShift (deck.getKeyShift() - 1); refresh(); };
+    addAndMakeVisible (keyDownButton);
+
+    keyUpButton.setTooltip ("Up a semitone, without changing the tempo");
+    keyUpButton.onClick = [this] { deck.setKeyShift (deck.getKeyShift() + 1); refresh(); };
+    addAndMakeVisible (keyUpButton);
+
     // Loop lengths. A click sets a loop of that many beats and leaves it
     // running; holding turns the same button into a roll, which repeats while
     // it is down and then drops you where the track would have reached. One
@@ -320,6 +337,61 @@ DeckComponent::DeckComponent (AudioEngine& engineToUse, int deckIndex, const juc
 DeckComponent::~DeckComponent()
 {
     bpmLabel.removeMouseListener (&bpmClick);
+    keyLabel.removeMouseListener (&keyClick);
+}
+
+void DeckComponent::setKeyNotation (bool camelot)
+{
+    camelotKeys = camelot;
+    updateKeyReadout();
+}
+
+void DeckComponent::updateKeyReadout()
+{
+    const auto key = deck.getEffectiveKey();
+    const auto shift = deck.getKeyShift();
+
+    auto text = key.isValid() ? (camelotKeys ? key.toCamelot() : key.toString()) : juce::String ("--");
+
+    // The number says it has been moved, and how far, which the key alone does not.
+    if (shift != 0)
+        text << (shift > 0 ? " +" : " ") << shift;
+
+    keyLabel.setText (text, juce::dontSendNotification);
+    keyLabel.setColour (juce::Label::textColourId, shift != 0 ? accentColour : juce::Colours::lightgrey);
+}
+
+void DeckComponent::showKeyMenu()
+{
+    if (! deck.isLoaded())
+        return;
+
+    const auto leader = engine.findSyncLeader (index);
+    const auto hasKeys = deck.getEffectiveKey().isValid()
+                      && leader >= 0 && engine.getDeck (leader).getEffectiveKey().isValid();
+
+    juce::PopupMenu menu;
+    constexpr int matchId = 1, resetId = 2;
+
+    menu.addItem (matchId,
+                  leader >= 0 ? "Match the key of deck " + juce::String::charToString ((juce::juce_wchar) ('A' + leader))
+                              : juce::String ("Match the key of the playing deck"),
+                  hasKeys);
+    menu.addItem (resetId, "Back to the track's own key", deck.getKeyShift() != 0);
+
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (keyLabel),
+                        [safe = juce::Component::SafePointer<DeckComponent> (this), leader] (int result)
+    {
+        if (safe == nullptr)
+            return;
+
+        if (result == matchId)
+            safe->engine.matchDeckKey (safe->index, leader);
+        else if (result == resetId)
+            safe->deck.setKeyShift (0);
+
+        safe->refresh();
+    });
 }
 
 void DeckComponent::load (const juce::File& file)
@@ -490,6 +562,7 @@ void DeckComponent::refresh()
                                      haveStems ? accentColour.darker (0.4f) : juce::Colour (0xff2c2c34));
 
     updateTempoReadout();
+    updateKeyReadout();
 
     if (loading != wasLoading)
     {
@@ -746,6 +819,14 @@ void DeckComponent::resized()
     area.removeFromTop (4);
     {
         auto effectRow = area.removeFromTop (24);
+
+        // The key at the far end, under the beat jump and away from anything
+        // that moves the playhead.
+        keyUpButton.setBounds (effectRow.removeFromRight (22).reduced (1));
+        keyLabel.setBounds (effectRow.removeFromRight (50));
+        keyDownButton.setBounds (effectRow.removeFromRight (22).reduced (1));
+        effectRow.removeFromRight (4);
+
         const auto buttons = { static_cast<juce::Button*> (&brakeButton), static_cast<juce::Button*> (&backspinButton),
                                static_cast<juce::Button*> (&reverseButton), static_cast<juce::Button*> (&censorButton),
                                static_cast<juce::Button*> (&echoOutButton) };

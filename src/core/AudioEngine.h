@@ -187,6 +187,12 @@ public:
         nearest, which is what somebody pressing sync means by "the other one". */
     int findSyncLeader (int followerIndex) const;
 
+    /** Shifts one deck the shortest way to the key another is playing in, or to
+        its relative, which has the same notes. Leaves the tempo alone, and
+        replaces any shift the deck already had. Returns false when either key is
+        not known, and changes nothing. */
+    bool matchDeckKey (int followerIndex, int leaderIndex);
+
     /** The deck's analysed tempo scaled by its tempo fader, or 0 with no grid. */
     double getEffectiveBpm (int deckIndex) const;
 

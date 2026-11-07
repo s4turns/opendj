@@ -62,7 +62,8 @@ public:
                                                                 double bpm,
                                                                 double firstBeatSeconds,
                                                                 float confidence,
-                                                                Options options);
+                                                                Options options,
+                                                                MusicalKey key = {});
 
     /** Peaks only, for when a waveform is wanted before the tempo pass finishes. */
     static WaveformPeaks buildPeaks (const juce::AudioBuffer<float>& audio, int samplesPerBucket);

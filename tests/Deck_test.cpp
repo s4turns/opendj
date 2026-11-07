@@ -1132,3 +1132,173 @@ TEST_CASE ("loading a track clears reverse and censor", "[deck][performance]")
     REQUIRE_FALSE (fixture.deck->isReverseEnabled());
     REQUIRE_FALSE (fixture.deck->isCensorHeld());
 }
+
+//==============================================================================
+// Key shift
+//==============================================================================
+
+TEST_CASE ("a key shift moves the pitch by the semitones asked for", "[deck][key]")
+{
+    Fixture fixture;
+    playFrom (fixture, 1.0);
+
+    const auto measureNow = [&fixture]
+    {
+        fixture.run (blocksFor (0.3));     // past whatever the change itself leaves behind
+        return measureFrequency (fixture.capture (blocksFor (0.5)), deviceSampleRate);
+    };
+
+    REQUIRE_THAT (measureNow(), WithinAbs (440.0, 3.0));
+
+    fixture.deck->setKeyShift (2);
+    REQUIRE_THAT (measureNow(), WithinAbs (440.0 * std::pow (2.0, 2.0 / 12.0), 5.0));
+
+    fixture.deck->setKeyShift (-3);
+    REQUIRE_THAT (measureNow(), WithinAbs (440.0 * std::pow (2.0, -3.0 / 12.0), 5.0));
+
+    fixture.deck->setKeyShift (0);
+    REQUIRE_THAT (measureNow(), WithinAbs (440.0, 3.0));
+}
+
+TEST_CASE ("a key shift leaves the tempo alone", "[deck][key]")
+{
+    Fixture fixture;
+    fixture.deck->setKeyShift (5);
+    playFrom (fixture, 1.0);
+
+    const auto start = fixture.deck->getPositionSeconds();
+    const auto blocks = blocksFor (1.0);
+    fixture.run (blocks);
+
+    REQUIRE_THAT (fixture.deck->getPositionSeconds() - start, WithinAbs (blocks * fixture.secondsPerBlock(), 0.005));
+    REQUIRE (fixture.buffer.getMagnitude (0, 0, blockSize) > 0.2f);
+}
+
+TEST_CASE ("with key lock off, the tempo moves the pitch on top of a key shift", "[deck][key]")
+{
+    Fixture fixture;
+    fixture.deck->setKeyShift (2);
+    fixture.deck->setTempoRatio (1.08);
+    playFrom (fixture, 1.0);
+    fixture.run (blocksFor (0.3));
+
+    const auto expected = 440.0 * 1.08 * std::pow (2.0, 2.0 / 12.0);
+    REQUIRE_THAT (measureFrequency (fixture.capture (blocksFor (0.5)), deviceSampleRate), WithinAbs (expected, 6.0));
+}
+
+TEST_CASE ("with key lock on, only the key shift moves the pitch", "[deck][key][keylock]")
+{
+    Fixture fixture;
+    fixture.deck->setKeyLock (true);
+    fixture.deck->setKeyShift (2);
+    fixture.deck->setTempoRatio (1.08);
+    playFrom (fixture, 1.0);
+    fixture.run (blocksFor (0.3));
+
+    const auto expected = 440.0 * std::pow (2.0, 2.0 / 12.0);
+    REQUIRE_THAT (measureFrequency (fixture.capture (blocksFor (0.5)), deviceSampleRate), WithinAbs (expected, 5.0));
+}
+
+TEST_CASE ("key lock at the tempo the track was recorded at still costs nothing", "[deck][key][keylock]")
+{
+    // A shift of zero must not hold the stretcher in the path, or a deck at its
+    // own tempo would pick up a delay nobody asked for.
+    Fixture plain, shifted;
+    plain.deck->setKeyLock (true);
+    shifted.deck->setKeyLock (true);
+    shifted.deck->setKeyShift (1);
+    shifted.deck->setKeyShift (0);
+
+    plain.deck->play();
+    shifted.deck->play();
+
+    for (int b = 0; b < 20; ++b)
+    {
+        plain.deck->processBlock (plain.buffer);
+        shifted.deck->processBlock (shifted.buffer);
+
+        for (int i = 0; i < blockSize; ++i)
+            REQUIRE (plain.buffer.getSample (0, i) == shifted.buffer.getSample (0, i));
+    }
+}
+
+TEST_CASE ("a shift cannot go past an octave, and a new track starts without one", "[deck][key]")
+{
+    Fixture fixture;
+
+    fixture.deck->setKeyShift (40);
+    REQUIRE (fixture.deck->getKeyShift() == opendj::Deck::maximumKeyShift);
+
+    fixture.deck->setKeyShift (-40);
+    REQUIRE (fixture.deck->getKeyShift() == -opendj::Deck::maximumKeyShift);
+
+    REQUIRE (fixture.deck->loadFile (fixture.temporaryFile.getFile()));
+    REQUIRE (fixture.deck->getKeyShift() == 0);
+}
+
+TEST_CASE ("the deck's key follows the shift and, without key lock, the tempo", "[deck][key]")
+{
+    Fixture fixture;
+
+    opendj::KnownTrack known;
+    known.analysed = true;
+    known.bpm = 120.0;
+    known.key = opendj::MusicalKey::fromString ("Am");
+    REQUIRE (fixture.deck->loadFile (fixture.temporaryFile.getFile(), &known));
+
+    REQUIRE (fixture.deck->getEffectiveKey().toString() == "Am");
+
+    fixture.deck->setKeyShift (2);
+    REQUIRE (fixture.deck->getEffectiveKey().toString() == "Bm");
+
+    // Six percent is a semitone.
+    fixture.deck->setTempoRatio (1.06);
+    REQUIRE (fixture.deck->getEffectiveKey().toString() == "Cm");
+
+    fixture.deck->setKeyLock (true);
+    REQUIRE (fixture.deck->getEffectiveKey().toString() == "Bm");
+
+    // Under half a semitone reads as no move at all.
+    fixture.deck->setKeyLock (false);
+    fixture.deck->setKeyShift (0);
+    fixture.deck->setTempoRatio (1.02);
+    REQUIRE (fixture.deck->getEffectiveKey().toString() == "Am");
+}
+
+TEST_CASE ("a track the library knows arrives with its key", "[deck][key]")
+{
+    Fixture fixture;
+
+    opendj::KnownTrack known;
+    known.analysed = true;
+    known.bpm = 120.0;
+    known.key = opendj::MusicalKey::fromString ("F#m");
+    REQUIRE (fixture.deck->loadFile (fixture.temporaryFile.getFile(), &known));
+
+    REQUIRE (fixture.deck->getAnalysis()->key.toString() == "F#m");
+}
+
+TEST_CASE ("a key in the tags beats detection on a track's first load", "[deck][key]")
+{
+    Fixture fixture;
+
+    opendj::KnownTrack known;
+    known.analysed = false;
+    known.key = opendj::MusicalKey::fromString ("D#");
+    REQUIRE (fixture.deck->loadFile (fixture.temporaryFile.getFile(), &known));
+
+    REQUIRE (fixture.deck->getAnalysis()->key.toString() == "D#");
+}
+
+TEST_CASE ("with no key in the tags, a first load detects one as before", "[deck][key]")
+{
+    Fixture fixture;
+
+    opendj::KnownTrack known;
+    known.analysed = false;
+    REQUIRE (fixture.deck->loadFile (fixture.temporaryFile.getFile(), &known));
+
+    const auto detected = fixture.deck->getAnalysis()->key;
+    REQUIRE (fixture.deck->loadFile (fixture.temporaryFile.getFile()));
+    REQUIRE (fixture.deck->getAnalysis()->key.toString() == detected.toString());
+}

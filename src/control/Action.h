@@ -31,6 +31,11 @@ enum class Action
 
     deckKeyLockToggle,  ///< tempo changes stop shifting the pitch
 
+    deckKeyUp,          ///< press moves the pitch up a semitone
+    deckKeyDown,        ///< press moves the pitch down a semitone
+    deckKeyReset,       ///< press goes back to the track's own key
+    deckKeyMatch,       ///< press shifts to the key of the deck a sync would follow
+
     deckBrake,          ///< press slows the deck to a stop
     deckBackspin,       ///< press flings the record backwards to a stop
     deckReverseToggle,  ///< plays backwards until pressed again

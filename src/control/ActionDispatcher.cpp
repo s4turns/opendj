@@ -121,6 +121,27 @@ void ActionDispatcher::dispatch (const ActionMessage& message)
                 deck.toggleKeyLock();
             break;
 
+        case Action::deckKeyUp:
+            if (pressed)
+                deck.setKeyShift (deck.getKeyShift() + 1);
+            break;
+
+        case Action::deckKeyDown:
+            if (pressed)
+                deck.setKeyShift (deck.getKeyShift() - 1);
+            break;
+
+        case Action::deckKeyReset:
+            if (pressed)
+                deck.setKeyShift (0);
+            break;
+
+        case Action::deckKeyMatch:
+            if (pressed)
+                if (const auto leader = engine.findSyncLeader (deckIndex); leader >= 0)
+                    engine.matchDeckKey (deckIndex, leader);
+            break;
+
         case Action::deckBrake:
             if (pressed)
                 deck.brake();

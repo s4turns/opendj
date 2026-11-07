@@ -408,3 +408,56 @@ TEST_CASE ("the engine tells the master effects where the music is", "[control][
     REQUIRE (std::abs (fx.getBeatClock() - (deck.getPositionSeconds() - analysis->firstBeatSeconds)
                                                / analysis->secondsPerBeat()) < 0.1);
 }
+
+TEST_CASE ("key shift and key match are reachable by name", "[control][key]")
+{
+    PadHarness h;
+    auto& deck = h.engine.getDeck (0);
+    REQUIRE (deck.getKeyShift() == 0);
+
+    // Only the press acts.
+    h.dispatcher.dispatch ({ actionFromString ("deck.key_up"), 0, 0, 1.0f });
+    h.dispatcher.dispatch ({ actionFromString ("deck.key_up"), 0, 0, 0.0f });
+    REQUIRE (deck.getKeyShift() == 1);
+
+    h.dispatcher.dispatch ({ actionFromString ("deck.key_down"), 0, 0, 1.0f });
+    h.dispatcher.dispatch ({ actionFromString ("deck.key_down"), 0, 0, 1.0f });
+    REQUIRE (deck.getKeyShift() == -1);
+
+    h.dispatcher.dispatch ({ actionFromString ("deck.key_reset"), 0, 0, 1.0f });
+    REQUIRE (deck.getKeyShift() == 0);
+
+    // Up against the end of its range it stays there.
+    for (int i = 0; i < 30; ++i)
+        h.dispatcher.dispatch ({ actionFromString ("deck.key_up"), 0, 0, 1.0f });
+
+    REQUIRE (deck.getKeyShift() == Deck::maximumKeyShift);
+}
+
+TEST_CASE ("key match shifts to the deck a sync would follow", "[control][key]")
+{
+    PadHarness h;
+    auto& follower = h.engine.getDeck (0);
+    auto& leader = h.engine.getDeck (1);
+    juce::AudioBuffer<float> buffer (2, 512);
+
+    KnownTrack known;
+    known.analysed = true;
+    known.bpm = 120.0;
+    known.key = MusicalKey::fromString ("Am");
+    REQUIRE (follower.loadFile (h.click.file.getFile(), &known));
+
+    known.key = MusicalKey::fromString ("Cm");
+    REQUIRE (leader.loadFile (h.click.file.getFile(), &known));
+
+    // With nothing playing there is nothing to follow, and nothing moves.
+    h.dispatcher.dispatch ({ actionFromString ("deck.key_match"), 0, 0, 1.0f });
+    REQUIRE (follower.getKeyShift() == 0);
+
+    leader.play();
+    leader.processBlock (buffer);
+
+    h.dispatcher.dispatch ({ actionFromString ("deck.key_match"), 0, 0, 1.0f });
+    REQUIRE (follower.getKeyShift() == 3);
+    REQUIRE (follower.getEffectiveKey().toString() == "Cm");
+}

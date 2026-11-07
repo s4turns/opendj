@@ -107,6 +107,9 @@ public:
         every deck rather than something a deck decides for itself. */
     void setWaveformZoom (double seconds);
 
+    /** Shows the deck's key as a Camelot number, 8A, or as a note, Am. */
+    void setKeyNotation (bool camelot);
+
     /** Asked for when the wheel is turned over this deck's scrolling waveform,
         with a number of rungs, positive to zoom in. */
     std::function<void (int steps)> onZoomRequested;
@@ -165,6 +168,16 @@ private:
     juce::TextButton reverseButton { "Rev" };
     MomentaryButton censorButton { "Censor" };
     juce::TextButton echoOutButton { "Echo out" };
+
+    // The key the deck is in, with a semitone either way. Clicking the key
+    // offers a match to another deck.
+    juce::Label keyLabel;
+    BpmClick keyClick;
+    juce::TextButton keyDownButton { "-" };
+    juce::TextButton keyUpButton { "+" };
+    bool camelotKeys = false;
+    void updateKeyReadout();
+    void showKeyMenu();
 
     /** One knob per part of the track, and the button that asks for them. The
         knobs stay dead until a separation exists, since turning down a stem

@@ -528,3 +528,98 @@ TEST_CASE ("recording a sample needs a track on the deck", "[engine][sampler]")
     REQUIRE (error.containsIgnoreCase ("load a track"));
     REQUIRE_FALSE (h.engine.getSampler().isSlotLoaded (0));
 }
+
+TEST_CASE ("matching keys takes the short way, and allows for a key already moved", "[engine][key]")
+{
+    juce::TemporaryFile file (".wav");
+    {
+        juce::AudioBuffer<float> content (2, 44100);
+        content.clear();
+        juce::WavAudioFormat wav;
+        auto stream = std::make_unique<juce::FileOutputStream> (file.getFile());
+        REQUIRE (stream->openedOk());
+        std::unique_ptr<juce::AudioFormatWriter> writer (wav.createWriterFor (stream.release(), 44100.0, 2, 16, {}, 0));
+        REQUIRE (writer != nullptr);
+        REQUIRE (writer->writeFromAudioSampleBuffer (content, 0, 44100));
+    }
+
+    opendj::AudioEngine engine;
+    auto& follower = engine.getDeck (0);
+    auto& leader = engine.getDeck (1);
+
+    const auto loadWithKey = [&file] (opendj::Deck& deck, const char* key)
+    {
+        opendj::KnownTrack known;
+        known.analysed = true;
+        known.bpm = 120.0;
+        known.key = opendj::MusicalKey::fromString (key);
+        REQUIRE (deck.loadFile (file.getFile(), &known));
+    };
+
+    SECTION ("the same mode moves to the same key")
+    {
+        loadWithKey (follower, "Am");
+        loadWithKey (leader, "Bm");
+        REQUIRE (engine.matchDeckKey (0, 1));
+        REQUIRE (follower.getKeyShift() == 2);
+    }
+
+    SECTION ("a minor and its relative major need no shift")
+    {
+        loadWithKey (follower, "Am");
+        loadWithKey (leader, "C");
+        follower.setKeyShift (5);
+        REQUIRE (engine.matchDeckKey (0, 1));
+        REQUIRE (follower.getKeyShift() == 0);
+    }
+
+    SECTION ("it goes down rather than a long way up")
+    {
+        loadWithKey (follower, "C");
+        loadWithKey (leader, "A#");
+        REQUIRE (engine.matchDeckKey (0, 1));
+        REQUIRE (follower.getKeyShift() == -2);
+    }
+
+    SECTION ("the leader's key is the one it is playing in")
+    {
+        loadWithKey (follower, "Am");
+        loadWithKey (leader, "Am");
+        leader.setKeyShift (2);
+        REQUIRE (engine.matchDeckKey (0, 1));
+        REQUIRE (follower.getKeyShift() == 2);
+    }
+
+    SECTION ("a tempo moving the leader's pitch counts, and with key lock it does not")
+    {
+        loadWithKey (follower, "Am");
+        loadWithKey (leader, "Am");
+        leader.setTempoRatio (std::pow (2.0, 1.0 / 12.0));   // a semitone fast
+
+        REQUIRE (engine.matchDeckKey (0, 1));
+        REQUIRE (follower.getKeyShift() == 1);
+
+        leader.setKeyLock (true);
+        REQUIRE (engine.matchDeckKey (0, 1));
+        REQUIRE (follower.getKeyShift() == 0);
+    }
+
+    SECTION ("matching twice gives the same answer")
+    {
+        loadWithKey (follower, "Am");
+        loadWithKey (leader, "Bm");
+        REQUIRE (engine.matchDeckKey (0, 1));
+        REQUIRE (engine.matchDeckKey (0, 1));
+        REQUIRE (follower.getKeyShift() == 2);
+    }
+
+    SECTION ("with either key unknown nothing moves")
+    {
+        loadWithKey (follower, "");
+        loadWithKey (leader, "Am");
+        follower.setKeyShift (3);
+        REQUIRE_FALSE (engine.matchDeckKey (0, 1));
+        REQUIRE (follower.getKeyShift() == 3);
+        REQUIRE_FALSE (engine.matchDeckKey (0, 0));
+    }
+}

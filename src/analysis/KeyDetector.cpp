@@ -121,6 +121,66 @@ juce::String MusicalKey::toCamelot() const
     return juce::String (number) + (mode == Mode::minor ? "A" : "B");
 }
 
+MusicalKey MusicalKey::transposed (int semitones) const noexcept
+{
+    if (! isValid())
+        return *this;
+
+    auto moved = *this;
+    moved.tonic = ((tonic + semitones) % 12 + 12) % 12;
+    return moved;
+}
+
+int MusicalKey::wheelOrder() const noexcept
+{
+    if (! isValid())
+        return -1;
+
+    const auto offset = mode == Mode::minor ? 4 : 7;
+    return ((tonic * 7 + offset) % 12) * 2 + (mode == Mode::minor ? 0 : 1);
+}
+
+MusicalKey::Harmony MusicalKey::harmonyWith (const MusicalKey& other) const noexcept
+{
+    if (! isValid() || ! other.isValid())
+        return Harmony::clash;
+
+    const auto mine = wheelOrder(), theirs = other.wheelOrder();
+
+    if (mine == theirs)
+        return Harmony::same;
+
+    // The same number and the other letter.
+    if (mine / 2 == theirs / 2)
+        return Harmony::relative;
+
+    if (mode == other.mode)
+    {
+        const auto apart = (mine / 2 - theirs / 2 + 12) % 12;
+
+        if (apart == 1 || apart == 11)
+            return Harmony::neighbour;
+    }
+
+    return Harmony::clash;
+}
+
+int MusicalKey::semitonesToMatch (const MusicalKey& target) const noexcept
+{
+    if (! isValid() || ! target.isValid())
+        return 0;
+
+    // Mode to mode. A relative major is three semitones above its minor.
+    auto wanted = target.tonic;
+
+    if (mode == Mode::minor && target.mode == Mode::major)
+        wanted = target.tonic - 3;
+    else if (mode == Mode::major && target.mode == Mode::minor)
+        wanted = target.tonic + 3;
+
+    return ((wanted - tonic + 6) % 12 + 12) % 12 - 6;
+}
+
 MusicalKey MusicalKey::fromString (const juce::String& text)
 {
     const auto trimmed = text.trim();

@@ -7,6 +7,8 @@
 
 #include "library/RekordboxImport.h"
 
+#include <algorithm>
+
 namespace opendj
 {
 
@@ -50,6 +52,18 @@ BrowserComponent::BrowserComponent (Library& libraryToUse, LibraryScanner& scann
 
     removeFolderButton.onClick = [this] { removeFolderClicked(); };
     addAndMakeVisible (removeFolderButton);
+
+    camelotButton.setTooltip ("Show keys as Camelot numbers rather than notes. Keys in green mix with what is playing");
+    camelotButton.setClickingTogglesState (true);
+    camelotButton.setColour (juce::TextButton::buttonOnColourId, accentColour.darker (0.4f));
+    camelotButton.onClick = [this]
+    {
+        setKeyNotation (camelotButton.getToggleState());
+
+        if (onKeyNotationChanged != nullptr)
+            onKeyNotationChanged (camelotKeys);
+    };
+    addAndMakeVisible (camelotButton);
 
     rescanButton.onClick = [this] { scanner.start(); };
     addAndMakeVisible (rescanButton);
@@ -157,6 +171,31 @@ void BrowserComponent::refreshNow()
 
     const auto keep = getSelectedFile();
     rows = library.query (query);
+
+    if (sortByKey)
+    {
+        // Unknown keys stay at the end in both directions: nobody sorting by key
+        // is looking for the tracks that have none.
+        std::vector<std::pair<int, size_t>> order;
+        order.reserve (rows.size());
+
+        for (size_t i = 0; i < rows.size(); ++i)
+        {
+            const auto wheel = MusicalKey::fromString (rows[i].key).wheelOrder();
+            order.emplace_back (wheel < 0 ? 1000 : (keySortForwards ? wheel : 100 - wheel), i);
+        }
+
+        std::stable_sort (order.begin(), order.end(), [] (const auto& a, const auto& b) { return a.first < b.first; });
+
+        std::vector<TrackRecord> sorted;
+        sorted.reserve (rows.size());
+
+        for (const auto& entry : order)
+            sorted.push_back (std::move (rows[entry.second]));
+
+        rows = std::move (sorted);
+    }
+
     table.updateContent();
 
     // Keep the highlight on the same track through a re-sort or a scan.
@@ -363,13 +402,29 @@ void BrowserComponent::paintCell (juce::Graphics& g, int row, int columnId, int 
     const auto& record = rows[(size_t) row];
     juce::String text;
     auto justification = juce::Justification::centredLeft;
+    auto colour = juce::Colours::lightgrey;
 
     switch (columnId)
     {
         case artist: text = record.artist; break;
         case title:  text = record.displayTitle(); break;
         case album:  text = record.album; break;
-        case key:    text = record.key; break;
+        case key:
+        {
+            // A key the parser cannot read is shown as it was written, rather
+            // than hiding what a file's tags actually say.
+            const auto parsed = MusicalKey::fromString (record.key);
+            text = ! parsed.isValid() ? record.key : (camelotKeys ? parsed.toCamelot() : parsed.toString());
+
+            switch (parsed.harmonyWith (harmonicReference))
+            {
+                case MusicalKey::Harmony::same:      colour = juce::Colour (0xff4ad991); break;
+                case MusicalKey::Harmony::relative:
+                case MusicalKey::Harmony::neighbour: colour = juce::Colour (0xffa6e8c6); break;
+                case MusicalKey::Harmony::clash:     break;
+            }
+            break;
+        }
         case comment: text = record.comment; break;
         case rating:  text = juce::String::repeatedString (juce::String::fromUTF8 ("\xe2\x98\x85"), record.rating); break;
         case length: text = formatLength (record.durationSeconds); justification = juce::Justification::centredRight; break;
@@ -380,13 +435,51 @@ void BrowserComponent::paintCell (juce::Graphics& g, int row, int columnId, int 
         default: break;
     }
 
-    g.setColour (columnId == bpm && record.bpm > 0.0 ? accentColour : juce::Colours::lightgrey);
+    g.setColour (columnId == bpm && record.bpm > 0.0 ? accentColour : colour);
     g.setFont (juce::FontOptions (13.0f));
     g.drawText (text, 6, 0, width - 12, height, justification, true);
 }
 
+void BrowserComponent::setKeyNotation (bool camelot)
+{
+    camelotKeys = camelot;
+    camelotButton.setToggleState (camelot, juce::dontSendNotification);
+    table.repaint();
+}
+
+void BrowserComponent::setHarmonicReference (const MusicalKey& reference)
+{
+    if (reference.tonic == harmonicReference.tonic && reference.mode == harmonicReference.mode)
+        return;
+
+    harmonicReference = reference;
+    table.repaint();
+}
+
+juce::String BrowserComponent::getCellTooltip (int row, int columnId)
+{
+    if (columnId != key || ! juce::isPositiveAndBelow (row, (int) rows.size()) || ! harmonicReference.isValid())
+        return {};
+
+    const auto parsed = MusicalKey::fromString (rows[(size_t) row].key);
+    const auto playing = camelotKeys ? harmonicReference.toCamelot() : harmonicReference.toString();
+
+    switch (parsed.harmonyWith (harmonicReference))
+    {
+        case MusicalKey::Harmony::same:      return "The same key as what is playing, " + playing;
+        case MusicalKey::Harmony::relative:  return "The relative of what is playing, " + playing + ": the same notes";
+        case MusicalKey::Harmony::neighbour: return "One step round the wheel from what is playing, " + playing;
+        case MusicalKey::Harmony::clash:     break;
+    }
+
+    return {};
+}
+
 void BrowserComponent::sortOrderChanged (int columnId, bool forwards)
 {
+    sortByKey = columnId == key;
+    keySortForwards = forwards;
+
     switch (columnId)
     {
         case artist: query.sortBy = LibraryQuery::SortBy::artist; break;
@@ -511,6 +604,8 @@ void BrowserComponent::resized()
     rescanButton.setBounds (toolbar.removeFromLeft (70));
     toolbar.removeFromLeft (6);
     importButton.setBounds (toolbar.removeFromLeft (80));
+    toolbar.removeFromLeft (6);
+    camelotButton.setBounds (toolbar.removeFromLeft (70));
     toolbar.removeFromLeft (12);
     statusLabel.setBounds (toolbar.removeFromRight (juce::jmin (420, toolbar.getWidth() / 2)));
     toolbar.removeFromRight (12);

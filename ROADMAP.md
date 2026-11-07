@@ -1,7 +1,7 @@
 # OpenDJ roadmap
 
 Where the project is and what to pick up next. Anything ticked has tests or a verified manual
-check behind it, not just code that compiles. The suite is **468 tests** on Linux. Windows runs
+check behind it, not just code that compiles. The suite is **486 tests** on Linux. Windows runs
 one fewer, a stderr test whose stand-in for ffmpeg is a shell script. Anything touching audio is
 tested by measuring the output, not by checking that the code ran. Open work is also tracked as
 issues on [git.interdo.me](https://git.interdo.me/interdome/opendj/issues), and the numbers
@@ -41,6 +41,7 @@ that was listed after it except video.
 | Loops and loop rolls | ✅ | `Deck::setLoopBeats` and friends |
 | Slip mode | ✅ | `Deck::setSlipEnabled`, sharing the roll's shadow playhead |
 | Key detection | ✅ | `src/analysis/KeyDetector.*`, in the browser's Key column |
+| Key shift and key match | ✅ | `Deck::setKeyShift`, `AudioEngine::matchDeckKey`, through the key lock stretcher |
 | Effects: filter, echo, reverb | ✅ | `src/core/Mixer.*`, one knob each per channel |
 | Master effects | ✅ | `src/core/MasterEffects.*`: two slots on the whole mix, each echo, reverb, filter, flanger, phaser, gate, bitcrusher or stutter with a wet level and two parameters |
 | Brake, backspin, reverse, censor | ✅ | `Deck::brake` and friends, on a row of their own under the hot cues |
@@ -78,8 +79,7 @@ The goal is that a VirtualDJ user can sit down at OpenDJ and already know how to
 what they would still reach for and not find, checked against the code rather than assumed. The
 VirtualDJ column is a description of that product, not a measurement of it.
 
-Some of it is partly there already: pitch bend through the jog wheel's nudge, and Camelot notation
-in `MusicalKey::toCamelot` that the browser does not yet show.
+Some of it is partly there already: pitch bend through the jog wheel's nudge.
 
 ### Reached for in every set
 
@@ -89,7 +89,7 @@ in `MusicalKey::toCamelot` that the browser does not yet show.
 | Beat jump and quantize (#13) | Jumps of 1 to 32 beats; cues and loops snap to the grid | Done: beat jump of 1 to 32 beats that carries a running loop, and a quantize button per deck for the cue, hot cues and loop in and out. Jumping to a hot cue does not yet keep the phase |
 | Beat grid editing (#14) | Adjust the BPM, move the downbeat, tap tempo | Done: an editor behind each deck's BPM readout, with tap tempo. Edits are kept with the track and outrank later analysis. No dynamic grids yet: one tempo for the whole track |
 | More effects (#15) | Dozens, including flanger, phaser, gate, bitcrusher, brake, backspin, echo out and stutter, plus reverse and censor buttons | Done, all of those named: filter, echo and reverb per channel with an echo out, flanger, phaser, gate, bitcrusher and stutter as well in two master slots, which also take VST3 plugins, and brake, backspin, reverse and censor per deck. Not the dozens: the master slots are for what a set needs, and plugins are for the rest. Not heard in a real set yet |
-| Key tools (#16) | Key shift in semitones, key match between decks, Camelot display, harmonic hints in the browser | Detection only |
+| Key tools (#16) | Key shift in semitones, key match between decks, Camelot display, harmonic hints in the browser | Done: all four. Hints are colours on the Key column rather than a filter. Measured by counting the pitch that comes out on test tones; not yet heard on music |
 | Auto gain (#17) | Tracks levelled by measured loudness | A trim, with no analysis behind it |
 | Vocal-aware automix (#37) | Transitions that keep two vocals from overlapping | Vocals are kept apart, levels matched, and sections read from energy and vocals; not yet heard through a whole set. Sections come from energy, not from recognising repeated material, so a verse and a chorus of the same fullness look alike without stems |
 | MIDI learn and more controllers (#19, #4) | Hundreds of controllers mapped out of the box, and a mapper that learns a control from the hardware | One mapping, written by hand |
@@ -184,6 +184,23 @@ convertible to Camelot.
 | Nothing below about C3 counts | Below that, semitones are closer together than the transform can resolve |
 | Each frame is normalised before it is added | So a loud drop does not outvote the four quiet minutes that share its key |
 | A key already in the tags wins | Detection fills a gap rather than overruling a person |
+
+**Key shift** is the key lock stretcher with its pitch scale set, so a deck has one path that
+changes pitch rather than two. It only stays in the path while there is a shift, or key lock has a
+tempo to hide: at a shift of zero the output is bit for bit what it was.
+
+| Decision | Why |
+| --- | --- |
+| The key a deck is "in" counts the shift and, with key lock off, the tempo | A deck six percent fast with no key lock is a semitone sharp, and matching what it was recorded in would clash |
+| A match goes to the key or its relative, the shortest way | They have the same notes. Moving Am three semitones to reach C would change the sound of a track for nothing |
+| A match works from the deck with no shift | So pressing it twice gives the same answer rather than adding to itself |
+| It stays between -6 and +5 | Pitch is what a shift costs, so no shift goes further than half an octave |
+| The hints go by the deck the room hears, then any that is playing | With the faders down, somebody is looking for the next record in the headphones, and that is when they are wanted most |
+| Sorting the Key column happens in the browser | The library has the key as text, in whichever spelling it arrived in, and no text sorts in wheel order. The column looked sortable before this and sorted by artist |
+
+A track the library had already analysed used to reach the deck with no key at all: `KnownTrack` had
+no field for one, and skipping the tempo pass skipped key detection with it. It has one now, and a
+key in the tags beats detection on a first load as well, which the table above already claimed.
 
 The honest limitation is the relative major: it shares all seven notes with its minor, and a
 progression touching neither leading tone is ambiguous to any method. Camelot notation is
@@ -709,7 +726,7 @@ audio device in JUCE's own `audio-device.xml` next to it.
 | Master, phones and cue mix levels | The channel faders and the crossfader |
 | Crossfader curve and per-channel assignment | EQ, filter, echo and reverb settings |
 | Tempo fader ranges, which decks are on screen | |
-| The waveform zoom | |
+| The waveform zoom, and whether keys show as Camelot | |
 | The sampler pads, their files, loops and gains | |
 | The mic's level, talkover and routing | Whether the mic was on |
 | The window's size and position | |
@@ -734,6 +751,10 @@ would say so.
 | --- | --- | --- |
 | `deck.select` | `deck` | Puts that deck on screen in place of the one it shares a side with |
 | `deck.waveform_zoom` | value | Signed rungs of the zoom ladder, positive to zoom in. One zoom for every deck, so no deck is named |
+| `deck.key_up` | `deck` | Moves the pitch up a semitone |
+| `deck.key_down` | `deck` | Moves the pitch down a semitone |
+| `deck.key_reset` | `deck` | Back to the track's own key |
+| `deck.key_match` | `deck` | Shifts to the key of the deck a sync would follow |
 | `deck.brake` | `deck` | Slows the deck to a stop |
 | `deck.backspin` | `deck` | Flings the record backwards to a stop |
 | `deck.reverse_toggle` | `deck` | Plays backwards until pressed again |

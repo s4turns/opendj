@@ -527,3 +527,23 @@ TEST_CASE ("a changed file drops a grid set by hand", "[library][cache][grid]")
     REQUIRE (known.has_value());
     REQUIRE_THAT (known->bpm, WithinAbs (130.0, 1.0e-9));
 }
+
+TEST_CASE ("the library hands a deck the key it knows", "[library][key]")
+{
+    Fixture fixture;
+
+    const auto file = fixture.folder.getChildFile ("keyed.wav");
+    REQUIRE (file.replaceWithText ("not really audio"));
+
+    auto record = fixture.recordFor (file, "Keyed", "");
+    record.key = "8A";
+    REQUIRE (fixture.library.upsertTrack (record) > 0);
+
+    const auto known = fixture.library.lookup (file);
+    REQUIRE (known.has_value());
+    REQUIRE (known->key.toString() == "Am");
+
+    // Whether or not the rest of the analysis can be trusted: a key from the
+    // tags is as good on a track that has never been analysed.
+    REQUIRE_FALSE (known->analysed);
+}

@@ -17,7 +17,7 @@ and the code are entirely original and entirely open.
 
 **Status: early development, but it mixes.** Four decks with turntable platters you can scratch,
 waveforms, beat grids, automatic BPM and key detection, sync, key lock, beat-locked loops and
-rolls, stem separation with a knob per stem, a mixer with a filter, a beat-synced echo and a reverb per channel, two master effect units, brake, backspin, reverse and censor, hot cues, an eight slot sampler, a
+rolls, key shift and key match, stem separation with a knob per stem, a mixer with a filter, a beat-synced echo and a reverb per channel, two master effect units, brake, backspin, reverse and censor, hot cues, an eight slot sampler, a
 searchable track library, set recording to WAV, FLAC or MP3 with a tracklist, broadcasting to Icecast, and Roland
 DJ-202 support including its own audio interface and its platters.
 
@@ -128,6 +128,24 @@ The two master units over the whole mix hold an echo, reverb or filter, a VST3 p
 | Stutter | Repeats the last 1/8 of a beat to 4 beats while on | How fast the repeats fade |
 
 The gate and the sweeps follow the beat grid of the deck the room is hearing, so they land with the music whenever you switch them on.
+
+## Keys
+
+The readout at the end of the row under the hot cues is the key the deck is playing in now. The
+buttons beside it move it a semitone at a time without changing the tempo, up to an octave either
+way, and a number beside the key says how far it has been moved. A new track starts back at its own
+key. With Key lock off, the tempo fader moves the pitch as well, and the readout follows it to the
+nearest semitone.
+
+Click the readout to match the deck that a sync would follow. It takes the shortest way to that key
+or its relative, which has the same notes, so A minor already matches C major and doesn't move.
+
+**Camelot** in the library toolbar shows keys as wheel numbers, 8A rather than Am, there and on the
+decks, and is remembered. Click the Key column to sort by the wheel, with tracks that have no key last.
+
+While a deck plays, the library shows what would mix with it. A key in bright green is the same key,
+and pale green is its relative or a step round the wheel. The key it goes by is the one being played
+after any shift, from the deck the room is hearing or, with every fader down, a playing deck.
 
 ## Four decks
 

@@ -219,8 +219,17 @@ bool Deck::loadFile (const juce::File& file, const KnownTrack* known)
     auto analysis = known != nullptr && known->analysed
         ? TrackAnalyser::withKnownTempo (track->audio, track->sampleRate,
                                          known->bpm, known->firstBeatSeconds,
-                                         known->tempoConfidence, {})
+                                         known->tempoConfidence, {}, known->key)
         : TrackAnalyser::analyse (track->audio, track->sampleRate);
+
+    // A first analysis detects a key whether or not the tags already have one.
+    // The tags win, which is what the library shows too.
+    if (known != nullptr && ! known->analysed && known->key.isValid() && analysis != nullptr)
+    {
+        auto withTaggedKey = std::make_shared<TrackAnalysis> (*analysis);
+        withTaggedKey->key = known->key;
+        analysis = std::move (withTaggedKey);
+    }
 
     publish (std::move (track));
     loadedBpm.store (analysis != nullptr ? analysis->bpm : 0.0, std::memory_order_relaxed);
@@ -281,6 +290,7 @@ void Deck::publish (std::unique_ptr<Track> newTrack)
     // a deck matched to another and then loaded with something else kept the
     // stretch, and the new track came up fast or slow until somebody noticed.
     tempoRatio.store (1.0, std::memory_order_relaxed);
+    keyShift.store (0, std::memory_order_relaxed);
 
     lengthSeconds.store (seconds, std::memory_order_relaxed);
     cuePointSeconds.store (0.0, std::memory_order_relaxed);
@@ -368,6 +378,26 @@ void Deck::play()
         spinRequest.store (spinCancel, std::memory_order_relaxed);
 
     playing.store (true, std::memory_order_relaxed);
+}
+
+void Deck::setKeyShift (int semitones)
+{
+    keyShift.store (juce::jlimit (-maximumKeyShift, maximumKeyShift, semitones), std::memory_order_relaxed);
+}
+
+MusicalKey Deck::getEffectiveKey() const
+{
+    const auto analysis = getAnalysis();
+
+    if (analysis == nullptr || ! analysis->hasKey())
+        return {};
+
+    auto semitones = getKeyShift();
+
+    if (! isKeyLockEnabled())
+        semitones += juce::roundToInt (12.0 * std::log2 (juce::jmax (0.01, getTempoRatio())));
+
+    return analysis->key.transposed (semitones);
 }
 
 void Deck::brake()
@@ -1172,16 +1202,24 @@ void Deck::processBlock (juce::AudioBuffer<float>& destination)
     // that comes and goes with the fader is worse than a pitch that does. A
     // stretcher cannot run backwards or follow a brake either, and the falling
     // pitch is what a brake is.
-    const auto stretching = keyLock.load (std::memory_order_relaxed)
-                         && ! scratching
+    //
+    // A key shift needs it whatever the speed, since that is the only thing
+    // here that can move a pitch by itself. Without key lock, the tempo moves
+    // the pitch on top of the shift, just as the fader always does.
+    const auto keyLocked = keyLock.load (std::memory_order_relaxed);
+    const auto shift = keyShift.load (std::memory_order_relaxed);
+    const auto stretching = ! scratching
                          && ! reversed
                          && ! spinning
                          && stretcher != nullptr
                          && outChannels == 2
-                         && std::abs (rate - fileToDevice) > 1.0e-6;
+                         && (shift != 0 || (keyLocked && std::abs (rate - fileToDevice) > 1.0e-6));
 
     if (stretching)
-        renderStretched (*track, destination, rate, fileToDevice, separation, stemGainNow);
+    {
+        const auto pitchScale = std::pow (2.0, shift / 12.0) * (keyLocked ? 1.0 : rate / fileToDevice);
+        renderStretched (*track, destination, rate, fileToDevice, pitchScale, separation, stemGainNow);
+    }
     else
         stretchPrimed = false;
 
@@ -1395,9 +1433,11 @@ void Deck::feedStretcher (const Track& track, double fileToDevice,
 }
 
 void Deck::renderStretched (const Track& track, juce::AudioBuffer<float>& destination,
-                            double rate, double fileToDevice,
+                            double rate, double fileToDevice, double pitchScale,
                             const SeparatedTrack* separation, const float* stemGains)
 {
+    stretcher->setPitchScale (juce::jlimit (0.25, 4.0, pitchScale));
+
     // Output samples per input sample. Each output sample must consume `rate`
     // file samples, and each input sample is fileToDevice of them.
     stretcher->setTimeRatio (juce::jlimit (0.25, 4.0, fileToDevice / rate));

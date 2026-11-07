@@ -318,3 +318,90 @@ TEST_CASE ("confidence is higher for a clear key than for a chromatic wash", "[k
     INFO ("tonal " << tonal.confidence << " vs wash " << washKey.confidence);
     REQUIRE (tonal.confidence > washKey.confidence);
 }
+
+TEST_CASE ("a key can be moved by semitones, either way and round the octave", "[key]")
+{
+    const auto am = opendj::MusicalKey::fromString ("Am");
+
+    REQUIRE (am.transposed (2).toString() == "Bm");
+    REQUIRE (am.transposed (-1).toString() == "G#m");
+    REQUIRE (am.transposed (12).toString() == "Am");
+    REQUIRE (am.transposed (-25).toString() == "G#m");
+    REQUIRE_FALSE (opendj::MusicalKey().transposed (3).isValid());
+}
+
+TEST_CASE ("the wheel's order runs 1A, 1B, 2A and agrees with the numbers", "[key]")
+{
+    REQUIRE (opendj::MusicalKey::fromString ("1A").wheelOrder() == 0);
+    REQUIRE (opendj::MusicalKey::fromString ("1B").wheelOrder() == 1);
+    REQUIRE (opendj::MusicalKey::fromString ("8A").wheelOrder() == 14);
+    REQUIRE (opendj::MusicalKey::fromString ("12B").wheelOrder() == 23);
+    REQUIRE (opendj::MusicalKey().wheelOrder() == -1);
+
+    for (int number = 1; number <= 12; ++number)
+        for (const auto* letter : { "A", "B" })
+        {
+            const auto camelot = juce::String (number) + letter;
+            const auto key = opendj::MusicalKey::fromString (camelot);
+            INFO (camelot);
+            REQUIRE (key.toCamelot() == camelot);
+            REQUIRE (key.wheelOrder() == (number - 1) * 2 + (juce::String (letter) == "B" ? 1 : 0));
+        }
+}
+
+TEST_CASE ("keys are told apart by how they mix", "[key]")
+{
+    using Harmony = opendj::MusicalKey::Harmony;
+    const auto key = [] (const char* text) { return opendj::MusicalKey::fromString (text); };
+
+    REQUIRE (key ("Am").harmonyWith (key ("8A")) == Harmony::same);
+    REQUIRE (key ("Am").harmonyWith (key ("C")) == Harmony::relative);
+    REQUIRE (key ("C").harmonyWith (key ("Am")) == Harmony::relative);
+    REQUIRE (key ("Am").harmonyWith (key ("Em")) == Harmony::neighbour);
+    REQUIRE (key ("Am").harmonyWith (key ("Dm")) == Harmony::neighbour);
+    REQUIRE (key ("C").harmonyWith (key ("G")) == Harmony::neighbour);
+
+    // Round the top of the wheel.
+    REQUIRE (key ("12A").harmonyWith (key ("1A")) == Harmony::neighbour);
+    REQUIRE (key ("1B").harmonyWith (key ("12B")) == Harmony::neighbour);
+
+    // A semitone is as close as two notes get and as far as two keys get.
+    REQUIRE (key ("Am").harmonyWith (key ("A#m")) == Harmony::clash);
+    REQUIRE (key ("Am").harmonyWith (key ("G")) == Harmony::clash);
+    REQUIRE (key ("Am").harmonyWith (opendj::MusicalKey()) == Harmony::clash);
+    REQUIRE (opendj::MusicalKey().harmonyWith (opendj::MusicalKey()) == Harmony::clash);
+}
+
+TEST_CASE ("matching a key takes the shortest way, to the key or its relative", "[key]")
+{
+    const auto key = [] (const char* text) { return opendj::MusicalKey::fromString (text); };
+
+    REQUIRE (key ("Am").semitonesToMatch (key ("Am")) == 0);
+    REQUIRE (key ("Am").semitonesToMatch (key ("Bm")) == 2);
+    REQUIRE (key ("Bm").semitonesToMatch (key ("Am")) == -2);
+    REQUIRE (key ("C").semitonesToMatch (key ("B")) == -1);
+    REQUIRE (key ("Am").semitonesToMatch (key ("C")) == 0);
+    REQUIRE (key ("C").semitonesToMatch (key ("Am")) == 0);
+    REQUIRE (key ("Am").semitonesToMatch (key ("D")) == 2);    // Bm is D's relative
+
+    // Every pair, checked by what the shift actually gives.
+    for (int from = 0; from < 24; ++from)
+        for (int to = 0; to < 24; ++to)
+        {
+            opendj::MusicalKey a, b;
+            a.tonic = from % 12;
+            a.mode = from < 12 ? opendj::MusicalKey::Mode::major : opendj::MusicalKey::Mode::minor;
+            b.tonic = to % 12;
+            b.mode = to < 12 ? opendj::MusicalKey::Mode::major : opendj::MusicalKey::Mode::minor;
+
+            const auto shift = a.semitonesToMatch (b);
+            const auto harmony = a.transposed (shift).harmonyWith (b);
+
+            REQUIRE (shift >= -6);
+            REQUIRE (shift <= 5);
+            REQUIRE ((harmony == opendj::MusicalKey::Harmony::same || harmony == opendj::MusicalKey::Harmony::relative));
+        }
+
+    REQUIRE (opendj::MusicalKey().semitonesToMatch (key ("Am")) == 0);
+    REQUIRE (key ("Am").semitonesToMatch (opendj::MusicalKey()) == 0);
+}

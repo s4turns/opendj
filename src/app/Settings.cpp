@@ -349,6 +349,7 @@ juce::var SessionState::toVar() const
     root->setProperty ("quantize", quantized);
     root->setProperty ("visible_decks", visible);
     root->setProperty ("waveform_zoom_seconds", waveformZoomSeconds);
+    root->setProperty ("camelot_keys", camelotKeys);
 
     root->setProperty ("output_mode", opendj::toString (outputMode));
 
@@ -485,6 +486,8 @@ SessionState SessionState::fromVar (const juce::var& source)
     state.waveformZoomSeconds = waveform::nearestZoom (
         number (source, "waveform_zoom_seconds", state.waveformZoomSeconds,
                 waveform::zoomLevels.front(), waveform::zoomLevels.back()));
+
+    state.camelotKeys = flag (source, "camelot_keys", state.camelotKeys);
 
     state.outputMode = outputModeFromString (text (source, "output_mode"));
 

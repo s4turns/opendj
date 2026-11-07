@@ -50,6 +50,10 @@ struct KnownTrack
     double firstBeatSeconds = 0.0;
     float tempoConfidence = 0.0f;
 
+    /** From the tags or an earlier analysis. It stands whether or not the tempo
+        fields do: a key in the tags outranks anything a detector finds. */
+    MusicalKey key;
+
     HotCues hotCues = noHotCues();   ///< restored onto the pads when the track loads
 };
 
