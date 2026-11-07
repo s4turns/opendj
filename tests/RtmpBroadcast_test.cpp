@@ -112,6 +112,10 @@ TEST_CASE ("a broadcast keeps flowing while ffmpeg floods its stderr", "[rtmp]")
         "#!/bin/sh\n"
         "case \"$*\" in\n"
         "  *-encoders*) echo ' V....D libx264              stand-in'; exit 0 ;;\n"
+        // Launching probes for this too. Falling through would land in the
+        // read below with whatever stdin the tests were started with, and one
+        // that never closes hangs the probe, and the test, for good.
+        "  *-filters*)  echo ' T.C drawtext              stand-in'; exit 0 ;;\n"
         "  *-version*)  echo 'ffmpeg version stand-in'; exit 0 ;;\n"
         "esac\n"
         "echo \"Output #0, flv, to 'rtmp://stand-in':\" >&2\n"
