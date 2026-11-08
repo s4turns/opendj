@@ -9,17 +9,22 @@
 
 Free and open source DJ software, built in C++ with [JUCE](https://juce.com).
 
-![A strip across the top lining up both decks' beats, decks A and B below it, each with a track loaded and its waveforms coloured by frequency, loop lengths, stem knobs, turntable platter, tempo fader and a button to swap in deck C or D, a four channel mixer between them with every control named on every channel: high, mid and low EQ, filter, echo and its length in beats, reverb, crossfader assignment, a channel fader and cue, the track library underneath showing tempo and key, a row of eight sampler pads with their own level and cue, aux and mic strips with talkover on the mic, and a bottom bar with audio setup, recording, Icecast and RTMP streaming, controller setup, and the audio device running at 10 ms](images/screenshot.jpg)
+![A strip across the top lining up both decks' beats, decks A and B below it, each with a track loaded, its waveforms coloured by frequency and its tempo and clock above them, loop lengths, eight hot cue pads with beat jump arrows and a quantize button, a row of Brake, Spin, Rev, Censor and Echo out with the key and its shift buttons, four stem knobs beside Inst, Acap, Drum and NoDr pads and an FX button, a turntable platter, the tempo fader and a button to swap in deck C or D, a four channel mixer between them with every control named on every channel, master, headphone and cue/mix knobs, Auto gain and the crossfader, the track library underneath with Import and Camelot in its toolbar, two master effect units, eight sampler pads with a bank button, level and cue, aux and mic strips with talkover on the mic, and a bottom bar with audio setup, recording, Icecast and RTMP streaming, visuals, controller setup, and the audio device running at 10 ms](images/screenshot.jpg)
 
 The goal is an application a VirtualDJ user can sit down at and already know how to use:
 the same deck layout, the same workflow, the same muscle memory. The artwork, the naming
 and the code are entirely original and entirely open.
 
 **Status: early development, but it mixes.** Four decks with turntable platters you can scratch,
-waveforms, beat grids, automatic BPM and key detection, sync, key lock, beat-locked loops and
-rolls, key shift and key match, stem separation with a knob per stem, stem pads and an effect on one stem, a mixer with a filter, a beat-synced echo and a reverb per channel, two master effect units, brake, backspin, reverse and censor, hot cues, an eight slot sampler, a
-searchable track library, set recording to WAV, FLAC or MP3 with a tracklist, broadcasting to Icecast, and Roland
-DJ-202 support including its own audio interface and its platters.
+waveforms, beat grids you can edit or tap in, automatic BPM and key detection, sync, key lock, beat jump
+and quantize, beat-locked loops and rolls, key shift, key match and Camelot keys, auto gain by measured
+loudness, stem separation with a knob per stem, stem pads and an effect on one stem, a mixer with a
+filter, a beat-synced echo and a reverb per channel, two master effect units with VST3 support, brake,
+backspin, reverse and censor, named hot cues, a sampler with four banks that can record from a deck,
+a mic and an aux input, playlists and automix with smart crossfades, rekordbox import, a searchable
+track library, set recording to WAV, FLAC or MP3 with a tracklist, broadcasting to Icecast and RTMP,
+MilkDrop visuals, MIDI learn, and Roland DJ-202 support including its own audio interface and its
+platters.
 
 ## Design goals
 
@@ -32,8 +37,9 @@ DJ-202 support including its own audio interface and its platters.
 ## Roadmap
 
 See [ROADMAP.md](ROADMAP.md) for what is done, what is left, and where to start. The short
-version: everything in the first milestone now works, along with effects, loops, a sampler and
-four decks.
+version: everything in the first milestone works, and most of what a VirtualDJ user would reach
+for in a set is there too. What is left is mostly checking recent work on real hardware and in real
+sets, a history and smart folders, and video.
 
 ## Using it
 
@@ -78,8 +84,10 @@ key.
 
 | Key | Action |
 | --- | --- |
-| Q / W | Deck A cue / play |
-| O / P | Deck B cue / play |
+| Q / W | Left deck cue / play |
+| O / P | Right deck cue / play |
+| 1 to 8 | Fire the sampler pads |
+| F11 | Full screen |
 
 Cue follows the behaviour DJs expect. While the deck is stopped, pressing cue sets the cue
 point and previews from it, and releasing returns and stops. While it is playing, pressing
@@ -532,7 +540,7 @@ top of a platter halts playback and drives it from your hand at 33 1/3 rpm; movi
 ring instead nudges the pitch and decays back to the fader.
 
 Not yet mapped: the deck-toggle button and decks 3 and 4, the effects section, the TR-S
-sequencer, slip and vinyl mode, key lock, and the pad modes past hot cue.
+sequencer, slip and vinyl mode, and the pad modes past hot cue.
 
 **One thing still needs checking against real hardware:** the tempo faders are mapped inverted,
 on the assumption the DJ-202 sends its highest value at the bottom of the throw. If yours reads

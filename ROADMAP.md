@@ -1,8 +1,9 @@
 # OpenDJ roadmap
 
 Where the project is and what to pick up next. Anything ticked has tests or a verified manual
-check behind it, not just code that compiles. The suite is **651 tests** on Linux. Windows runs
-one fewer, a stderr test whose stand-in for ffmpeg is a shell script. Anything touching audio is
+check behind it, not just code that compiles. The suite is **618 test cases** in a Windows build
+(`opendj-tests --list-tests`); a few are platform specific, so the count differs a little on Linux
+and macOS. Anything touching audio is
 tested by measuring the output, not by checking that the code ran. Open work is also tracked as
 issues on [git.interdo.me](https://git.interdo.me/interdome/opendj/issues), and the numbers
 below refer to those.
@@ -39,6 +40,9 @@ that was listed after it except video.
 | --- | :---: | --- |
 | Four decks, A to D | ✅ | Four mixer strips, a crossfader assignment per channel, a swap button per side |
 | Loops and loop rolls | ✅ | `Deck::setLoopBeats` and friends |
+| Beat jump and quantize (#13) | ✅ | `Deck::beatJump`, `Deck::setQuantize`: jumps of 1 to 32 beats, cues and loops snapped to the grid |
+| Beat grid editing and tap tempo (#14) | ✅ | `src/ui/BeatGridEditor.*`, behind each deck's BPM readout. Edits are kept with the track and outrank later analysis |
+| Full screen (#41) | ✅ | F11, `MainComponent::keyPressed` |
 | Slip mode | ✅ | `Deck::setSlipEnabled`, sharing the roll's shadow playhead |
 | Key detection | ✅ | `src/analysis/KeyDetector.*`, in the browser's Key column |
 | Auto gain | ✅ | `src/analysis/Loudness.*`, `Deck::setAutoGainEnabled`. BS.1770 loudness, kept with the track |
@@ -48,12 +52,16 @@ that was listed after it except video.
 | Brake, backspin, reverse, censor | ✅ | `Deck::brake` and friends, on a row of their own under the hot cues |
 | Echo out | ✅ | `Mixer::setChannelEchoOut` |
 | VST3 effect plugins | ✅ | `src/core/PluginHost.*`: scanned in the background, loaded into a master slot with its own window and two knobs mapped to its parameters |
-| Sampler | ✅ | `src/core/Sampler.*`, eight pads |
+| Sampler | ✅ | `src/core/Sampler.*`, `src/ui/SamplerComponent.*`: four banks of eight pads, recording from a deck, and tempo sync (#21) |
 | Playlists | ✅ | `Library` playlist tables, `src/ui/PlaylistComponent.*`: built from the browser by selection or drag, reordered, renamed |
 | Automix | ✅ | `src/core/AutoMix.*`, `AutoMixMath.h`: plays a playlist on decks A and B, loading ahead, matching tempo and beat, sweeping the crossfader. Key lock goes on for a deck whose tempo it changes |
 | Smart crossfade | 🚧 | `src/core/MixPoints.*`: outro into intro, phrase on phrase, with a bass swap (#37). Checked against 20 real tracks' analyses, not yet listened to through a whole set. Vocals are kept apart where a separator is installed (#37): each track is separated while the one before plays, the mix moves to the nearest phrase, or the shorter fade, with fewest bars sung over each other, and the outgoing vocals make way for any that remain. Each phrase is read as intro, verse, chorus, breakdown or outro from its energy (and its vocals when separated). With no outro to mix from, the fade moves back rather than cut into a closing chorus. The incoming track is matched to the loudness of the outgoing one, within 6 dB |
 | Mic input | 🚧 | `src/core/MicInput.*`, `src/ui/MicComponent.*`, with talkover and a stream-only switch. Tested by measuring the output; not yet tried with a real mic |
+| Aux input (#46) | 🚧 | The same `MicInput` in stereo, on its own pair of inputs. Tested by measuring the output; not yet tried with a real source |
 | Stem separation | ✅ | `src/analysis/StemSeparator.*`, `StemDsp.*`, a knob per stem |
+| Stem pads, an effect on one stem, preparing ahead (#22) | 🚧 | `Deck::setStemFxEnabled` and friends, `src/ui/StemPrepareMenu.h`. Tested with hand-built stems and a stand-in separator; not yet run with a real separation model |
+| MIDI learn (#19) | 🚧 | `src/control/MidiLearn.*`, in the Controller panel. Tested with messages fed in where a device delivers them; not yet on a controller |
+| rekordbox import (#23) | ✅ | `src/library/RekordboxImport.*`: grids, hot cues, playlists, colours, ratings and comments |
 | Stems on the GPU (#36) | ✅ | `src/analysis/StemModel.*`: ONNX Runtime with CUDA on an NVIDIA card, OpenVINO on Intel graphics or the CPU. A five minute track takes 27 s on an RTX 4070 against 118 s on the CPU. Core ML on a Mac: a six minute track takes about 26 s on an M5 Pro, 2.5 times as fast as its CPU |
 | Record the master output | ✅ | `src/core/SetRecorder.*`: WAV, FLAC or MP3, with a tracklist |
 | Split output cue | ✅ | `src/core/OutputRouter.*`, headphones on a stereo interface |
@@ -67,6 +75,8 @@ that was listed after it except video.
 
 | Item | Notes |
 | --- | --- |
+| History and smart folders (#11) | The biggest gap left in the VirtualDJ comparison below. `tracks.last_played_at` exists but nothing writes it |
+| Hands-on checks of recent work | Stem pads and stem FX with a real separation model, MIDI learn on a real controller, the new effects and key tools heard in a set, auto gain across a real collection, the aux input with a real source. All are tested by measurement; none has been used in anger |
 | DJ-202 pad modes on the hardware, then the rest (#6) | Loop, roll and sampler modes are mapped from Mixxx's DJ-202 script and need pressing on the controller. Cue loop, pitch play, slicer, the parameter buttons and the TR-S sequencer are not mapped |
 | Arch | `scripts/build.sh` knows the Arch packages but has never been run there |
 | macOS hardware coverage | Apple Silicon builds, tests and opens with CoreAudio. Intel hardware and the DJ-202 on macOS still need checking; see Platforms below |
