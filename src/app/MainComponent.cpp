@@ -95,6 +95,9 @@ MainComponent::MainComponent()
 
     startupError = engine.initialise (midi.getDeviceNameHints(), savedDevice.get());
 
+    // What a separation killed last time left behind, before any new one starts.
+    engine.getStemSeparator().sweepLeftovers();
+
     if (juce::SystemStats::getEnvironmentVariable ("OPENDJ_MIDI_TRACE", {}).getIntValue() != 0)
         std::cerr << "[opendj audio] "
                   << (startupError.isNotEmpty()
@@ -201,6 +204,32 @@ MainComponent::MainComponent()
 
     browser->onPlaylistsChanged = [this] { playlistView->refresh(); };
 
+    // Both lists offer the same thing the same way: through the dispatcher, like
+    // anything else a person can do, so a controller's button means the same.
+    StemPrepareMenu stemMenu;
+    stemMenu.isAvailable = [this] { return engine.getStemSeparator().isAvailable(); };
+    stemMenu.isBusy = [this] { return engine.isPreparingStems(); };
+    stemMenu.hasStatus = [this]
+    {
+        const auto progress = engine.getStemQueueProgress();
+        return progress.halt != StemQueue::Halt::none || progress.total > 0;
+    };
+    stemMenu.prepare = [safe = juce::Component::SafePointer<MainComponent> (this)]
+    {
+        if (safe != nullptr)
+            safe->dispatcher.dispatch ({ Action::stemsPrepareSelected, 0, 0, 1.0f });
+    };
+    stemMenu.cancel = [safe = juce::Component::SafePointer<MainComponent> (this)]
+    {
+        if (safe != nullptr)
+            safe->dispatcher.dispatch ({ Action::stemsPrepareCancel, 0, 0, 1.0f });
+    };
+
+    browser->stemPrepareMenu = stemMenu;
+    playlistView->stemPrepareMenu = stemMenu;
+    browser->stemStatus = [this] { return engine.getStemQueueProgress().describe(); };
+    playlistView->stemStatus = browser->stemStatus;
+
     // Here rather than with the rest of the settings, which are restored before
     // the browser exists.
     browser->setKeyNotation (settings.camelotKeys);
@@ -228,6 +257,17 @@ MainComponent::MainComponent()
         {
             if (safe != nullptr)
                 safe->stepWaveformZoom (steps);
+        });
+    };
+
+    // The press can come from the MIDI thread, and a selection cannot be read
+    // from there. Which list it means is whichever is on show.
+    dispatcher.prepareStemsHandler = [safe = juce::Component::SafePointer<MainComponent> (this)]
+    {
+        juce::MessageManager::callAsync ([safe]
+        {
+            if (safe != nullptr)
+                safe->prepareStemsForListOnShow();
         });
     };
 
@@ -311,6 +351,7 @@ MainComponent::~MainComponent()
     dispatcher.onStateChanged = nullptr;
     dispatcher.selectedFileProvider = nullptr;
     dispatcher.browseScrollHandler = nullptr;
+    dispatcher.prepareStemsHandler = nullptr;
     dispatcher.waveformZoomHandler = nullptr;
     removeKeyListener (this);
 
@@ -815,6 +856,15 @@ void MainComponent::showDeck (int deckIndex)
         beatStrip->setDecks (visibleDecks[0], visibleDecks[1]);
 
     deckRow.resized();
+}
+
+void MainComponent::prepareStemsForListOnShow()
+{
+    // By which component is on show rather than by its tab's place, which can
+    // change without anyone thinking of this.
+    const auto selection = browser->getSelectedFiles();
+    engine.prepareStems (stemListOnShow (browserTabs->getCurrentContentComponent() == playlistView.get(),
+                                         playlistView->getFiles(), selection));
 }
 
 void MainComponent::stepWaveformZoom (int steps)

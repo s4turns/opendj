@@ -6,10 +6,12 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include "control/ActionDispatcher.h"
+#include "control/MidiControlSurface.h"
 #include "core/AudioEngine.h"
 
 #include <cmath>
 #include <memory>
+#include <vector>
 
 using namespace opendj;
 
@@ -78,6 +80,298 @@ namespace
         AudioEngine engine;
         ActionDispatcher dispatcher { engine };
     };
+}
+
+namespace
+{
+    /** Four stems an octave apart for a deck of the harness, to be told apart
+        by ear in the output. */
+    std::shared_ptr<SeparatedTrack> makeToneStems (double seconds)
+    {
+        constexpr double rate = 44100.0;
+        const double frequency[numStems] { 110.0, 220.0, 440.0, 880.0 };
+
+        auto separation = std::make_shared<SeparatedTrack>();
+        separation->sampleRate = rate;
+
+        for (int stem = 0; stem < numStems; ++stem)
+        {
+            auto& buffer = separation->stems[(size_t) stem];
+            buffer.setSize (2, static_cast<int> (seconds * rate));
+
+            for (int i = 0; i < buffer.getNumSamples(); ++i)
+            {
+                const auto value = 0.2f * static_cast<float> (std::sin (juce::MathConstants<double>::twoPi * frequency[stem] * i / rate));
+                buffer.setSample (0, i, value);
+                buffer.setSample (1, i, value);
+            }
+        }
+
+        return separation;
+    }
+
+    /** The amplitude of one of those tones in a window of output. */
+    double toneIn (const std::vector<float>& samples, double frequency)
+    {
+        double real = 0.0, imaginary = 0.0, windowSum = 0.0;
+
+        for (size_t i = 0; i < samples.size(); ++i)
+        {
+            const auto position = static_cast<double> (i);
+            const auto window = 0.5 - 0.5 * std::cos (juce::MathConstants<double>::twoPi * position / static_cast<double> (samples.size()));
+            const auto phase = juce::MathConstants<double>::twoPi * frequency * position / 48000.0;
+            real += window * samples[i] * std::cos (phase);
+            imaginary += window * samples[i] * std::sin (phase);
+            windowSum += window;
+        }
+
+        return 2.0 * std::sqrt (real * real + imaginary * imaginary) / windowSum;
+    }
+
+    std::vector<float> captureDeck (Deck& deck, int blocks)
+    {
+        juce::AudioBuffer<float> block (2, 512);
+        std::vector<float> samples;
+
+        for (int i = 0; i < blocks; ++i)
+        {
+            deck.processBlock (block);
+            samples.insert (samples.end(), block.getReadPointer (0), block.getReadPointer (0) + 512);
+        }
+
+        return samples;
+    }
+}
+
+TEST_CASE ("the stem pad actions have names and take a slot", "[control][stems]")
+{
+    REQUIRE (actionFromString ("deck.stem_pad") == Action::deckStemPad);
+    REQUIRE (actionFromString ("deck.stem_pad_toggle") == Action::deckStemPadToggle);
+    REQUIRE (toString (Action::deckStemPad) == "deck.stem_pad");
+    REQUIRE (toString (Action::deckStemPadToggle) == "deck.stem_pad_toggle");
+    REQUIRE (actionTakesSlot (Action::deckStemPad));
+    REQUIRE (actionTakesSlot (Action::deckStemPadToggle));
+    REQUIRE (actionTakesDeck (Action::deckStemPad));
+    REQUIRE_FALSE (isContinuous (Action::deckStemPad));
+    REQUIRE_FALSE (isContinuous (Action::deckStemPadToggle));
+}
+
+TEST_CASE ("a held stem pad plays while it is down and gives way to the latched one", "[control][stems]")
+{
+    PadHarness h;
+    auto& deck = h.engine.getDeck (0);
+
+    deck.setSeparation (makeToneStems (10.0), deck.getLoadedFile());
+    deck.play();
+    captureDeck (deck, 10);
+
+    // Latched to the acapella.
+    h.dispatcher.dispatch ({ Action::deckStemPadToggle, 0, 1, 1.0f });
+    h.dispatcher.dispatch ({ Action::deckStemPadToggle, 0, 1, 0.0f });   // the release is not a second press
+    captureDeck (deck, 10);
+
+    auto heard = captureDeck (deck, 80);
+    REQUIRE (toneIn (heard, 880.0) > 0.19);
+    REQUIRE (toneIn (heard, 110.0) < 0.003);
+
+    // Drums while held.
+    h.dispatcher.dispatch ({ Action::deckStemPad, 0, 2, 1.0f });
+    captureDeck (deck, 10);
+
+    heard = captureDeck (deck, 80);
+    REQUIRE (toneIn (heard, 110.0) > 0.19);
+    REQUIRE (toneIn (heard, 880.0) < 0.003);
+
+    // And back.
+    h.dispatcher.dispatch ({ Action::deckStemPad, 0, 2, 0.0f });
+    captureDeck (deck, 10);
+
+    heard = captureDeck (deck, 80);
+    REQUIRE (toneIn (heard, 880.0) > 0.19);
+    REQUIRE (toneIn (heard, 110.0) < 0.003);
+}
+
+TEST_CASE ("a stem pad action past the last pad does nothing", "[control][stems]")
+{
+    PadHarness h;
+    auto& deck = h.engine.getDeck (0);
+    deck.setSeparation (makeToneStems (1.0), deck.getLoadedFile());
+
+    h.dispatcher.dispatch ({ Action::deckStemPadToggle, 0, 4, 1.0f });
+    h.dispatcher.dispatch ({ Action::deckStemPad, 0, 7, 1.0f });
+    REQUIRE (deck.getStemPad() == -1);
+}
+
+TEST_CASE ("the stem effect actions have names", "[control][stems][stemfx]")
+{
+    const std::pair<Action, const char*> names[]
+    {
+        { Action::deckStemFx,       "deck.stem_fx" },
+        { Action::deckStemFxTarget, "deck.stem_fx_target" },
+        { Action::deckStemFxType,   "deck.stem_fx_type" },
+        { Action::deckStemFxBeats,  "deck.stem_fx_beats" },
+        { Action::deckStemFxAmount, "deck.stem_fx_amount" }
+    };
+
+    for (const auto& [action, name] : names)
+    {
+        INFO (name);
+        REQUIRE (actionFromString (name) == action);
+        REQUIRE (toString (action) == name);
+        REQUIRE (actionTakesDeck (action));
+    }
+
+    REQUIRE_FALSE (actionTakesSlot (Action::deckStemFx));
+    REQUIRE (actionTakesSlot (Action::deckStemFxTarget));
+    REQUIRE (actionTakesSlot (Action::deckStemFxType));
+    REQUIRE (actionTakesSlot (Action::deckStemFxBeats));
+    REQUIRE_FALSE (actionTakesSlot (Action::deckStemFxAmount));
+
+    REQUIRE_FALSE (isContinuous (Action::deckStemFx));
+    REQUIRE_FALSE (isContinuous (Action::deckStemFxTarget));
+    REQUIRE (isContinuous (Action::deckStemFxAmount));
+}
+
+TEST_CASE ("the stem effect is played through its actions", "[control][stems][stemfx]")
+{
+    PadHarness h;
+    auto& deck = h.engine.getDeck (0);
+
+    // No stems yet, so the press is not waiting for any.
+    h.dispatcher.dispatch ({ Action::deckStemFx, 0, 0, 1.0f });
+    REQUIRE_FALSE (deck.isStemFxEnabled());
+
+    deck.setSeparation (makeToneStems (10.0), deck.getLoadedFile());
+
+    // Every choice lands, and the release of a button is not another press.
+    h.dispatcher.dispatch ({ Action::deckStemFxTarget, 0, 1, 1.0f });
+    h.dispatcher.dispatch ({ Action::deckStemFxTarget, 0, 3, 0.0f });
+    REQUIRE (deck.getStemFxTarget() == Stem::bass);
+
+    h.dispatcher.dispatch ({ Action::deckStemFxType, 0, 2, 1.0f });
+    REQUIRE (deck.getStemFxType() == StemEffect::Type::lowPass);
+    h.dispatcher.dispatch ({ Action::deckStemFxType, 0, 0, 1.0f });
+    REQUIRE (deck.getStemFxType() == StemEffect::Type::echo);
+
+    h.dispatcher.dispatch ({ Action::deckStemFxBeats, 0, 1, 1.0f });
+    REQUIRE (deck.getStemFxBeats() == 1);
+
+    h.dispatcher.dispatch ({ Action::deckStemFxAmount, 0, 0, 0.75f });
+    REQUIRE_THAT (deck.getStemFxAmount(), Catch::Matchers::WithinAbs (0.75f, 1.0e-6));
+
+    // What does not exist does nothing, rather than acting as the last there is.
+    h.dispatcher.dispatch ({ Action::deckStemFxTarget, 0, numStems, 1.0f });
+    h.dispatcher.dispatch ({ Action::deckStemFxType, 0, StemEffect::numTypes, 1.0f });
+    h.dispatcher.dispatch ({ Action::deckStemFxBeats, 0, StemEffect::numDivisions, 1.0f });
+    REQUIRE (deck.getStemFxTarget() == Stem::bass);
+    REQUIRE (deck.getStemFxType() == StemEffect::Type::echo);
+    REQUIRE (deck.getStemFxBeats() == 1);
+
+    h.dispatcher.dispatch ({ Action::deckStemFx, 0, 0, 1.0f });
+    h.dispatcher.dispatch ({ Action::deckStemFx, 0, 0, 0.0f });
+    REQUIRE (deck.isStemFxEnabled());
+
+    // And it is heard. The deck is playing this track's own mix, which has no
+    // tones in, so the bass is there only because the actions put it there.
+    deck.play();
+    captureDeck (deck, 100);
+    const auto heard = captureDeck (deck, 100);
+
+    REQUIRE (toneIn (heard, 220.0) > 0.05);
+    REQUIRE (toneIn (heard, 880.0) < 0.003);
+
+    h.dispatcher.dispatch ({ Action::deckStemFx, 0, 0, 1.0f });
+    REQUIRE_FALSE (deck.isStemFxEnabled());
+}
+
+TEST_CASE ("the stem effect's lights say what it is doing", "[control][stems][stemfx]")
+{
+    PadHarness h;
+    auto& deck = h.engine.getDeck (0);
+    deck.setSeparation (makeToneStems (1.0), deck.getLoadedFile());
+
+    const auto lit = [&h] (Action action, int slot)
+    {
+        MidiControl control;
+        control.action = action;
+        control.slot = slot;
+        return feedbackStateFor (h.engine, h.dispatcher, control);
+    };
+
+    REQUIRE_FALSE (lit (Action::deckStemFx, 0));
+    deck.setStemFxEnabled (true);
+    REQUIRE (lit (Action::deckStemFx, 0));
+
+    deck.setStemFxTarget (Stem::other);
+    REQUIRE (lit (Action::deckStemFxTarget, 2));
+    REQUIRE_FALSE (lit (Action::deckStemFxTarget, 3));
+
+    deck.setStemFxType (StemEffect::Type::reverb);
+    REQUIRE (lit (Action::deckStemFxType, 1));
+    REQUIRE_FALSE (lit (Action::deckStemFxType, 0));
+
+    deck.setStemFxBeats (3);
+    REQUIRE (lit (Action::deckStemFxBeats, 3));
+    REQUIRE_FALSE (lit (Action::deckStemFxBeats, 2));
+}
+
+TEST_CASE ("the engine keeps the stem effect on the beat of the record, not the fader", "[control][stems][stemfx]")
+{
+    PadHarness h;
+    auto& deck = h.engine.getDeck (0);
+    const auto analysis = deck.getAnalysis();
+    REQUIRE (analysis->hasTempo());
+
+    // At a tempo of 1.25, and one the deck's default would be wrong for.
+    deck.setStemFxBeatSeconds (3.0);
+    deck.setTempoRatio (1.25);
+    h.engine.setEchoBeats (0, 1.0);
+
+    REQUIRE_THAT (deck.getStemFxBeatSeconds(), Catch::Matchers::WithinAbs (analysis->secondsPerBeat(), 1.0e-9));
+
+    // No track, no grid: half a second, as the channel echo has it.
+    deck.setStemFxBeatSeconds (3.0);
+    deck.unload();
+    h.engine.setEchoBeats (0, 1.0);
+    REQUIRE_THAT (deck.getStemFxBeatSeconds(), Catch::Matchers::WithinAbs (0.5, 1.0e-9));
+}
+
+TEST_CASE ("a stem pad's light follows the pad that is playing", "[control][stems]")
+{
+    PadHarness h;
+    auto& deck = h.engine.getDeck (0);
+
+    MidiControl latching, holding, other;
+    latching.action = Action::deckStemPadToggle;
+    latching.slot = 2;
+    holding.action = Action::deckStemPad;
+    holding.slot = 2;
+    other.action = Action::deckStemPadToggle;
+    other.slot = 1;
+
+    const auto lit = [&h] (const MidiControl& control) { return feedbackStateFor (h.engine, h.dispatcher, control); };
+
+    // No stems, so the press does nothing and nothing lights.
+    h.dispatcher.dispatch ({ Action::deckStemPadToggle, 0, 2, 1.0f });
+    REQUIRE_FALSE (lit (latching));
+
+    deck.setSeparation (makeToneStems (1.0), deck.getLoadedFile());
+
+    h.dispatcher.dispatch ({ Action::deckStemPadToggle, 0, 2, 1.0f });
+    REQUIRE (lit (latching));
+    REQUIRE (lit (holding));
+    REQUIRE_FALSE (lit (other));
+
+    h.dispatcher.dispatch ({ Action::deckStemPad, 0, 1, 1.0f });
+    REQUIRE_FALSE (lit (latching));
+    REQUIRE (lit (other));
+
+    h.dispatcher.dispatch ({ Action::deckStemPad, 0, 1, 0.0f });
+    REQUIRE (lit (latching));
+
+    // The other deck's light belongs to the other deck.
+    latching.deck = 1;
+    REQUIRE_FALSE (lit (latching));
 }
 
 TEST_CASE ("a pad mode is kept per deck, as the code the controller sent", "[control][pads]")

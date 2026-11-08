@@ -57,6 +57,12 @@ public:
         marshal. */
     std::function<void (int deckIndex)> deckSelectHandler;
 
+    /** Queues the selected tracks to have their stems prepared. What is selected
+        is the interface's to know, and it may be in the middle of changing, so
+        the shell provides this. May be called from the MIDI thread, so
+        implementations must marshal. */
+    std::function<void()> prepareStemsHandler;
+
     /** How far the tempo fader travels, as a percentage either side of zero. */
     void setTempoRange (int deckIndex, double percent);
     double getTempoRange (int deckIndex) const;

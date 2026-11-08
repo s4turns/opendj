@@ -272,7 +272,7 @@ DeckComponent::DeckComponent (AudioEngine& engineToUse, int deckIndex, const juc
     tempoLabel.setColour (juce::Label::textColourId, juce::Colours::grey);
     addAndMakeVisible (tempoLabel);
 
-    // Stems: a knob each, and the button that asks for a separation.
+    // Stems: a knob each, the button that asks for a separation, and the pads.
     updateSeparateTooltip();
     stemControls.separate.onClick = [this]
     {
@@ -293,7 +293,7 @@ DeckComponent::DeckComponent (AudioEngine& engineToUse, int deckIndex, const juc
             // The model is loaded by now, so the tooltip can name the device.
             safe->updateSeparateTooltip();
             safe->refresh();
-        });
+        }, true);
 
         refresh();
     };
@@ -324,6 +324,42 @@ DeckComponent::DeckComponent (AudioEngine& engineToUse, int deckIndex, const juc
         label.setFont (juce::FontOptions (11.0f));
         addAndMakeVisible (label);
     }
+
+    {
+        static constexpr const char* padNames[numStemPads] { "Inst", "Acap", "Drum", "NoDr" };
+        static constexpr const char* padTips[numStemPads]
+        {
+            "Instrumental: everything but the vocals, until pressed again",
+            "Acapella: only the vocals, until pressed again",
+            "Only the drums, until pressed again",
+            "Everything but the drums, until pressed again"
+        };
+
+        for (int pad = 0; pad < numStemPads; ++pad)
+        {
+            auto& button = stemControls.pads[(size_t) pad];
+            button.setButtonText (padNames[pad]);
+            button.setTooltip (padTips[pad]);
+            button.onClick = [this, pad] { deck.toggleStemPad (pad); refresh(); };
+            addAndMakeVisible (button);
+        }
+    }
+
+    // The stem effect: a knob for how much, and a button for on and off with the
+    // rest of what there is to choose kept out of the way behind a right click.
+    stemControls.fxAmount.setSliderStyle (juce::Slider::RotaryVerticalDrag);
+    stemControls.fxAmount.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
+    stemControls.fxAmount.setRange (0.0, 1.0, 0.0);
+    stemControls.fxAmount.setValue (deck.getStemFxAmount(), juce::dontSendNotification);
+    stemControls.fxAmount.onValueChange = [this]
+    {
+        deck.setStemFxAmount ((float) stemControls.fxAmount.getValue());
+    };
+    addAndMakeVisible (stemControls.fxAmount);
+
+    stemControls.fxButton.onClick = [this] { deck.toggleStemFx(); refresh(); };
+    stemControls.fxButton.onClear = [this] { showStemFxMenu(); };
+    addAndMakeVisible (stemControls.fxButton);
 
     scrollingWave.onZoom = [this] (int steps) { if (onZoomRequested != nullptr) onZoomRequested (steps); };
     addAndMakeVisible (scrollingWave);
@@ -359,6 +395,62 @@ void DeckComponent::updateKeyReadout()
 
     keyLabel.setText (text, juce::dontSendNotification);
     keyLabel.setColour (juce::Label::textColourId, shift != 0 ? accentColour : juce::Colours::lightgrey);
+}
+
+void DeckComponent::showStemFxMenu()
+{
+    // The ids are the choices, offset so each section has a range of its own.
+    constexpr int targetIds = 100, typeIds = 200, beatsIds = 300;
+    const auto type = deck.getStemFxType();
+
+    juce::PopupMenu menu;
+    menu.addSectionHeader ("Effect on");
+
+    for (int stem = 0; stem < numStems; ++stem)
+    {
+        const juce::String stemName (toString (static_cast<Stem> (stem)));
+        menu.addItem (targetIds + stem, stemName.substring (0, 1).toUpperCase() + stemName.substring (1),
+                      true, static_cast<int> (deck.getStemFxTarget()) == stem);
+    }
+
+    menu.addSectionHeader ("Effect");
+
+    for (int choice = 0; choice < StemEffect::numTypes; ++choice)
+        menu.addItem (typeIds + choice, StemEffect::getTypeName (static_cast<StemEffect::Type> (choice)),
+                      true, static_cast<int> (type) == choice);
+
+    menu.addSectionHeader ("Echo length, in beats");
+
+    for (int division = 0; division < StemEffect::numDivisions; ++division)
+        menu.addItem (beatsIds + division, StemEffect::getDivisionName (division),
+                      type == StemEffect::Type::echo, deck.getStemFxBeats() == division);
+
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (stemControls.fxButton),
+                        [safe = juce::Component::SafePointer<DeckComponent> (this)] (int result)
+    {
+        if (safe == nullptr || result <= 0)
+            return;
+
+        if (result >= beatsIds)
+            safe->deck.setStemFxBeats (result - beatsIds);
+        else if (result >= typeIds)
+            safe->deck.setStemFxType (static_cast<StemEffect::Type> (result - typeIds));
+        else
+            safe->deck.setStemFxTarget (static_cast<Stem> (result - targetIds));
+
+        safe->refresh();
+    });
+}
+
+void DeckComponent::updateStemFxTooltip()
+{
+    const auto type = deck.getStemFxType();
+    auto text = StemEffect::getTypeName (type) + " on the " + toString (deck.getStemFxTarget());
+
+    if (type == StemEffect::Type::echo)
+        text << ", " << StemEffect::getDivisionName (deck.getStemFxBeats()) << " beat";
+
+    stemControls.fxButton.setTooltip (text + ".\nClick for on and off, right click to choose.");
 }
 
 void DeckComponent::showKeyMenu()
@@ -542,29 +634,44 @@ void DeckComponent::refresh()
     lit (echoOutButton, engine.getMixer().isChannelEchoOut (index), accentColour.darker (0.4f));
 
     // The stem controls follow the engine: dead until a separation exists, and
-    // the button says what it is doing while one is running.
+    // the button says what it is doing while one is running. A knob a pad has
+    // silenced goes dead too, as turning it could not be heard, and it keeps its
+    // value for when the pad lets go. The deck puts the gains back to unity for
+    // each new track, so a knob only has to show what the deck says.
     const auto separating = engine.isDeckSeparating (index);
     const auto haveStems = deck.hasStems();
-
-    if (haveStems != stemsWereAvailable)
-    {
-        stemsWereAvailable = haveStems;
-
-        for (auto& knob : stemControls.knobs)
-        {
-            knob.setEnabled (haveStems);
-            knob.setValue (1.0, juce::dontSendNotification);
-        }
-    }
+    const auto stemPad = deck.getStemPad();
 
     for (int stem = 0; stem < numStems; ++stem)
     {
         auto& knob = stemControls.knobs[(size_t) stem];
         const auto gain = deck.getStemGain (static_cast<Stem> (stem));
 
+        knob.setEnabled (haveStems && (stemPad < 0 || stemPadMasks[stemPad][stem] > 0.0f));
+
         if (! knob.isMouseButtonDown() && std::abs (knob.getValue() - gain) > 1.0e-4)
             knob.setValue (gain, juce::dontSendNotification);
     }
+
+    for (int pad = 0; pad < numStemPads; ++pad)
+    {
+        auto& button = stemControls.pads[(size_t) pad];
+        button.setEnabled (haveStems);
+        lit (button, pad == stemPad, accentColour.darker (0.4f));
+    }
+
+    // Both stay usable without stems, dimmed: what the effect is and how much
+    // of it are choices for the next track too, and the right click on the
+    // button is the only way to them on screen. A press without stems does
+    // nothing, as it does from a controller.
+    stemControls.fxAmount.setAlpha (haveStems ? 1.0f : 0.5f);
+    stemControls.fxButton.setAlpha (haveStems ? 1.0f : 0.5f);
+    lit (stemControls.fxButton, deck.isStemFxEnabled(), accentColour.darker (0.4f));
+    updateStemFxTooltip();
+
+    if (! stemControls.fxAmount.isMouseButtonDown()
+        && std::abs (stemControls.fxAmount.getValue() - deck.getStemFxAmount()) > 1.0e-4)
+        stemControls.fxAmount.setValue (deck.getStemFxAmount(), juce::dontSendNotification);
 
     stemControls.separate.setEnabled (deck.isLoaded() && ! haveStems && ! separating
                                       && engine.getStemSeparator().isAvailable());
@@ -849,14 +956,29 @@ void DeckComponent::resized()
             button->setBounds (effectRow.removeFromLeft (width).reduced (1));
     }
 
-    // Then the stems: the button that asks for a separation, and a knob per part.
+    // Then the stems: the button that asks for a separation, a knob per part, the
+    // effect's knob and button, and two rows of pads at the far end.
     area.removeFromTop (6);
     {
         auto stemRow = area.removeFromTop (46);
         stemControls.separate.setBounds (stemRow.removeFromLeft (74).reduced (0, 12));
         stemRow.removeFromLeft (6);
 
-        const auto knobWidth = juce::jmax (36, stemRow.getWidth() / numStems);
+        constexpr int padsPerRow = numStemPads / 2, padWidth = 40;
+        auto padGrid = stemRow.removeFromRight (padWidth * padsPerRow);
+        const auto padHeight = padGrid.getHeight() / 2;
+
+        for (int pad = 0; pad < numStemPads; ++pad)
+            stemControls.pads[(size_t) pad].setBounds (
+                juce::Rectangle<int> (padGrid.getX() + (pad % padsPerRow) * padWidth,
+                                      padGrid.getY() + (pad / padsPerRow) * padHeight,
+                                      padWidth, padHeight).reduced (1));
+
+        stemRow.removeFromRight (4);
+
+        // The row shares out into one more cell than there are knobs, and the
+        // last goes to the effect.
+        const auto knobWidth = juce::jmax (36, stemRow.getWidth() / (numStems + 1));
 
         for (int stem = 0; stem < numStems; ++stem)
         {
@@ -864,6 +986,9 @@ void DeckComponent::resized()
             stemControls.labels[(size_t) stem].setBounds (cell.removeFromBottom (13));
             stemControls.knobs[(size_t) stem].setBounds (cell.reduced (2, 0));
         }
+
+        stemControls.fxButton.setBounds (stemRow.removeFromBottom (16).reduced (1, 0));
+        stemControls.fxAmount.setBounds (stemRow.reduced (2, 0));
     }
 
     area.removeFromTop (8);

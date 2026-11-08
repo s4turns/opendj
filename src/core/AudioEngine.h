@@ -9,6 +9,7 @@
 #include <juce_audio_formats/juce_audio_formats.h>
 
 #include "analysis/AnalysisCache.h"
+#include "analysis/StemQueue.h"
 #include "analysis/StemSeparator.h"
 #include "core/Deck.h"
 #include "core/MicInput.h"
@@ -41,7 +42,9 @@ class AudioEngine final : private juce::AudioIODeviceCallback,
 public:
     static constexpr int numDecks = Mixer::numChannels;
 
-    AudioEngine();
+    /** Tests say which stem models count, so that a stand-in separator is what
+        runs on a machine that has real ones installed. */
+    explicit AudioEngine (StemSeparator::Models stemModels = StemSeparator::Models::useInstalled);
     ~AudioEngine() override;
 
     /** Opens an output device and starts the engine. Returns an error string,
@@ -149,23 +152,35 @@ public:
     }
 
     /** Separates the track on a deck into its four parts, in the background,
-        and hands them to the deck when they are ready. Does nothing if the
-        deck is empty or no separator is installed. */
-    void separateDeckAsync (int deckIndex, std::function<void (bool)> onComplete = {});
+        and hands them to the deck when they are ready. It runs ahead of anything
+        being prepared. Told false on the message thread if there is nothing to
+        separate, no separator, or it failed. Told nothing if the request was
+        given up: the deck had another track by its turn, or the engine stopped.
 
-    bool isDeckSeparating (int deckIndex) const noexcept
-    {
-        return juce::isPositiveAndBelow (deckIndex, numDecks)
-            && separating[(size_t) deckIndex].load (std::memory_order_relaxed);
-    }
+        `byHand` is a person pressing the button, which tries again a track that
+        failed earlier this session. Automix asks without it, so that it cannot
+        spend minutes again on a track that will not separate. */
+    void separateDeckAsync (int deckIndex, std::function<void (bool)> onComplete = {}, bool byHand = false);
+
+    /** True from a deck asking for its track's stems until they arrive, and while
+        its track happens to be the one being prepared. */
+    bool isDeckSeparating (int deckIndex) const;
 
     /** How far along a separation is, from 0 to 1. */
-    float getSeparationProgress (int deckIndex) const noexcept
-    {
-        return juce::isPositiveAndBelow (deckIndex, numDecks)
-            ? separationProgress[(size_t) deckIndex].load (std::memory_order_relaxed)
-            : 0.0f;
-    }
+    float getSeparationProgress (int deckIndex) const;
+
+    /** Separates tracks ahead of time, so that when one is loaded its stems are
+        there at once. Only while no deck is playing, and keeping nothing in
+        memory, unless the track turns out to be on a deck that has none. Files
+        that are not there are left out. */
+    void prepareStems (const std::vector<juce::File>& tracks);
+
+    /** Forgets the tracks being prepared. What a deck asked for carries on. */
+    void cancelStemPreparation();
+
+    bool isPreparingStems() const { return stemQueue.isPreparing(); }
+
+    StemQueue::Progress getStemQueueProgress() const { return stemQueue.getProgress(); }
 
     StemSeparator& getStemSeparator() noexcept { return stemSeparator; }
 
@@ -356,9 +371,12 @@ private:
     std::atomic<AnalysisCache*> analysisCache { nullptr };
 
     StemSeparator stemSeparator;
-    juce::ThreadPool separatorPool { juce::ThreadPoolOptions{}.withNumberOfThreads (1) };
-    std::array<std::atomic<bool>, numDecks> separating {};
-    std::array<std::atomic<float>, numDecks> separationProgress {};
+
+    // After the decks and the separator, which it reaches until it is shut down.
+    StemQueue stemQueue;
+
+    StemQueue::Config makeStemQueueConfig();
+    void giveStemsToDecks (const juce::File& track);
 
     std::array<juce::AudioBuffer<float>, numDecks> deckBuffers;
     juce::AudioBuffer<float> masterBuffer;

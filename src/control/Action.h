@@ -69,6 +69,19 @@ enum class Action
     deckStem,
     deckStemToggle,     ///< press flips that stem between silent and full
 
+    /** The stem pads. slot selects one: 0 no vocals, 1 acapella, 2 drums only,
+        3 no drums. They do nothing until the track has stems. */
+    deckStemPad,        ///< on for as long as it is held, then back to any latched pad
+    deckStemPadToggle,  ///< press latches it, and pressing it again turns it off
+
+    /** One effect on one stem of the deck. They do nothing until the track has
+        stems, except that the choices are remembered. */
+    deckStemFx,         ///< press turns it on and off; off lets the tail ring out
+    deckStemFxTarget,   ///< slot picks the stem: 0 drums, 1 bass, 2 other, 3 vocals
+    deckStemFxType,     ///< slot picks the effect: 0 echo, 1 reverb, 2 low pass
+    deckStemFxBeats,    ///< slot picks the echo length: 0 is 1/4, then 1/2, 1 and 2 beats
+    deckStemFxAmount,   ///< how much of it, or for the low pass how far it closes
+
     // Performance pads. slot selects the pad, 0 to 7.
     hotCue,             ///< press sets an empty slot, or jumps to a set one
     hotCueClear,
@@ -166,6 +179,10 @@ enum class Action
 
     // Track browser. deck and slot are unused.
     browseScroll,       ///< value is signed rows to move the selection, not normalised
+
+    // Stems ahead of time. deck and slot are unused.
+    stemsPrepareSelected,   ///< press queues the list on show: the library's selection, or the whole playlist on show
+    stemsPrepareCancel,     ///< press forgets the queue; a deck's own request carries on
 
     // Modifier, held rather than toggled.
     shift

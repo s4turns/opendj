@@ -249,6 +249,31 @@ void PlaylistComponent::listBoxItemDoubleClicked (int row, const juce::MouseEven
     play (row);
 }
 
+void PlaylistComponent::listBoxItemClicked (int, const juce::MouseEvent& e)
+{
+    showMenuIfAskedFor (e);
+}
+
+void PlaylistComponent::backgroundClicked (const juce::MouseEvent& e)
+{
+    showMenuIfAskedFor (e);
+}
+
+void PlaylistComponent::showMenuIfAskedFor (const juce::MouseEvent& e)
+{
+    if (! e.mods.isPopupMenu())
+        return;
+
+    // About the whole list wherever it was clicked: this is what a set is going
+    // to be made of, and there is one list to make it from.
+    juce::PopupMenu menu;
+    stemPrepareMenu.addTo (menu, "Prepare stems for this playlist (" + juce::String (files.size()) + ")",
+                           ! files.empty());
+
+    if (menu.getNumItems() > 0)
+        menu.showMenuAsync (juce::PopupMenu::Options());
+}
+
 void PlaylistComponent::paintListBoxItem (int row, juce::Graphics& g, int width, int height, bool selected)
 {
     if (! juce::isPositiveAndBelow (row, (int) names.size()))
@@ -275,7 +300,13 @@ void PlaylistComponent::timerCallback()
     const auto running = autoMix.isRunning();
 
     // Set every time: the status follows the mix, not just the list.
-    statusLabel.setText (describeStatus(), juce::dontSendNotification);
+    auto status = describeStatus();
+
+    if (stemStatus != nullptr)
+        if (const auto stems = stemStatus(); stems.isNotEmpty())
+            status = status.isNotEmpty() ? stems + "  |  " + status : stems;
+
+    statusLabel.setText (status, juce::dontSendNotification);
 
     if (current == shownCurrent && next == shownNext && running == shownRunning)
         return;

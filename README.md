@@ -17,7 +17,7 @@ and the code are entirely original and entirely open.
 
 **Status: early development, but it mixes.** Four decks with turntable platters you can scratch,
 waveforms, beat grids, automatic BPM and key detection, sync, key lock, beat-locked loops and
-rolls, key shift and key match, stem separation with a knob per stem, a mixer with a filter, a beat-synced echo and a reverb per channel, two master effect units, brake, backspin, reverse and censor, hot cues, an eight slot sampler, a
+rolls, key shift and key match, stem separation with a knob per stem, stem pads and an effect on one stem, a mixer with a filter, a beat-synced echo and a reverb per channel, two master effect units, brake, backspin, reverse and censor, hot cues, an eight slot sampler, a
 searchable track library, set recording to WAV, FLAC or MP3 with a tracklist, broadcasting to Icecast, and Roland
 DJ-202 support including its own audio interface and its platters.
 
@@ -146,6 +146,30 @@ decks, and is remembered. Click the Key column to sort by the wheel, with tracks
 While a deck plays, the library shows what would mix with it. A key in bright green is the same key,
 and pale green is its relative or a step round the wheel. The key it goes by is the one being played
 after any shift, from the deck the room is hearing or, with every fader down, a playing deck.
+
+## Stems
+
+With a separator installed, **Stems** splits the track on a deck into drums, bass, other and vocals,
+with a knob each. A track separated once keeps its stems, so the next time it loads they are already
+there.
+
+**Prepare stems** in the library's right-click menu separates a selection ahead of time, and the
+playlist's right-click menu does a whole playlist. It works through them one at a time in the
+background and only while no deck is playing, since separation takes every core the machine has. A deck
+asking for its own track's stems goes first. Progress shows in the library's status line, and the same
+menu cancels it. It stops by itself after three failures in a row or when the disk has under 5 GB free.
+A track that would not separate is not tried again until the file changes, though pressing Stems on a
+deck always tries again.
+
+The four pads beside the knobs, **Inst**, **Acap**, **Drum** and **NoDr**, take out the vocals, keep only
+the vocals, keep only the drums, or take out the drums. Click one to turn it on and again to turn it off.
+They work on top of the knobs rather than moving them, so turning a pad off brings back what the knobs
+were set to.
+
+**FX** puts one effect on one stem: an echo, a reverb or a low pass on the vocals, say. Right-click it to
+pick the stem, the effect and, for the echo, its length in beats; the knob above it is how much. The
+effect hears the stem after its knob and pad, so taking the vocals out with a pad lets an echo on them
+ring out.
 
 ## Auto gain
 

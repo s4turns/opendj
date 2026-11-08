@@ -12,6 +12,7 @@
 #include "analysis/Stems.h"
 #include "analysis/TrackAnalysis.h"
 #include "analysis/TapTempo.h"
+#include "core/StemEffect.h"
 
 #include <array>
 #include <atomic>
@@ -61,7 +62,13 @@ public:
         a timer on the message thread. */
     void cleanUp();
 
+    /** The file of the track on the deck. Only on the message thread, which is
+        where retired tracks are freed; anywhere else, ask holdsFile(). */
     juce::File getLoadedFile() const;
+
+    /** Whether this file is the one on the deck. Safe from any thread. */
+    bool holdsFile (const juce::File& file) const;
+
     juce::String getTrackTitle() const;
 
     /** Why the last loadFile() returned false, in words a user can act on.
@@ -212,6 +219,48 @@ public:
         smoothed, so a pad does not click. */
     void setStemGain (Stem stem, float gain);
     float getStemGain (Stem stem) const;
+
+    /** The stem pads, from any thread. A press with no stems, or of a pad that
+        does not exist, does nothing: it does not start a separation, which is
+        minutes of work nobody asked for. Only one pad plays at a time, and a
+        new one replaces the last. They multiply with the knobs and leave them
+        where they are, so getStemGain() does not see them.
+
+        Toggling latches a pad until it is pressed again. Holding wins over a
+        latched pad for as long as it is down and letting go returns to it. A
+        track loading clears both. */
+    void toggleStemPad (int slot);
+    void holdStemPad (int slot, bool down);
+
+    /** The pad playing now, or -1 with none on or no stems to apply one to. */
+    int getStemPad() const noexcept;
+
+    /** One effect on one stem, from any thread. Switching on with no stems does
+        nothing, like a pad. Off stops feeding it and lets what is in it ring out.
+        A track loading switches it off and clears it, and leaves the choices
+        below as they were, since those are how the DJ likes it. */
+    void setStemFxEnabled (bool shouldBeOn);
+    void toggleStemFx();
+    bool isStemFxEnabled() const noexcept;
+
+    void setStemFxTarget (Stem stem);
+    Stem getStemFxTarget() const noexcept { return static_cast<Stem> (stemFxTarget.load (std::memory_order_relaxed)); }
+
+    void setStemFxType (StemEffect::Type type);
+    StemEffect::Type getStemFxType() const noexcept { return stemFxType.load (std::memory_order_relaxed); }
+
+    /** An index into StemEffect::beatDivisions. One past the end does nothing. */
+    void setStemFxBeats (int division);
+    int getStemFxBeats() const noexcept { return stemFxDivision.load (std::memory_order_relaxed); }
+
+    /** 0 to 1: how much of the echo or reverb, and how far the low pass closes. */
+    void setStemFxAmount (float amount);
+    float getStemFxAmount() const noexcept { return stemFxAmount.load (std::memory_order_relaxed); }
+
+    /** One beat of the loaded track at its recorded speed, kept up to date by the
+        engine, which can read the grid. The audio thread cannot. */
+    void setStemFxBeatSeconds (double seconds);
+    double getStemFxBeatSeconds() const noexcept { return stemFxBeatSeconds.load (std::memory_order_relaxed); }
 
     //==========================================================================
     // Hot cues
@@ -423,13 +472,73 @@ private:
     std::shared_ptr<const SeparatedTrack> ownedSeparation;
     std::vector<std::pair<std::shared_ptr<const SeparatedTrack>, juce::uint32>> retiredSeparations;
 
+    // A separation arrives on its own worker, a track on the loader and the
+    // cleaning up on the timer, and they can all be at this together. It covers
+    // both retired lists, and a separation's check that it still belongs to the
+    // loaded track along with the swap that acts on the answer, so that stems
+    // cannot land on the track that replaced theirs. The audio thread never takes
+    // it, and needs nothing it protects.
+    mutable std::mutex separationMutex;
+
     std::array<std::atomic<float>, numStems> stemGains;
     std::array<juce::SmoothedValue<float>, numStems> stemGainRamps;   // audio thread
+
+    std::atomic<int> latchedStemPad { -1 };
+    std::atomic<int> heldStemPad { -1 };
+
+    int currentStemPad() const noexcept;
+
+    /** A stem's knob with the pad applied: what the stem should be playing at. */
+    float effectiveStemGain (size_t stem, int pad) const noexcept;
+
+    // Stems never quite sum to the mix a real model started from, so moving from
+    // one to the other is a step in the waveform, and a held pad crosses it
+    // twice. This fades between them: 0 is the mix, 1 is the stems. Key lock
+    // reads ahead of the audible head, so it has a fade of its own, moved as it
+    // is fed rather than as it is heard.
+    juce::SmoothedValue<float> stemPathRamp { 0.0f };   // audio thread
+    float feedStemPath = 0.0f;                          // audio thread
+    std::array<float, numStems> feedStemGains;          // audio thread
+
+    /** Puts every stem fade where it is heading, with no fade. For when nothing
+        is being heard, or what was being heard is gone. Audio thread. */
+    void settleStemRamps (const SeparatedTrack* separation) noexcept;
+
+    // publish() cannot touch the fades or the stem effect, which belong to the
+    // audio thread, and a deck started straight after a load may never pass
+    // through silence on its way, so this asks for them to be settled at the top
+    // of the next block.
+    std::atomic<bool> stemSettleAsked { false };
+
+    // Built in prepare() and then the audio thread's alone.
+    std::unique_ptr<StemEffect> stemEffect;
+    bool stemEffectLive = false;                        // audio thread: running this block
+
+    // Leaving the stretcher, the effect is ahead of the room by what the
+    // stretcher had been fed and not yet played. It sits out that many samples,
+    // and then fades back up. Audio thread.
+    juce::int64 stemEffectHold = 0;
+    float stemEffectReturn = 1.0f;
+    float stemReturnStep = 1.0f;
+
+    std::atomic<bool> stemFxEnabled { false };
+    std::atomic<int> stemFxTarget { static_cast<int> (Stem::vocals) };
+    std::atomic<StemEffect::Type> stemFxType { StemEffect::Type::echo };
+    std::atomic<int> stemFxDivision { 2 };              // one beat
+    std::atomic<float> stemFxAmount { 0.5f };
+    std::atomic<double> stemFxBeatSeconds { 0.5 };
+
+    /** Tells the effect what is wanted this block and whether it is to run. */
+    void startStemEffect (const SeparatedTrack* separation, bool stretching) noexcept;
+
+    /** Forgets the effect's tail, if it has one. */
+    void silenceStemEffect();
+
     // Apple's libc++ lacks atomic<shared_ptr>. Access this only through the
     // portable shared_ptr atomic free functions, which provide the same safety.
     std::shared_ptr<const TrackAnalysis> analysisData;
     std::unique_ptr<Track> owned;                       // the live track
-    std::vector<std::unique_ptr<Track>> retired;        // message thread only
+    std::vector<std::unique_ptr<Track>> retired;        // under separationMutex
 
     std::atomic<bool> playing { false };
     std::atomic<double> tempoRatio { 1.0 };
@@ -519,9 +628,11 @@ private:
 
     void renderStretched (const Track& track, juce::AudioBuffer<float>& destination,
                           double rate, double fileToDevice, double pitchScale,
-                          const SeparatedTrack* separation, const float* stemGains);
+                          const SeparatedTrack* separation, const float* stemGainTargets,
+                          float stemPathTarget);
     void feedStretcher (const Track& track, double fileToDevice,
-                        const SeparatedTrack* separation, const float* stemGains);
+                        const SeparatedTrack* separation, const float* stemGainTargets,
+                        float stemPathTarget);
 
     double readPosition = 0.0;                          // audio thread, in file samples
     double deviceSampleRate = 44100.0;

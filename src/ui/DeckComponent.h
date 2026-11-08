@@ -179,18 +179,24 @@ private:
     void updateKeyReadout();
     void showKeyMenu();
 
-    /** One knob per part of the track, and the button that asks for them. The
-        knobs stay dead until a separation exists, since turning down a stem
-        that is not there would do nothing and look broken. */
+    /** One knob per part of the track, the pads that take whole parts away, and
+        the button that asks for them. All of it stays dead until a separation
+        exists, since turning down a stem that is not there would do nothing and
+        look broken. */
     struct StemControls
     {
         juce::TextButton separate { "Stems" };
         std::array<juce::Slider, numStems> knobs;
         std::array<juce::Label, numStems> labels;
+        std::array<juce::TextButton, numStemPads> pads;
+        juce::Slider fxAmount;
+        PadButton fxButton { "FX" };
     };
 
+    void showStemFxMenu();
+    void updateStemFxTooltip();
+
     StemControls stemControls;
-    bool stemsWereAvailable = false;
     MomentaryButton cueButton { "Cue" };
     juce::Slider tempoSlider;
     juce::Label tempoLabel;

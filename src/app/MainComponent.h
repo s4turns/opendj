@@ -107,6 +107,10 @@ private:
     void stepWaveformZoom (int steps);
     void applyWaveformZoom();
 
+    /** What a press of the prepare action means: the whole playlist on show, or
+        the library's selection. */
+    void prepareStemsForListOnShow();
+
     /** Swaps one side for the deck behind it. */
     void swapSide (int side);
 

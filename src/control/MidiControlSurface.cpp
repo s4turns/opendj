@@ -786,7 +786,7 @@ void MidiControlSurface::undoLearn()
 // Feedback
 //==============================================================================
 
-bool MidiControlSurface::feedbackStateFor (const MidiControl& control) const
+bool feedbackStateFor (const AudioEngine& engine, const ActionDispatcher& dispatcher, const MidiControl& control)
 {
     const auto deckIndex = juce::jlimit (0, AudioEngine::numDecks - 1, control.deck);
     auto& deck = const_cast<AudioEngine&> (engine).getDeck (deckIndex);
@@ -818,6 +818,22 @@ bool MidiControlSurface::feedbackStateFor (const MidiControl& control) const
 
         case Action::hotCue:
             return deck.hasHotCue (control.slot);
+
+        case Action::deckStemPad:
+        case Action::deckStemPadToggle:
+            return deck.getStemPad() == control.slot;
+
+        case Action::deckStemFx:
+            return deck.isStemFxEnabled();
+
+        case Action::deckStemFxTarget:
+            return static_cast<int> (deck.getStemFxTarget()) == control.slot;
+
+        case Action::deckStemFxType:
+            return static_cast<int> (deck.getStemFxType()) == control.slot;
+
+        case Action::deckStemFxBeats:
+            return deck.getStemFxBeats() == control.slot;
 
         case Action::channelCue:
         case Action::channelCueToggle:
@@ -860,7 +876,7 @@ void MidiControlSurface::refreshFeedback()
         if (control.feedbackNumber < 0)
             continue;
 
-        const auto state = feedbackStateFor (control);
+        const auto state = feedbackStateFor (engine, dispatcher, control);
         const auto key = (control.status & 0x0F) * 128 + control.feedbackNumber;
 
         if (const auto existing = lastFeedbackState.find (key);

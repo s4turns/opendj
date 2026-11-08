@@ -129,6 +129,18 @@ juce::File BrowserComponent::getSelectedFile() const
     return selectedFile;
 }
 
+std::vector<juce::File> BrowserComponent::getSelectedFiles() const
+{
+    std::vector<juce::File> files;
+    const auto selected = table.getSelectedRows();
+
+    for (int i = 0; i < selected.size(); ++i)
+        if (const auto r = selected[i]; juce::isPositiveAndBelow (r, (int) rows.size()))
+            files.push_back (rows[(size_t) r].file);
+
+    return files;
+}
+
 void BrowserComponent::moveSelection (int rowsToMove)
 {
     if (rows.empty())
@@ -244,6 +256,10 @@ void BrowserComponent::refreshStatus()
 
     if (rows.size() < (size_t) library.countTracks() && ! progress.running)
         status = juce::String (rows.size()) + " shown  |  " + status;
+
+    if (stemStatus != nullptr)
+        if (const auto stems = stemStatus(); stems.isNotEmpty())
+            status = stems + "  |  " + status;
 
     statusLabel.setText (status, juce::dontSendNotification);
 }
@@ -504,12 +520,7 @@ void BrowserComponent::cellClicked (int row, int, const juce::MouseEvent& e)
     if (! table.isRowSelected (row))
         table.selectRow (row);
 
-    std::vector<juce::File> chosenFiles;
-    const auto selected = table.getSelectedRows();
-
-    for (int i = 0; i < selected.size(); ++i)
-        if (const auto r = selected[i]; juce::isPositiveAndBelow (r, (int) rows.size()))
-            chosenFiles.push_back (rows[(size_t) r].file);
+    const auto chosenFiles = getSelectedFiles();
 
     if (chosenFiles.empty())
         return;
@@ -545,6 +556,9 @@ void BrowserComponent::cellClicked (int row, int, const juce::MouseEvent& e)
 
     menu.addSubMenu (count == 1 ? juce::String ("Add to playlist")
                                 : "Add " + juce::String (count) + " tracks to playlist", playlists);
+
+    stemPrepareMenu.addTo (menu, count == 1 ? juce::String ("Prepare stems")
+                                            : "Prepare stems for " + juce::String (count) + " tracks", true);
 
     menu.showMenuAsync (juce::PopupMenu::Options(),
         [safe = juce::Component::SafePointer<BrowserComponent> (this), chosenFiles] (int chosen)

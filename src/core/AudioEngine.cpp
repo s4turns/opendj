@@ -11,6 +11,7 @@
 #include <algorithm>
 
 #include <cmath>
+#include <new>
 
 namespace opendj
 {
@@ -45,7 +46,9 @@ namespace
     }
 }
 
-AudioEngine::AudioEngine()
+AudioEngine::AudioEngine (StemSeparator::Models stemModels)
+    : stemSeparator (stemModels),
+      stemQueue (makeStemQueueConfig())
 {
     formatManager.registerBasicFormats();
 
@@ -129,7 +132,7 @@ void AudioEngine::stop()
     // Waiting here is the point: a decode still running when the decks are
     // freed is the same crash by a different route.
     loaderPool.removeAllJobs (true, 5000);
-    separatorPool.removeAllJobs (true, 5000);
+    stemQueue.shutdown();
 
     // A recording still open would otherwise be left without its final flush.
     if (recorder.isRecording())
@@ -564,42 +567,144 @@ double AudioEngine::getEffectiveBpm (int deckIndex) const
     return analysis->bpm * deck.getTempoRatio();
 }
 
-void AudioEngine::separateDeckAsync (int deckIndex, std::function<void (bool)> onComplete)
+StemQueue::Config AudioEngine::makeStemQueueConfig()
 {
-    if (! juce::isPositiveAndBelow (deckIndex, numDecks) || ! stemSeparator.isAvailable())
+    StemQueue::Config config;
+
+    config.work = [this] (const juce::File& track,
+                          const std::function<void (float)>& onProgress,
+                          const std::atomic<bool>& stop)
+    {
+        return stemSeparator.prepare (formatManager, track, onProgress, stop);
+    };
+
+    config.anyDeckPlaying = [this]
+    {
+        return std::any_of (decks.begin(), decks.end(), [] (const auto& deck) { return deck->isPlaying(); });
+    };
+
+    config.freeBytes = [this] { return stemSeparator.getFreeBytes(); };
+    config.onReady = [this] (const juce::File& track) { giveStemsToDecks (track); };
+
+    config.onADeck = [this] (const juce::File& track)
+    {
+        return std::any_of (decks.begin(), decks.end(), [&track] (const auto& deck) { return deck->holdsFile (track); });
+    };
+
+    return config;
+}
+
+void AudioEngine::giveStemsToDecks (const juce::File& track)
+{
+    // Decoded only if a deck wants it: a list prepared ahead of time would
+    // otherwise pass through memory at 600 MB a track for nothing. A load racing
+    // this finds the stems for itself, since they are in place by now.
+    //
+    // This is the queue's worker, so the decks are asked under their own lock:
+    // a track retired by a load is freed on the message thread.
+    std::shared_ptr<const SeparatedTrack> stems;
+
+    for (auto& deck : decks)
+    {
+        if (deck->hasStems() || ! deck->holdsFile (track))
+            continue;
+
+        if (stems == nullptr)
+        {
+            auto broken = false;
+
+            try
+            {
+                stems = stemSeparator.loadFromCache (formatManager, track, &broken);
+            }
+            catch (const std::bad_alloc&)
+            {
+                broken = false;
+            }
+
+            if (stems == nullptr)
+            {
+                // It said it was there and will not decode. Without this, asking
+                // again would get the same entry for ever. Not for want of
+                // memory, though, which is no fault of minutes of good work.
+                if (broken)
+                    stemSeparator.discardCacheEntry (track);
+
+                return;
+            }
+        }
+
+        deck->setSeparation (stems, track);
+    }
+}
+
+void AudioEngine::separateDeckAsync (int deckIndex, std::function<void (bool)> onComplete, bool byHand)
+{
+    const auto tell = [onComplete = std::move (onComplete)] (bool succeeded)
+    {
+        if (onComplete != nullptr)
+            juce::MessageManager::callAsync ([onComplete, succeeded] { onComplete (succeeded); });
+    };
+
+    const auto file = juce::isPositiveAndBelow (deckIndex, numDecks) ? decks[(size_t) deckIndex]->getLoadedFile()
+                                                                     : juce::File();
+
+    if (! file.existsAsFile() || ! stemSeparator.isAvailable())
+    {
+        tell (false);
         return;
+    }
+
+    // Nothing here says the deck is busy. That belonged to the job rather than
+    // to the deck, and it stopped a new track on this deck asking for its stems
+    // while the last one's were still running.
+    //
+    // A request given up on, because the deck moved on to another track before
+    // its turn came or the engine is stopping, is not a failure to report.
+    stemQueue.requestNow (file, [tell] (StemOutcome outcome)
+    {
+        if (outcome != StemOutcome::stopped)
+            tell (outcome == StemOutcome::ready);
+    }, byHand);
+}
+
+bool AudioEngine::isDeckSeparating (int deckIndex) const
+{
+    if (! juce::isPositiveAndBelow (deckIndex, numDecks))
+        return false;
 
     const auto file = decks[(size_t) deckIndex]->getLoadedFile();
+    return file != juce::File() && stemQueue.isRequested (file);
+}
 
-    if (! file.existsAsFile())
+float AudioEngine::getSeparationProgress (int deckIndex) const
+{
+    return juce::isPositiveAndBelow (deckIndex, numDecks)
+        ? stemQueue.getFractionFor (decks[(size_t) deckIndex]->getLoadedFile())
+        : 0.0f;
+}
+
+void AudioEngine::prepareStems (const std::vector<juce::File>& tracks)
+{
+    if (! stemSeparator.isAvailable())
         return;
 
-    // One separation at a time, per deck and across the pool: it is minutes of
-    // work on every core the machine has, and two at once would starve both.
-    if (separating[(size_t) deckIndex].exchange (true, std::memory_order_relaxed))
-        return;
+    // A playlist keeps tracks that have since moved or gone. Each would fail in
+    // a moment, and three together would halt the lane as though the machine
+    // were at fault, with the rest of the list behind them.
+    std::vector<juce::File> there;
+    there.reserve (tracks.size());
 
-    separationProgress[(size_t) deckIndex].store (0.0f, std::memory_order_relaxed);
+    for (const auto& track : tracks)
+        if (track.existsAsFile())
+            there.push_back (track);
 
-    separatorPool.addJob ([this, deckIndex, file, onComplete = std::move (onComplete)]
-    {
-        auto separation = stemSeparator.separate (formatManager, file,
-                                                  [this, deckIndex] (float progress)
-        {
-            separationProgress[(size_t) deckIndex].store (progress, std::memory_order_relaxed);
-        });
+    stemQueue.requestInBackground (there);
+}
 
-        if (separation != nullptr)
-            decks[(size_t) deckIndex]->setSeparation (separation, file);
-
-        separating[(size_t) deckIndex].store (false, std::memory_order_relaxed);
-
-        if (onComplete != nullptr)
-        {
-            const auto succeeded = separation != nullptr;
-            juce::MessageManager::callAsync ([onComplete, succeeded] { onComplete (succeeded); });
-        }
-    });
+void AudioEngine::cancelStemPreparation()
+{
+    stemQueue.cancelBackground();
 }
 
 int AudioEngine::findSyncLeader (int followerIndex) const
@@ -934,6 +1039,13 @@ void AudioEngine::updateEchoTimes()
         const auto beatSeconds = bpm > 0.0 ? 60.0 / bpm : 0.5;
 
         mixer.setChannelEchoTime (i, beatSeconds * echoBeats[(size_t) i].load (std::memory_order_relaxed));
+
+        // The stem effect wants the beat as recorded and not at the fader. Under
+        // a stretcher it sits ahead of what the fader does to the tempo, and the
+        // deck knows that better than this does.
+        auto& deck = *decks[(size_t) i];
+        const auto analysis = deck.getAnalysis();
+        deck.setStemFxBeatSeconds (analysis != nullptr && analysis->hasTempo() ? analysis->secondsPerBeat() : 0.5);
     }
 
     const auto tempoDeck = findMasterTempoDeck();

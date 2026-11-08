@@ -43,6 +43,7 @@ target_sources(opendj-tests PRIVATE
     TempoMath_test.cpp
     TapTempo_test.cpp
     StemModel_test.cpp
+    StemQueue_test.cpp
     WaveformMath_test.cpp
     StemDsp_test.cpp
     Library_test.cpp

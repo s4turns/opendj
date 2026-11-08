@@ -304,6 +304,7 @@ set(OPENDJ_ENGINE_SOURCES
     ${CMAKE_SOURCE_DIR}/src/core/MicInput.cpp
     ${CMAKE_SOURCE_DIR}/src/core/Mixer.cpp
     ${CMAKE_SOURCE_DIR}/src/core/MasterEffects.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/StemEffect.cpp
     ${CMAKE_SOURCE_DIR}/src/core/PluginHost.cpp
     ${CMAKE_SOURCE_DIR}/src/core/OutputRouter.cpp
     ${CMAKE_SOURCE_DIR}/src/stream/Broadcaster.cpp
@@ -319,6 +320,7 @@ set(OPENDJ_ENGINE_SOURCES
     ${CMAKE_SOURCE_DIR}/src/analysis/TrackAnalyser.cpp
     ${CMAKE_SOURCE_DIR}/src/analysis/TrackDecoder.cpp
     ${CMAKE_SOURCE_DIR}/src/analysis/StemDsp.cpp
+    ${CMAKE_SOURCE_DIR}/src/analysis/StemQueue.cpp
     ${CMAKE_SOURCE_DIR}/src/analysis/StemSeparator.cpp
     ${CMAKE_SOURCE_DIR}/src/analysis/StemModel.cpp
     ${CMAKE_SOURCE_DIR}/src/control/Action.cpp

@@ -195,6 +195,18 @@ void ActionDispatcher::dispatch (const ActionMessage& message)
             notify = false;   // the browser redraws itself
             break;
 
+        case Action::stemsPrepareSelected:
+            if (pressed && prepareStemsHandler != nullptr)
+                prepareStemsHandler();
+            notify = false;   // the browser's status line follows the queue
+            break;
+
+        case Action::stemsPrepareCancel:
+            if (pressed)
+                engine.cancelStemPreparation();
+            notify = false;
+            break;
+
         case Action::deckTempo:
         {
             // 0 is the slow end and 1 the fast end, whichever way the hardware
@@ -377,6 +389,43 @@ void ActionDispatcher::dispatch (const ActionMessage& message)
                 const auto stem = static_cast<Stem> (juce::jlimit (0, numStems - 1, message.slot));
                 deck.setStemGain (stem, deck.getStemGain (stem) > 0.5f ? 0.0f : 1.0f);
             }
+            break;
+
+        case Action::deckStemPad:
+            // Momentary, like the channel cue: the slot is not clamped, because
+            // a pad that does not exist should do nothing, not act as the last.
+            deck.holdStemPad (message.slot, pressed);
+            break;
+
+        case Action::deckStemPadToggle:
+            if (pressed)
+                deck.toggleStemPad (message.slot);
+            break;
+
+        case Action::deckStemFx:
+            if (pressed)
+                deck.toggleStemFx();
+            break;
+
+        // The slots are not clamped, for the same reason the pads' are not: a
+        // choice that does not exist should do nothing, not act as the last.
+        case Action::deckStemFxTarget:
+            if (pressed)
+                deck.setStemFxTarget (static_cast<Stem> (message.slot));
+            break;
+
+        case Action::deckStemFxType:
+            if (pressed)
+                deck.setStemFxType (static_cast<StemEffect::Type> (message.slot));
+            break;
+
+        case Action::deckStemFxBeats:
+            if (pressed)
+                deck.setStemFxBeats (message.slot);
+            break;
+
+        case Action::deckStemFxAmount:
+            deck.setStemFxAmount (message.value);
             break;
 
         case Action::samplerTrigger:

@@ -9,6 +9,7 @@
 
 #include "core/AutoMix.h"
 #include "library/Library.h"
+#include "ui/StemPrepareMenu.h"
 
 #include <functional>
 #include <vector>
@@ -35,6 +36,16 @@ public:
     void resized() override;
     void paint (juce::Graphics& g) override;
 
+    /** Offers stems in the right-click menu, for the whole list. */
+    StemPrepareMenu stemPrepareMenu;
+
+    /** How preparing stems is going, for the status line, which a list prepared
+        from here would otherwise leave to the library's. */
+    std::function<juce::String()> stemStatus;
+
+    /** The tracks of the playlist on show. */
+    const std::vector<juce::File>& getFiles() const noexcept { return files; }
+
     /** Re-reads the playlists after something outside changed them. */
     void refresh() { reloadPlaylists(); pushQueue(); }
 
@@ -47,6 +58,10 @@ private:
     int getNumRows() override { return (int) files.size(); }
     void paintListBoxItem (int row, juce::Graphics&, int width, int height, bool selected) override;
     void listBoxItemDoubleClicked (int row, const juce::MouseEvent&) override;
+    void listBoxItemClicked (int row, const juce::MouseEvent&) override;
+    void backgroundClicked (const juce::MouseEvent&) override;
+
+    void showMenuIfAskedFor (const juce::MouseEvent&);
 
     void timerCallback() override;
 

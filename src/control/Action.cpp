@@ -17,7 +17,7 @@ namespace
 
     // One table, read in both directions, so a name can never disagree with
     // itself between the parser and the writer.
-    constexpr std::array<Entry, 79> actionNames
+    constexpr std::array<Entry, 88> actionNames
     {{
         { Action::deckPlayToggle,   "deck.play_toggle" },
         { Action::deckPlay,         "deck.play" },
@@ -42,6 +42,13 @@ namespace
         { Action::deckSeek,         "deck.seek" },
         { Action::deckStem,         "deck.stem" },
         { Action::deckStemToggle,   "deck.stem_toggle" },
+        { Action::deckStemPad,      "deck.stem_pad" },
+        { Action::deckStemPadToggle, "deck.stem_pad_toggle" },
+        { Action::deckStemFx,       "deck.stem_fx" },
+        { Action::deckStemFxTarget, "deck.stem_fx_target" },
+        { Action::deckStemFxType,   "deck.stem_fx_type" },
+        { Action::deckStemFxBeats,  "deck.stem_fx_beats" },
+        { Action::deckStemFxAmount, "deck.stem_fx_amount" },
         { Action::jogTouch,         "jog.touch" },
         { Action::jogTurn,          "jog.turn" },
         { Action::hotCue,           "pad.hotcue" },
@@ -97,6 +104,8 @@ namespace
         { Action::auxGain,          "aux.gain" },
         { Action::deckWaveformZoom, "deck.waveform_zoom" },
         { Action::browseScroll,     "browse.scroll" },
+        { Action::stemsPrepareSelected, "stems.prepare_selected" },
+        { Action::stemsPrepareCancel, "stems.prepare_cancel" },
         { Action::shift,            "modifier.shift" }
     }};
 }
@@ -153,6 +162,8 @@ bool actionTakesDeck (Action action)
         case Action::auxToggle:
         case Action::auxGain:
         case Action::browseScroll:
+        case Action::stemsPrepareSelected:
+        case Action::stemsPrepareCancel:
             return false;
 
         default:
@@ -166,6 +177,11 @@ bool actionTakesSlot (Action action)
     {
         case Action::deckStem:
         case Action::deckStemToggle:
+        case Action::deckStemPad:
+        case Action::deckStemPadToggle:
+        case Action::deckStemFxTarget:
+        case Action::deckStemFxType:
+        case Action::deckStemFxBeats:
         case Action::hotCue:
         case Action::hotCueClear:
         case Action::padLoop:
@@ -196,6 +212,7 @@ bool isContinuous (Action action)
         case Action::deckTrim:
         case Action::deckSeek:
         case Action::deckStem:
+        case Action::deckStemFxAmount:
         case Action::jogTurn:
         case Action::channelFader:
         case Action::channelEq:

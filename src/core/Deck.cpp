@@ -48,6 +48,10 @@ namespace
 
     constexpr double gainRampSeconds = 0.005;
 
+    // However far the stretcher had been fed ahead, the stem effect never sits
+    // out longer than this when it stops. Its latency is a fraction of it.
+    constexpr double longestStemEffectHoldSeconds = 0.5;
+
     // The level falls over the end of a brake or backspin. A rate close to zero
     // is far below anything a speaker can play, and would otherwise be heard
     // only as the thump of the signal stopping wherever it happened to be.
@@ -56,17 +60,22 @@ namespace
     constexpr double landingFadeSeconds = 0.005;
 
     /** One channel of the track at a fractional position: the recorded mix, or
-        the stems weighted by their gains when the track has been separated.
-        Summing the stems at unity gives the mix back, so the two paths agree;
-        the mix is used when it can be, because it is a quarter of the work. */
+        the stems weighted by their gains when the track has been separated, or
+        `stemPath` of the way from one to the other. The mix is used when it can
+        be, because it is a quarter of the work.
+
+        Each stem is read to its own length. A stem cache from an older copy of a
+        file can be shorter than the track, and past its end a stem is silence,
+        not whatever the allocator put next to it. */
     inline float readSample (const float* const* mix,
                              const SeparatedTrack* separation,
                              const float* stemGains,
+                             float stemPath,
                              int channel,
                              juce::int64 numSamples,
                              double position) noexcept
     {
-        if (separation == nullptr)
+        if (separation == nullptr || stemPath <= 0.0f)
             return interpolate (mix[channel], numSamples, position);
 
         float sum = 0.0f;
@@ -78,11 +87,51 @@ namespace
             if (stemGains[stem] <= 0.0f)
                 continue;
 
-            sum += interpolate (separation->stems[(size_t) stem].getReadPointer (channel),
-                                numSamples, position) * stemGains[stem];
+            const auto& buffer = separation->stems[(size_t) stem];
+
+            sum += interpolate (buffer.getReadPointer (channel),
+                                static_cast<juce::int64> (buffer.getNumSamples()), position) * stemGains[stem];
         }
 
-        return sum;
+        return stemPath >= 1.0f
+            ? sum
+            : sum * stemPath + interpolate (mix[channel], numSamples, position) * (1.0f - stemPath);
+    }
+
+    /** Whether a gain differs from unity at all. Exactly unity is what lets the
+        deck go back to playing the mix itself. */
+    inline bool isOffUnity (float gain) noexcept
+    {
+        return gain < 1.0f || gain > 1.0f;
+    }
+
+    inline float moveTowards (float value, float target, float step) noexcept
+    {
+        return value < target ? juce::jmin (value + step, target)
+                              : juce::jmax (value - step, target);
+    }
+
+    /** One frame through the stem effect. It reads its stem for itself, because
+        at unity the deck is reading the mix, and to the stem's own length, as
+        readSample does. The stem's gain goes before the send, so that closing the
+        stem closes the way in and leaves the tail. With no stems to read, or off
+        the end of the track, it is fed silence and goes on ringing. */
+    inline void tickStemEffect (StemEffect& effect, const SeparatedTrack* separation, const float* stemGains,
+                                double position, float& deltaLeft, float& deltaRight) noexcept
+    {
+        auto left = 0.0f, right = 0.0f;
+
+        if (separation != nullptr)
+        {
+            const auto stem = effect.getStem();
+            const auto& buffer = separation->stems[(size_t) stem];
+            const auto numSamples = static_cast<juce::int64> (buffer.getNumSamples());
+
+            left = interpolate (buffer.getReadPointer (0), numSamples, position) * stemGains[stem];
+            right = interpolate (buffer.getReadPointer (1), numSamples, position) * stemGains[stem];
+        }
+
+        effect.tick (left, right, deltaLeft, deltaRight);
     }
 
     // Shorter than this and a loop is a tone rather than a rhythm, and a badly
@@ -137,6 +186,8 @@ Deck::Deck (int deckIndex, juce::AudioFormatManager& formatManagerToUse)
 
     for (auto& gain : stemGains)
         gain.store (1.0f, std::memory_order_relaxed);
+
+    feedStemGains.fill (1.0f);
 }
 
 //==============================================================================
@@ -145,13 +196,16 @@ Deck::Deck (int deckIndex, juce::AudioFormatManager& formatManagerToUse)
 
 void Deck::setSeparation (std::shared_ptr<const SeparatedTrack> separation, const juce::File& forFile)
 {
-    // A separation takes far longer than a load, so by the time one arrives the
-    // deck may be playing something else entirely. Playing it then would be a
-    // different record over this one.
-    if (getLoadedFile() != forFile)
+    if (separation != nullptr && ! separation->isWellFormed())
         return;
 
-    if (separation != nullptr && ! separation->isWellFormed())
+    const std::lock_guard<std::mutex> lock (separationMutex);
+
+    // A separation takes far longer than a load, so by the time one arrives the
+    // deck may be playing something else entirely. Playing it then would be a
+    // different record over this one. Checked under the lock, or a load could
+    // come between the question and acting on the answer.
+    if (getLoadedFile() != forFile)
         return;
 
     auto* raw = separation.get();
@@ -176,6 +230,174 @@ float Deck::getStemGain (Stem stem) const
 {
     const auto index = static_cast<size_t> (stem);
     return index < numStems ? stemGains[index].load (std::memory_order_relaxed) : 1.0f;
+}
+
+void Deck::toggleStemPad (int slot)
+{
+    if (! hasStems() || ! juce::isPositiveAndBelow (slot, numStemPads))
+        return;
+
+    // A press of a pad being held lets go of the hold, and of the same pad if it
+    // is latched too. The release of a hold can go missing -- shift down when
+    // the pad comes up sends it elsewhere, and so does a controller unplugged --
+    // and the screen has nothing but presses. Without this, the lit pad there
+    // would only toggle the latch underneath, and stay lit.
+    if (auto held = slot; heldStemPad.compare_exchange_strong (held, -1, std::memory_order_relaxed))
+    {
+        auto latched = slot;
+        latchedStemPad.compare_exchange_strong (latched, -1, std::memory_order_relaxed);
+        return;
+    }
+
+    // The MIDI and message threads can both press at once, and a plain read and
+    // write could lose one of the presses. The pad would then be stuck on the
+    // wrong way round from what the hand just did.
+    auto current = latchedStemPad.load (std::memory_order_relaxed);
+
+    while (! latchedStemPad.compare_exchange_weak (current, current == slot ? -1 : slot,
+                                                   std::memory_order_relaxed))
+        ;
+}
+
+void Deck::holdStemPad (int slot, bool down)
+{
+    if (down)
+    {
+        if (hasStems() && juce::isPositiveAndBelow (slot, numStemPads))
+            heldStemPad.store (slot, std::memory_order_relaxed);
+
+        return;
+    }
+
+    // Only the pad still being held: with two hands on the pads, letting go of
+    // the one the other replaced should not end the one still down.
+    heldStemPad.compare_exchange_strong (slot, -1, std::memory_order_relaxed);
+}
+
+int Deck::currentStemPad() const noexcept
+{
+    const auto held = heldStemPad.load (std::memory_order_relaxed);
+    return held >= 0 ? held : latchedStemPad.load (std::memory_order_relaxed);
+}
+
+int Deck::getStemPad() const noexcept
+{
+    return hasStems() ? currentStemPad() : -1;
+}
+
+void Deck::setStemFxEnabled (bool shouldBeOn)
+{
+    if (! shouldBeOn || hasStems())
+        stemFxEnabled.store (shouldBeOn, std::memory_order_relaxed);
+}
+
+void Deck::toggleStemFx()
+{
+    if (! hasStems())
+        return;
+
+    // As with the pads, two threads pressing at once must not lose a press.
+    auto current = stemFxEnabled.load (std::memory_order_relaxed);
+
+    while (! stemFxEnabled.compare_exchange_weak (current, ! current, std::memory_order_relaxed))
+        ;
+}
+
+bool Deck::isStemFxEnabled() const noexcept
+{
+    return hasStems() && stemFxEnabled.load (std::memory_order_relaxed);
+}
+
+void Deck::setStemFxTarget (Stem stem)
+{
+    if (juce::isPositiveAndBelow (static_cast<int> (stem), numStems))
+        stemFxTarget.store (static_cast<int> (stem), std::memory_order_relaxed);
+}
+
+void Deck::setStemFxType (StemEffect::Type type)
+{
+    if (juce::isPositiveAndBelow (static_cast<int> (type), StemEffect::numTypes))
+        stemFxType.store (type, std::memory_order_relaxed);
+}
+
+void Deck::setStemFxBeats (int division)
+{
+    if (juce::isPositiveAndBelow (division, StemEffect::numDivisions))
+        stemFxDivision.store (division, std::memory_order_relaxed);
+}
+
+void Deck::setStemFxAmount (float amount)
+{
+    stemFxAmount.store (juce::jlimit (0.0f, 1.0f, amount), std::memory_order_relaxed);
+}
+
+void Deck::setStemFxBeatSeconds (double seconds)
+{
+    if (seconds > 0.0)
+        stemFxBeatSeconds.store (seconds, std::memory_order_relaxed);
+}
+
+void Deck::startStemEffect (const SeparatedTrack* separation, bool stretching) noexcept
+{
+    stemEffectLive = false;
+
+    if (stemEffect == nullptr)
+        return;
+
+    const auto on = separation != nullptr && stemFxEnabled.load (std::memory_order_relaxed);
+
+    // Nothing past this point runs for a deck that has never used the effect, or
+    // has finished with it, so what such a deck plays is what it always played.
+    if (! on && ! stemEffect->isRinging())
+        return;
+
+    StemEffect::Settings settings;
+    settings.on = on;
+    settings.stem = stemFxTarget.load (std::memory_order_relaxed);
+    settings.type = stemFxType.load (std::memory_order_relaxed);
+    settings.amount = stemFxAmount.load (std::memory_order_relaxed);
+
+    // The tempo fader and not the rate actually playing, so that a scratch or a
+    // brake moves what goes in and leaves the repeats where they were.
+    settings.delaySeconds = StemEffect::delaySecondsFor (stemFxBeatSeconds.load (std::memory_order_relaxed),
+                                                         stemFxDivision.load (std::memory_order_relaxed),
+                                                         tempoRatio.load (std::memory_order_relaxed),
+                                                         stretching);
+
+    stemEffectLive = stemEffect->beginBlock (settings);
+}
+
+void Deck::silenceStemEffect()
+{
+    if (stemEffect != nullptr && stemEffect->isRinging())
+        stemEffect->reset();
+
+    stemEffectHold = 0;
+    stemEffectReturn = 1.0f;
+}
+
+float Deck::effectiveStemGain (size_t stem, int pad) const noexcept
+{
+    const auto knob = stemGains[stem].load (std::memory_order_relaxed);
+    return pad >= 0 ? knob * stemPadMasks[pad][stem] : knob;
+}
+
+void Deck::settleStemRamps (const SeparatedTrack* separation) noexcept
+{
+    const auto pad = separation != nullptr ? currentStemPad() : -1;
+    auto wanted = false;
+
+    for (size_t stem = 0; stem < numStems; ++stem)
+    {
+        const auto target = effectiveStemGain (stem, pad);
+        stemGainRamps[stem].setCurrentAndTargetValue (target);
+        feedStemGains[stem] = target;
+        wanted = wanted || isOffUnity (target);
+    }
+
+    const auto path = separation != nullptr && wanted ? 1.0f : 0.0f;
+    stemPathRamp.setCurrentAndTargetValue (path);
+    feedStemPath = path;
 }
 
 Deck::~Deck()
@@ -262,6 +484,8 @@ void Deck::publish (std::unique_ptr<Track> newTrack)
 {
     pause();
 
+    const std::lock_guard<std::mutex> lock (separationMutex);
+
     const auto seconds = newTrack != nullptr
         ? static_cast<double> (newTrack->audio.getNumSamples()) / newTrack->sampleRate
         : 0.0;
@@ -280,6 +504,16 @@ void Deck::publish (std::unique_ptr<Track> newTrack)
         previousSeparation != nullptr)
         retiredSeparations.emplace_back (std::move (previousSeparation),
                                          blocksProcessed.load (std::memory_order_relaxed));
+
+    // So do what was being done with them. Left alone, a part turned off for
+    // the last track would be missing from the stems of the next one, with the
+    // knob showing it and nobody remembering why.
+    for (auto& gain : stemGains)
+        gain.store (1.0f, std::memory_order_relaxed);
+
+    latchedStemPad.store (-1, std::memory_order_relaxed);
+    heldStemPad.store (-1, std::memory_order_relaxed);
+    stemFxEnabled.store (false, std::memory_order_relaxed);
 
     // A loop belongs to the track it was made in. Carrying one across would
     // trap the new track between two positions that mean nothing in it.
@@ -305,6 +539,7 @@ void Deck::publish (std::unique_ptr<Track> newTrack)
     pendingSeekSeconds.store (0.0, std::memory_order_relaxed);
 
     activeTrack.store (raw, std::memory_order_release);
+    stemSettleAsked.store (true, std::memory_order_release);
 
     if (previous != nullptr)
     {
@@ -338,6 +573,8 @@ std::shared_ptr<const SeparatedTrack> Deck::getSeparation() const
 
 void Deck::cleanUp()
 {
+    const std::lock_guard<std::mutex> lock (separationMutex);
+
     const auto now = blocksProcessed.load (std::memory_order_relaxed);
 
     const auto separationSafeToFree = [now] (const auto& entry)
@@ -357,6 +594,14 @@ void Deck::cleanUp()
     };
 
     retired.erase (std::remove_if (retired.begin(), retired.end(), safeToFree), retired.end());
+}
+
+bool Deck::holdsFile (const juce::File& file) const
+{
+    // The cleaning up frees retired tracks under this lock, so the track read
+    // here cannot go between loading the pointer and reading its file.
+    const std::lock_guard<std::mutex> lock (separationMutex);
+    return getLoadedFile() == file;
 }
 
 juce::File Deck::getLoadedFile() const
@@ -1014,11 +1259,11 @@ void Deck::prepare (double sampleRate, int)
     autoGainRamp.reset (deviceSampleRate, 0.02);
     autoGainRamp.setCurrentAndTargetValue (getAutoGain());
 
-    for (size_t i = 0; i < numStems; ++i)
-    {
-        stemGainRamps[i].reset (deviceSampleRate, gainRampSeconds);
-        stemGainRamps[i].setCurrentAndTargetValue (stemGains[i].load (std::memory_order_relaxed));
-    }
+    for (auto& ramp : stemGainRamps)
+        ramp.reset (deviceSampleRate, gainRampSeconds);
+
+    stemPathRamp.reset (deviceSampleRate, gainRampSeconds);
+    settleStemRamps (activeSeparation.load (std::memory_order_acquire));
 
     // Built here, before the device starts, so that processBlock() never has to.
     stretcher = std::make_unique<RubberBand::RubberBandStretcher> (
@@ -1028,12 +1273,20 @@ void Deck::prepare (double sampleRate, int)
     stretchInput.setSize (2, stretchChunkSize);
     stretchDiscard.setSize (2, stretchChunkSize);
     stretchPrimed = false;
+
+    stemEffect = std::make_unique<StemEffect>();
+    stemEffect->prepare (deviceSampleRate);
+    stemEffectLive = false;
+    stemEffectHold = 0;
+    stemEffectReturn = 1.0f;
+    stemReturnStep = static_cast<float> (1.0 / (gainRampSeconds * deviceSampleRate));
 }
 
 void Deck::releaseResources()
 {
     transportGain.setCurrentAndTargetValue (0.0f);
     stretchPrimed = false;
+    silenceStemEffect();
 }
 
 void Deck::processBlock (juce::AudioBuffer<float>& destination)
@@ -1044,6 +1297,12 @@ void Deck::processBlock (juce::AudioBuffer<float>& destination)
     auto* track = activeTrack.load (std::memory_order_acquire);
     const auto spinAsked = spinRequest.exchange (spinNone, std::memory_order_relaxed);
 
+    if (stemSettleAsked.exchange (false, std::memory_order_acquire))
+    {
+        settleStemRamps (activeSeparation.load (std::memory_order_acquire));
+        silenceStemEffect();    // repeats of the last track are no part of the next
+    }
+
     if (track == nullptr)
     {
         spinActive.store (false, std::memory_order_relaxed);
@@ -1051,6 +1310,8 @@ void Deck::processBlock (juce::AudioBuffer<float>& destination)
         peakLevel.store (0.0f, std::memory_order_relaxed);
         stretchPrimed = false;
         scratchTargetValid = false;
+        settleStemRamps (nullptr);
+        silenceStemEffect();
         return;
     }
 
@@ -1105,6 +1366,13 @@ void Deck::processBlock (juce::AudioBuffer<float>& destination)
         pitchBend = 0.0;
         stretchPrimed = false;
         scratchTargetValid = false;
+
+        // Nor need a pad pressed while stopped fade in over the first thing heard.
+        settleStemRamps (activeSeparation.load (std::memory_order_acquire));
+
+        // A tail goes down with the transport, and is not there to be picked up
+        // again on the next press of play, some other part of the track later.
+        silenceStemEffect();
 
         // A stopped deck has no music running under it. A shadow head left over
         // from a censor would otherwise pull the next press of play back to
@@ -1198,22 +1466,25 @@ void Deck::processBlock (juce::AudioBuffer<float>& destination)
 
     const float* source[2] = { track->audio.getReadPointer (0), track->audio.getReadPointer (1) };
 
-    // Stems are only worth reading when one of them is turned down: at unity
-    // they sum back to the mix that is already there, for four times the work.
     const auto* separation = activeSeparation.load (std::memory_order_acquire);
+    const auto stemPad = separation != nullptr ? currentStemPad() : -1;
     float stemGainNow[numStems];
+    float stemGainTarget[numStems];
     auto anyStemChanged = false;
 
     for (size_t stem = 0; stem < numStems; ++stem)
     {
-        stemGainRamps[stem].setTargetValue (stemGains[stem].load (std::memory_order_relaxed));
-        anyStemChanged = anyStemChanged || stemGainRamps[stem].getTargetValue() != 1.0f
-                                        || stemGainRamps[stem].getCurrentValue() != 1.0f;
-        stemGainNow[stem] = stemGainRamps[stem].getCurrentValue();
+        stemGainTarget[stem] = effectiveStemGain (stem, stemPad);
+        stemGainRamps[stem].setTargetValue (stemGainTarget[stem]);
+        anyStemChanged = anyStemChanged || isOffUnity (stemGainTarget[stem])
+                                        || isOffUnity (stemGainRamps[stem].getCurrentValue());
     }
 
-    if (! anyStemChanged)
-        separation = nullptr;
+    // Stems are only worth reading when one of them is turned down: at unity
+    // they sum back to the mix that is already there, for four times the work.
+    // They fade in as soon as one moves, and out once they are back at unity.
+    const auto stemPathTarget = separation != nullptr && anyStemChanged ? 1.0f : 0.0f;
+    stemPathRamp.setTargetValue (stemPathTarget);
 
     // Key lock is bypassed on the platter, and if it would have nothing to do:
     // at exactly the recorded speed the stretcher is a delay line, and a delay
@@ -1233,13 +1504,31 @@ void Deck::processBlock (juce::AudioBuffer<float>& destination)
                          && outChannels == 2
                          && (shift != 0 || (keyLocked && std::abs (rate - fileToDevice) > 1.0e-6));
 
+    startStemEffect (separation, stretching);
+
     if (stretching)
     {
         const auto pitchScale = std::pow (2.0, shift / 12.0) * (keyLocked ? 1.0 : rate / fileToDevice);
-        renderStretched (*track, destination, rate, fileToDevice, pitchScale, separation, stemGainNow);
+        renderStretched (*track, destination, rate, fileToDevice, pitchScale, separation, stemGainTarget, stemPathTarget);
     }
     else
+    {
+        // The stretcher ran ahead of the room, and the stem effect was fed with
+        // it. What lies between the two has gone into the effect already, and
+        // the effect's clock is that far ahead of what is heard. Fed again from
+        // the audible head, that stretch would echo twice, and everything before
+        // it would come round early. So the effect waits, not fed and not heard,
+        // until the room has caught up with where it got to. The wet it would
+        // have played meanwhile went with the stretcher's buffer.
+        if (stretchPrimed && stemEffect != nullptr && stemEffect->isRinging())
+        {
+            const auto lead = std::abs (feedPosition - readPosition) / fileToDevice;
+            stemEffectHold = static_cast<juce::int64> (juce::jmin (lead, longestStemEffectHoldSeconds * deviceSampleRate));
+            stemEffectReturn = 0.0f;
+        }
+
         stretchPrimed = false;
+    }
 
     auto position = readPosition;
     auto peak = 0.0f;
@@ -1270,12 +1559,39 @@ void Deck::processBlock (juce::AudioBuffer<float>& destination)
         for (size_t stem = 0; stem < numStems; ++stem)
             stemGainNow[stem] = stemGainRamps[stem].getNextValue();
 
+        const auto stemPath = stemPathRamp.getNextValue();
+
+        // Under the stretcher this is already in what it was fed. Here it goes on
+        // top of the mix or the stems, wherever the crossfade between them is.
+        float stemDelta[2] { 0.0f, 0.0f };
+
+        if (stemEffectLive && ! stretching)
+        {
+            if (stemEffectHold > 0)
+            {
+                --stemEffectHold;
+            }
+            else
+            {
+                tickStemEffect (*stemEffect, inRange ? separation : nullptr, stemGainNow, position,
+                                stemDelta[0], stemDelta[1]);
+
+                // Back from waiting for the room, it comes up rather than in.
+                stemEffectReturn = moveTowards (stemEffectReturn, 1.0f, stemReturnStep);
+                stemDelta[0] *= stemEffectReturn;
+                stemDelta[1] *= stemEffectReturn;
+            }
+        }
+
         for (int ch = 0; ch < outChannels; ++ch)
         {
-            const auto sample = stretching
+            auto sample = stretching
                 ? destination.getSample (ch, i) * gain
-                : (inRange ? readSample (source, separation, stemGainNow, ch, numSamples, position) * gain
+                : (inRange ? readSample (source, separation, stemGainNow, stemPath, ch, numSamples, position) * gain
                            : 0.0f);
+
+            if (stemEffectLive && ! stretching)
+                sample += stemDelta[ch] * gain;
 
             destination.setSample (ch, i, sample);
             peak = juce::jmax (peak, std::abs (sample));
@@ -1403,7 +1719,8 @@ void Deck::processBlock (juce::AudioBuffer<float>& destination)
 //==============================================================================
 
 void Deck::feedStretcher (const Track& track, double fileToDevice,
-                          const SeparatedTrack* separation, const float* stemGains)
+                          const SeparatedTrack* separation, const float* stemGainTargets,
+                          float stemPathTarget)
 {
     // The stretcher says how much it wants; give it that, within the chunk it
     // was told to expect. Zero means it is full and only needs draining, but a
@@ -1421,27 +1738,33 @@ void Deck::feedStretcher (const Track& track, double fileToDevice,
     // key lock is on, so a loop that only wrapped the other one would be
     // inaudible: the deck would show itself looping and play straight through.
     const float* mix[2] = { track.audio.getReadPointer (0), track.audio.getReadPointer (1) };
+    auto* left = stretchInput.getWritePointer (0);
+    auto* right = stretchInput.getWritePointer (1);
 
-    for (int ch = 0; ch < 2; ++ch)
-    {
-        auto* out = stretchInput.getWritePointer (ch);
-        auto position = feedPosition;
+    // The stretcher smears what it is given but does not hide it: a pad landing
+    // on one sample goes in as a step, and a step has every frequency there is.
+    // So the gains and the crossfade move here a sample at a time, as they do on
+    // the audible head.
+    const auto fadeStep = static_cast<float> (1.0 / (gainRampSeconds * deviceSampleRate));
 
-        for (int i = 0; i < count; ++i)
-        {
-            // The gains are taken as they stand rather than ramped: this audio
-            // is going into a stretcher that will smear it over its own window,
-            // which is far longer than any ramp would be.
-            out[i] = readSample (mix, separation, stemGains, ch, numSamples, position);
-            position += fileToDevice;
-            wrapIntoLoop (position, fileToDevice, track);
-        }
-    }
-
-    // Advance the shared head the same way, one sample at a time, so it lands
-    // exactly where the per-channel reads did.
     for (int i = 0; i < count; ++i)
     {
+        feedStemPath = moveTowards (feedStemPath, stemPathTarget, fadeStep);
+
+        for (size_t stem = 0; stem < numStems; ++stem)
+            feedStemGains[stem] = moveTowards (feedStemGains[stem], stemGainTargets[stem], fadeStep);
+
+        left[i]  = readSample (mix, separation, feedStemGains.data(), feedStemPath, 0, numSamples, feedPosition);
+        right[i] = readSample (mix, separation, feedStemGains.data(), feedStemPath, 1, numSamples, feedPosition);
+
+        if (stemEffectLive)
+        {
+            float delta[2] { 0.0f, 0.0f };
+            tickStemEffect (*stemEffect, separation, feedStemGains.data(), feedPosition, delta[0], delta[1]);
+            left[i] += delta[0];
+            right[i] += delta[1];
+        }
+
         feedPosition += fileToDevice;
         wrapIntoLoop (feedPosition, fileToDevice, track);
     }
@@ -1452,7 +1775,8 @@ void Deck::feedStretcher (const Track& track, double fileToDevice,
 
 void Deck::renderStretched (const Track& track, juce::AudioBuffer<float>& destination,
                             double rate, double fileToDevice, double pitchScale,
-                            const SeparatedTrack* separation, const float* stemGains)
+                            const SeparatedTrack* separation, const float* stemGainTargets,
+                            float stemPathTarget)
 {
     stretcher->setPitchScale (juce::jlimit (0.25, 4.0, pitchScale));
 
@@ -1470,13 +1794,18 @@ void Deck::renderStretched (const Track& track, juce::AudioBuffer<float>& destin
         stretcher->reset();
         feedPosition = readPosition;
 
+        // Nothing fed from here on has been heard, and anything it was owed by
+        // the direct path is moot now the stretcher is ahead again.
+        stemEffectHold = 0;
+        stemEffectReturn = 1.0f;
+
         auto toDiscard = static_cast<int> (stretcher->getStartDelay());
 
         while (toDiscard > 0 && rounds-- > 0)
         {
             if (stretcher->available() <= 0)
             {
-                feedStretcher (track, fileToDevice, separation, stemGains);
+                feedStretcher (track, fileToDevice, separation, stemGainTargets, stemPathTarget);
                 continue;
             }
 
@@ -1495,7 +1824,7 @@ void Deck::renderStretched (const Track& track, juce::AudioBuffer<float>& destin
     {
         if (stretcher->available() <= 0)
         {
-            feedStretcher (track, fileToDevice, separation, stemGains);
+            feedStretcher (track, fileToDevice, separation, stemGainTargets, stemPathTarget);
             continue;
         }
 

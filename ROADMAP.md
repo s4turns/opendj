@@ -1,7 +1,7 @@
 # OpenDJ roadmap
 
 Where the project is and what to pick up next. Anything ticked has tests or a verified manual
-check behind it, not just code that compiles. The suite is **539 tests** on Linux. Windows runs
+check behind it, not just code that compiles. The suite is **651 tests** on Linux. Windows runs
 one fewer, a stderr test whose stand-in for ffmpeg is a shell script. Anything touching audio is
 tested by measuring the output, not by checking that the code ran. Open work is also tracked as
 issues on [git.interdo.me](https://git.interdo.me/interdome/opendj/issues), and the numbers
@@ -100,7 +100,7 @@ Some of it is partly there already: pitch bend through the jog wheel's nudge.
 | Missing | Notes |
 | --- | --- |
 | A deeper sampler (#21) | Done: four banks of eight pads, recording a sample from a deck (its loop or whole bars, on the grid), and pads synced to the music's tempo. Sync changes speed and pitch together; it does not yet start a sample on the beat |
-| More from stems (#22) | Separating the library ahead of time, stem pads such as vocal off or drums only, effects on one stem |
+| More from stems (#22) | Done: separating ahead of time from the library and playlists, four stem pads, and an echo, reverb or low pass on one stem. Tested with stems built by hand and a stand-in separator; no separation model has been run on this work |
 | Library import and metadata (#23) | iTunes and Music and Serato libraries; a tag editor; cover art. rekordbox collections import from their XML (`src/library/RekordboxImport.*`), with grids, hot cues, playlists, colours, ratings and comments, which the library now keeps |
 | Sandbox (#26) | Previewing a later moment in the headphones while the master plays on |
 | Keyboard mapper (#27) | Shortcuts of your own; today there are only Q, W, O, P and the number row |
@@ -206,6 +206,33 @@ key in the tags beats detection on a first load as well, which the table above a
 The honest limitation is the relative major: it shares all seven notes with its minor, and a
 progression touching neither leading tone is ambiguous to any method. Camelot notation is
 forgiving here, since a key and its relative share a number and mix anyway.
+
+## More from stems
+
+Three things, built in this order because each leans on the last: pads, an effect on one stem, and
+separating ahead of time. Measured with stems built by hand from tones, and a stand-in separator
+script; no real model was available while this was written.
+
+**Fixed on the way.** `retiredSeparations` was changed by three threads with no lock, and a separation
+arriving as a track loaded could land on the new track; a mutex the audio thread never takes now covers
+both. Stems were read to the mix's length, so a stale cache with shorter stems read past their end on
+the audio thread; each is now read to its own. A new track also kept the last one's stem knobs.
+
+| Decision | Why |
+| --- | --- |
+| A pad multiplies the knobs rather than moving them | Automix writes the vocal gain on every tick of a fade and puts it back afterwards. A pad that wrote the gain would be undone by it, or baked in |
+| Mix and stems cross over in 5 ms, on the direct path and the stretcher's feed | Real stems do not sum exactly to the mix, and a pad crosses between the two |
+| One effect on one stem per deck, fed before the stretcher | Under key lock the stems exist only on the way into the stretcher. A second stretcher per stem would double the cost and comb against the first |
+| The effect adds to the dry signal | Nothing about the dry path changes, and with it off the output is bit for bit what it was |
+| One queue for every separation | One separator, one worker. A deck's request goes first and stops a background job, which goes back in the queue |
+| Background work only while no deck is playing | Separation takes every core, and a dropout in the room costs more than a track not ready yet |
+| Written to a partial folder and renamed once checked | A killed separator used to leave a folder that loaded as stems. JUCE reports a killed child as having exited cleanly, so on Linux and macOS the separator is now started with `fork` and waited on directly |
+| A failed track is not tried again until it changes, except by hand | Automix would otherwise spend minutes again on a track that will not separate. A person pressing the button is asking for another go |
+| Free space comes through a probe tests can replace | The engine's tests used to skip on a nearly full temp folder, and so passed on one machine and skipped on another |
+
+Not verified: a real separation model or `stemsep` with any of this, how long a native separation takes
+to stop, Windows and macOS, and ThreadSanitizer. On Linux a killed OpenDJ takes its separator with it;
+anything the separator itself started is not covered.
 
 ## Loudness and auto gain
 
@@ -806,6 +833,15 @@ would say so.
 | `deck.censor` | `deck` | Backwards while held, landing back on time |
 | `mixer.echo_out_toggle` | `deck` | Takes the track away and leaves its echo |
 | `mixer.auto_gain_toggle` | nothing | Turns levelling by loudness on or off, for every deck |
+| `deck.stem_pad` | `deck`, `slot` | A stem pad while held: 0 instrumental, 1 acapella, 2 drums only, 3 no drums |
+| `deck.stem_pad_toggle` | `deck`, `slot` | The same pad, on until pressed again |
+| `deck.stem_fx` | `deck` | Turns the deck's stem effect on or off |
+| `deck.stem_fx_target` | `deck`, `slot` | Which stem it is on: 0 drums, 1 bass, 2 other, 3 vocals |
+| `deck.stem_fx_type` | `deck`, `slot` | 0 echo, 1 reverb, 2 low pass |
+| `deck.stem_fx_beats` | `deck`, `slot` | The echo's length: 0 a quarter beat, 1 a half, 2 one beat, 3 two |
+| `deck.stem_fx_amount` | `deck`, value | How much of it |
+| `stems.prepare_selected` | nothing | Prepares the stems of what the library has selected, or the playlist on show |
+| `stems.prepare_cancel` | nothing | Stops preparing |
 | `master_fx.type` | `deck`, `slot` | Picks an effect for unit `deck`: 0 echo, 1 reverb, 2 filter, 3 plugin, 4 flanger, 5 phaser, 6 gate, 7 bitcrusher, 8 stutter |
 | `deck.swap` | nothing | Swaps both sides at once. What a single deck-toggle button means |
 | `mixer.crossfader_assign` | `deck`, `slot` | 0 the A side, 1 neither, 2 the B side |

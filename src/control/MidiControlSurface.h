@@ -21,6 +21,10 @@
 namespace opendj
 {
 
+/** Whether a control's light should be on. Apart from the surface so that what
+    the lights say can be checked with no controller attached. */
+bool feedbackStateFor (const AudioEngine& engine, const ActionDispatcher& dispatcher, const MidiControl& control);
+
 /** Connects a MIDI controller to the action dispatcher.
 
     Input arrives on JUCE's MIDI thread and is turned into actions immediately,
@@ -133,7 +137,6 @@ private:
     void sendInitMessages();
     void sendKeepAlive();
     float valueFor (const MidiControl& control, int number, int rawValue, int lowByte);
-    bool feedbackStateFor (const MidiControl& control) const;
     void applyLearned (MidiControl control);
     juce::File fileForMapping (const MidiMapping& mapping) const;
 

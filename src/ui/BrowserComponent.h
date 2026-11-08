@@ -9,6 +9,7 @@
 
 #include "library/Library.h"
 #include "library/LibraryScanner.h"
+#include "ui/StemPrepareMenu.h"
 
 #include <functional>
 #include <vector>
@@ -39,6 +40,15 @@ public:
     /** Called after the right-click menu put a track in a playlist, so the
         playlist tab can show it. */
     std::function<void()> onPlaylistsChanged;
+
+    /** Offers stems in the right-click menu, for the selection. */
+    StemPrepareMenu stemPrepareMenu;
+
+    /** The stem queue's line for the status, empty when it has nothing to say. */
+    std::function<juce::String()> stemStatus;
+
+    /** Every selected track. Message thread. */
+    std::vector<juce::File> getSelectedFiles() const;
 
     /** The highlighted track, or an invalid file. Safe from any thread, so the
         controller's load button can ask on the MIDI thread. */
