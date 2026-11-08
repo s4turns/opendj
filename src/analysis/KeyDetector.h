@@ -39,6 +39,29 @@ struct MusicalKey
     /** Parses either spelling back, so a key already written into a file's tags
         can be compared with a detected one. Returns an invalid key on nonsense. */
     static MusicalKey fromString (const juce::String& text);
+
+    /** The same key moved by a number of semitones, up for positive. */
+    MusicalKey transposed (int semitones) const noexcept;
+
+    /** Where this key sits on the wheel, for sorting: 1A, 1B, 2A and so on,
+        counting from 0. Neighbours in this order mix. -1 when unknown. */
+    int wheelOrder() const noexcept;
+
+    /** How two keys sit together on the wheel, best first. */
+    enum class Harmony
+    {
+        same,        ///< the same key
+        relative,    ///< the same number and the other letter: Am and C
+        neighbour,   ///< one step round the wheel with the same letter: Am and Em
+        clash        ///< anything else, or either key unknown
+    };
+
+    Harmony harmonyWith (const MusicalKey& other) const noexcept;
+
+    /** The smallest shift, between -6 and +5 semitones, that takes this key to
+        `target` or to its relative. A minor and a major have the same notes, so
+        Am reaches C by not moving at all. 0 when either key is unknown. */
+    int semitonesToMatch (const MusicalKey& target) const noexcept;
 };
 
 /** Finds the key of a track.

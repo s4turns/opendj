@@ -222,7 +222,11 @@ void SessionState::captureFrom (const Mixer& mixer, const Sampler& sampler)
         samplerLooping[(size_t) slot] = sampler.isSlotLooping (slot);
         samplerGains[(size_t) slot] = sampler.getSlotGain (slot);
         samplerFiles[(size_t) slot] = sampler.getSlotFile (slot).getFullPathName();
+        samplerSync[(size_t) slot] = sampler.isSlotSync (slot);
+        samplerBpms[(size_t) slot] = sampler.getSlotBpm (slot);
     }
+
+    samplerBank = sampler.getBank();
 }
 
 void SessionState::applyTo (Mixer& mixer, Sampler& sampler) const
@@ -261,7 +265,10 @@ void SessionState::applyTo (Mixer& mixer, Sampler& sampler) const
     {
         sampler.setSlotLooping (slot, samplerLooping[(size_t) slot]);
         sampler.setSlotGain (slot, samplerGains[(size_t) slot]);
+        sampler.setSlotSync (slot, samplerSync[(size_t) slot]);
     }
+
+    sampler.setBank (samplerBank);
 }
 
 void SessionState::captureFrom (const MicInput& mic)
@@ -269,6 +276,23 @@ void SessionState::captureFrom (const MicInput& mic)
     micGain = mic.getGain();
     micTalkover = mic.isTalkoverEnabled();
     micRouting = mic.getRouting();
+    micInputPair = mic.getInputPair();
+}
+
+void SessionState::captureAuxFrom (const MicInput& aux)
+{
+    auxGain = aux.getGain();
+    auxRouting = aux.getRouting();
+    auxInputPair = aux.getInputPair();
+}
+
+void SessionState::applyAuxTo (MicInput& aux) const
+{
+    aux.setGain (auxGain);
+    aux.setTalkover (false);
+    aux.setRouting (auxRouting);
+    aux.setInputPair (auxInputPair);
+    aux.setEnabled (false);
 }
 
 void SessionState::applyTo (MicInput& mic) const
@@ -276,6 +300,7 @@ void SessionState::applyTo (MicInput& mic) const
     mic.setGain (micGain);
     mic.setTalkover (micTalkover);
     mic.setRouting (micRouting);
+    mic.setInputPair (micInputPair);
     mic.setEnabled (false);
 }
 
@@ -290,7 +315,7 @@ juce::var SessionState::toVar() const
     root->setProperty ("cue_mix", cueMix);
     root->setProperty ("crossfader_curve", curveName (crossfaderCurve));
 
-    juce::Array<juce::var> assigns, ranges, visible, files, loops, gains;
+    juce::Array<juce::var> assigns, ranges, quantized, visible, files, loops, gains;
 
     for (const auto assign : crossfaderAssigns)
         assigns.add (assignName (assign));
@@ -298,20 +323,34 @@ juce::var SessionState::toVar() const
     for (const auto range : tempoRanges)
         ranges.add (range);
 
+    for (const auto on : quantize)
+        quantized.add (on);
+
     for (const auto deck : visibleDecks)
         visible.add (deck);
+
+    juce::Array<juce::var> syncs, bpms;
 
     for (size_t slot = 0; slot < Sampler::numSlots; ++slot)
     {
         files.add (samplerFiles[slot]);
         loops.add (samplerLooping[slot]);
         gains.add (samplerGains[slot]);
+        syncs.add (samplerSync[slot]);
+        bpms.add (samplerBpms[slot]);
     }
+
+    root->setProperty ("sampler_sync", syncs);
+    root->setProperty ("sampler_bpms", bpms);
+    root->setProperty ("sampler_bank", samplerBank);
 
     root->setProperty ("crossfader_assign", assigns);
     root->setProperty ("tempo_ranges", ranges);
+    root->setProperty ("quantize", quantized);
     root->setProperty ("visible_decks", visible);
     root->setProperty ("waveform_zoom_seconds", waveformZoomSeconds);
+    root->setProperty ("camelot_keys", camelotKeys);
+    root->setProperty ("auto_gain", autoGain);
 
     root->setProperty ("output_mode", opendj::toString (outputMode));
 
@@ -394,6 +433,10 @@ juce::var SessionState::toVar() const
     root->setProperty ("mic_gain", micGain);
     root->setProperty ("mic_talkover", micTalkover);
     root->setProperty ("mic_routing", routingName (micRouting));
+    root->setProperty ("mic_input_pair", micInputPair);
+    root->setProperty ("aux_gain", auxGain);
+    root->setProperty ("aux_routing", routingName (auxRouting));
+    root->setProperty ("aux_input_pair", auxInputPair);
 
     if (windowBounds.isNotEmpty())
         root->setProperty ("window", windowBounds);
@@ -412,6 +455,7 @@ SessionState SessionState::fromVar (const juce::var& source)
 
     const auto assigns = arrayOf (source, "crossfader_assign");
     const auto ranges = arrayOf (source, "tempo_ranges");
+    const auto quantized = arrayOf (source, "quantize");
 
     for (int c = 0; c < Mixer::numChannels; ++c)
     {
@@ -420,6 +464,9 @@ SessionState SessionState::fromVar (const juce::var& source)
 
         if (const auto value = element (ranges, c); value.isDouble() || value.isInt())
             state.tempoRanges[(size_t) c] = juce::jlimit (1.0, 100.0, (double) value);
+
+        if (const auto value = element (quantized, c); value.isBool())
+            state.quantize[(size_t) c] = (bool) value;
     }
 
     const auto visible = arrayOf (source, "visible_decks");
@@ -440,6 +487,9 @@ SessionState SessionState::fromVar (const juce::var& source)
     state.waveformZoomSeconds = waveform::nearestZoom (
         number (source, "waveform_zoom_seconds", state.waveformZoomSeconds,
                 waveform::zoomLevels.front(), waveform::zoomLevels.back()));
+
+    state.camelotKeys = flag (source, "camelot_keys", state.camelotKeys);
+    state.autoGain = flag (source, "auto_gain", state.autoGain);
 
     state.outputMode = outputModeFromString (text (source, "output_mode"));
 
@@ -542,6 +592,10 @@ SessionState SessionState::fromVar (const juce::var& source)
     const auto files = arrayOf (source, "sampler_files");
     const auto loops = arrayOf (source, "sampler_looping");
     const auto gains = arrayOf (source, "sampler_gains");
+    const auto syncs = arrayOf (source, "sampler_sync");
+    const auto bpms = arrayOf (source, "sampler_bpms");
+
+    state.samplerBank = (int) number (source, "sampler_bank", state.samplerBank, 0.0, Sampler::numBanks - 1);
 
     for (int slot = 0; slot < Sampler::numSlots; ++slot)
     {
@@ -553,11 +607,21 @@ SessionState SessionState::fromVar (const juce::var& source)
 
         if (const auto value = element (gains, slot); value.isDouble() || value.isInt())
             state.samplerGains[(size_t) slot] = (float) juce::jlimit (0.0, 2.0, (double) value);
+
+        if (const auto value = element (syncs, slot); value.isBool())
+            state.samplerSync[(size_t) slot] = (bool) value;
+
+        if (const auto value = element (bpms, slot); value.isDouble() || value.isInt())
+            state.samplerBpms[(size_t) slot] = juce::jlimit (0.0, 300.0, (double) value);
     }
 
     state.micGain = (float) number (source, "mic_gain", state.micGain, 0.0, 2.0);
     state.micTalkover = flag (source, "mic_talkover", state.micTalkover);
     state.micRouting = routingFromName (text (source, "mic_routing"));
+    state.micInputPair = (int) number (source, "mic_input_pair", state.micInputPair, 0.0, 3.0);
+    state.auxGain = (float) number (source, "aux_gain", state.auxGain, 0.0, 2.0);
+    state.auxRouting = routingFromName (text (source, "aux_routing"));
+    state.auxInputPair = (int) number (source, "aux_input_pair", state.auxInputPair, 0.0, 3.0);
 
     state.windowBounds = text (source, "window");
 

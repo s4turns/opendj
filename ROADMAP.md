@@ -1,7 +1,7 @@
 # OpenDJ roadmap
 
 Where the project is and what to pick up next. Anything ticked has tests or a verified manual
-check behind it, not just code that compiles. The suite is **371 tests** on Linux. Windows runs
+check behind it, not just code that compiles. The suite is **651 tests** on Linux. Windows runs
 one fewer, a stderr test whose stand-in for ffmpeg is a shell script. Anything touching audio is
 tested by measuring the output, not by checking that the code ran. Open work is also tracked as
 issues on [git.interdo.me](https://git.interdo.me/interdome/opendj/issues), and the numbers
@@ -30,8 +30,8 @@ that was listed after it except video.
 | 8 | BPM detection and beat grid | ✅ | `src/analysis/TrackAnalyser.*` |
 | 9 | Sync: tempo and beat phase | ✅ | `AudioEngine::syncDeck` |
 | 10 | Turntable platters, mouse drivable | ✅ | `src/ui/PlatterComponent.*`, `src/ui/AngleMath.h` |
-| 11 | Hot cues | ✅ | `Deck::hotCuePressed` and friends. Eight coloured pads per deck (click sets or jumps, right-click clears) and matching markers on both waveforms, `src/ui/HotCueColours.h` |
-| 12 | MIDI mapping engine, monitor, device picker | ✅ | `src/control/`, `src/ui/MidiSetupComponent.*` |
+| 11 | Hot cues | ✅ | `Deck::hotCuePressed` and friends. Eight coloured pads per deck (click sets or jumps, right-click clears) and matching markers on both waveforms, `src/ui/HotCueColours.h`. Kept with the track in the library and back on the pads when it is loaded again (#24) |
+| 12 | MIDI mapping engine, monitor, device picker, learn | ✅ | `src/control/`, `src/ui/MidiSetupComponent.*` |
 | 13 | Roland DJ-202 mapping | ✅ | `mappings/roland-dj-202.json`, verified on hardware |
 | 14 | Track browser and library database | ✅ | `src/library/`, `src/ui/BrowserComponent.*` |
 
@@ -41,15 +41,20 @@ that was listed after it except video.
 | Loops and loop rolls | ✅ | `Deck::setLoopBeats` and friends |
 | Slip mode | ✅ | `Deck::setSlipEnabled`, sharing the roll's shadow playhead |
 | Key detection | ✅ | `src/analysis/KeyDetector.*`, in the browser's Key column |
+| Auto gain | ✅ | `src/analysis/Loudness.*`, `Deck::setAutoGainEnabled`. BS.1770 loudness, kept with the track |
+| Key shift and key match | ✅ | `Deck::setKeyShift`, `AudioEngine::matchDeckKey`, through the key lock stretcher |
 | Effects: filter, echo, reverb | ✅ | `src/core/Mixer.*`, one knob each per channel |
-| Master effects | ✅ | `src/core/MasterEffects.*`: two slots on the whole mix, each echo, reverb or filter with a wet level and two parameters |
+| Master effects | ✅ | `src/core/MasterEffects.*`: two slots on the whole mix, each echo, reverb, filter, flanger, phaser, gate, bitcrusher or stutter with a wet level and two parameters |
+| Brake, backspin, reverse, censor | ✅ | `Deck::brake` and friends, on a row of their own under the hot cues |
+| Echo out | ✅ | `Mixer::setChannelEchoOut` |
 | VST3 effect plugins | ✅ | `src/core/PluginHost.*`: scanned in the background, loaded into a master slot with its own window and two knobs mapped to its parameters |
 | Sampler | ✅ | `src/core/Sampler.*`, eight pads |
 | Playlists | ✅ | `Library` playlist tables, `src/ui/PlaylistComponent.*`: built from the browser by selection or drag, reordered, renamed |
-| Automix | ✅ | `src/core/AutoMix.*`, `AutoMixMath.h`: plays a playlist on decks A and B, loading ahead, matching tempo and beat, sweeping the crossfader |
-| Smart crossfade | 🚧 | `src/core/MixPoints.*`: outro into intro, phrase on phrase, with a bass swap (#37). Checked against 20 real tracks' analyses, not yet listened to through a whole set. No vocal avoidance, which needs stems prepared ahead (#22) |
+| Automix | ✅ | `src/core/AutoMix.*`, `AutoMixMath.h`: plays a playlist on decks A and B, loading ahead, matching tempo and beat, sweeping the crossfader. Key lock goes on for a deck whose tempo it changes |
+| Smart crossfade | 🚧 | `src/core/MixPoints.*`: outro into intro, phrase on phrase, with a bass swap (#37). Checked against 20 real tracks' analyses, not yet listened to through a whole set. Vocals are kept apart where a separator is installed (#37): each track is separated while the one before plays, the mix moves to the nearest phrase, or the shorter fade, with fewest bars sung over each other, and the outgoing vocals make way for any that remain. Each phrase is read as intro, verse, chorus, breakdown or outro from its energy (and its vocals when separated). With no outro to mix from, the fade moves back rather than cut into a closing chorus. The incoming track is matched to the loudness of the outgoing one, within 6 dB |
 | Mic input | 🚧 | `src/core/MicInput.*`, `src/ui/MicComponent.*`, with talkover and a stream-only switch. Tested by measuring the output; not yet tried with a real mic |
 | Stem separation | ✅ | `src/analysis/StemSeparator.*`, `StemDsp.*`, a knob per stem |
+| Stems on the GPU (#36) | ✅ | `src/analysis/StemModel.*`: ONNX Runtime with CUDA on an NVIDIA card, OpenVINO on Intel graphics or the CPU. A five minute track takes 27 s on an RTX 4070 against 118 s on the CPU. Core ML on a Mac: a six minute track takes about 26 s on an M5 Pro, 2.5 times as fast as its CPU |
 | Record the master output | ✅ | `src/core/SetRecorder.*`: WAV, FLAC or MP3, with a tracklist |
 | Split output cue | ✅ | `src/core/OutputRouter.*`, headphones on a stereo interface |
 | Settings that survive a restart | ✅ | `src/app/Settings.*` |
@@ -62,9 +67,9 @@ that was listed after it except video.
 
 | Item | Notes |
 | --- | --- |
-| Stems on the GPU (#36) | Library analysis now uses several cores. Stem separation is still slow; OpenVINO is already the backend and can target a GPU when there is one |
 | DJ-202 pad modes on the hardware, then the rest (#6) | Loop, roll and sampler modes are mapped from Mixxx's DJ-202 script and need pressing on the controller. Cue loop, pitch play, slicer, the parameter buttons and the TR-S sequencer are not mapped |
-| Arch and macOS (#7) | `scripts/build.sh` knows the Arch packages but has never been run there. macOS has never been tried |
+| Arch | `scripts/build.sh` knows the Arch packages but has never been run there |
+| macOS hardware coverage | Apple Silicon builds, tests and opens with CoreAudio. Intel hardware and the DJ-202 on macOS still need checking; see Platforms below |
 | Video (#8) | Playing video files is unstarted, and probably its own project. The visualiser is separate and built |
 | The visualiser on macOS | Linux and Windows have an offscreen context, from EGL and WGL. macOS needs the CGL equivalent, and nothing there has been tried at all |
 | RTMP against a real YouTube or Twitch account | Verified so far only against ffmpeg's own loopback RTMP listener; the handshake has never reached an actual platform |
@@ -75,31 +80,28 @@ The goal is that a VirtualDJ user can sit down at OpenDJ and already know how to
 what they would still reach for and not find, checked against the code rather than assumed. The
 VirtualDJ column is a description of that product, not a measurement of it.
 
-Some of it is partly there already: pitch bend through the jog wheel's nudge, and Camelot notation
-in `MusicalKey::toCamelot` that the browser does not yet show.
+Some of it is partly there already: pitch bend through the jog wheel's nudge.
 
 ### Reached for in every set
 
 | Missing | What VirtualDJ has | Where OpenDJ is |
 | --- | --- | --- |
 | History and smart folders (#11) | Playlists, virtual and filter folders, an automatic history of played tracks, a side list for lining up the next few | Playlists are done. No history: `tracks.last_played_at` exists but nothing writes it. No filter folders |
-| Named hot cues (#12) | Pads per deck with colours and names, and markers on the waveform | Pads and coloured markers are done; a cue cannot be named yet |
-| Beat jump and quantize (#13) | Jumps of 1 to 32 beats; cues and loops snap to the grid | None. Automatic loops already start on the beat |
-| Beat grid editing (#14) | Adjust the BPM, move the downbeat, tap tempo | Detection only, so a wrong grid cannot be corrected |
-| More effects (#15) | Dozens, including flanger, phaser, gate, bitcrusher, brake, backspin, echo out and stutter, plus reverse and censor buttons | Filter, echo and reverb per channel, and the same three in two master slots, which also take VST3 plugins |
-| Key tools (#16) | Key shift in semitones, key match between decks, Camelot display, harmonic hints in the browser | Detection only |
-| Auto gain (#17) | Tracks levelled by measured loudness | A trim, with no analysis behind it |
-| Vocal-aware automix (#37) | Transitions that keep two vocals from overlapping | Mixes land outro on intro, phrase on phrase, but vocals are not detected |
-| MIDI learn and more controllers (#19, #4) | Hundreds of controllers mapped out of the box, and a mapper that learns a control from the hardware | One mapping, written by hand |
+| Beat jump and quantize (#13) | Jumps of 1 to 32 beats; cues and loops snap to the grid | Done: beat jump of 1 to 32 beats that carries a running loop, and a quantize button per deck for the cue, hot cues and loop in and out. Jumping to a hot cue does not yet keep the phase |
+| Beat grid editing (#14) | Adjust the BPM, move the downbeat, tap tempo | Done: an editor behind each deck's BPM readout, with tap tempo. Edits are kept with the track and outrank later analysis. No dynamic grids yet: one tempo for the whole track |
+| More effects (#15) | Dozens, including flanger, phaser, gate, bitcrusher, brake, backspin, echo out and stutter, plus reverse and censor buttons | Done, all of those named: filter, echo and reverb per channel with an echo out, flanger, phaser, gate, bitcrusher and stutter as well in two master slots, which also take VST3 plugins, and brake, backspin, reverse and censor per deck. Not the dozens: the master slots are for what a set needs, and plugins are for the rest. Not heard in a real set yet |
+| Key tools (#16) | Key shift in semitones, key match between decks, Camelot display, harmonic hints in the browser | Done: all four. Hints are colours on the Key column rather than a filter. Measured by counting the pitch that comes out on test tones; not yet heard on music |
+| Auto gain (#17) | Tracks levelled by measured loudness | Done. Readings agree with ffmpeg's `ebur128` to within 0.05 LU on three test tracks, not yet tried across a real collection |
+| Vocal-aware automix (#37) | Transitions that keep two vocals from overlapping | Vocals are kept apart, levels matched, and sections read from energy and vocals; not yet heard through a whole set. Sections come from energy, not from recognising repeated material, so a verse and a chorus of the same fullness look alike without stems |
+| MIDI learn and more controllers (#19, #4) | Hundreds of controllers mapped out of the box, and a mapper that learns a control from the hardware | Learn is done, from the Controller panel, tested with messages fed in at the point a device delivers them and not yet on a controller. One mapping ships, written by hand |
 
 ### Expected by regular users
 
 | Missing | Notes |
 | --- | --- |
-| A deeper sampler (#21) | More pads, banks, recording a sample from a deck, samples locked to tempo |
-| More from stems (#22) | Separating the library ahead of time, stem pads such as vocal off or drums only, effects on one stem |
-| Library import and metadata (#23) | iTunes and Music, rekordbox and Serato libraries; a tag editor; cover art; colours, ratings and comments |
-| Saved cue points (#24) | Hot cues kept with the track in the library |
+| A deeper sampler (#21) | Done: four banks of eight pads, recording a sample from a deck (its loop or whole bars, on the grid), and pads synced to the music's tempo. Sync changes speed and pitch together; it does not yet start a sample on the beat |
+| More from stems (#22) | Done: separating ahead of time from the library and playlists, four stem pads, and an echo, reverb or low pass on one stem. Tested with stems built by hand and a stand-in separator; no separation model has been run on this work |
+| Library import and metadata (#23) | iTunes and Music and Serato libraries; a tag editor; cover art. rekordbox collections import from their XML (`src/library/RekordboxImport.*`), with grids, hot cues, playlists, colours, ratings and comments, which the library now keeps |
 | Sandbox (#26) | Previewing a later moment in the headphones while the master plays on |
 | Keyboard mapper (#27) | Shortcuts of your own; today there are only Q, W, O, P and the number row |
 | Ableton Link (#29) | Tempo shared with other applications and devices |
@@ -122,7 +124,8 @@ in `MusicalKey::toCamelot` that the browser does not yet show.
 | Fedora | ✅ | ✅ | Fedora 44, GCC 16, on a DJ-202's own four channel interface through PipeWire's JACK |
 | Debian and Ubuntu | ✅ | ⬜ | Builds and tests in CI; never run on a desktop |
 | Arch | ⬜ | ⬜ | Packages known, untested |
-| macOS | ⬜ | ⬜ | JUCE supports it; nothing has been tried |
+| macOS Apple Silicon | ✅ | ✅ | Separate `scripts/build-macos.sh`, Apple Clang 21. Native app opens with CoreAudio; 375 CTest entries pass with stems and visuals disabled. Microphone and DJ-202 hardware use remain unverified |
+| macOS Intel | ✅ | 🚧 | Universal app contains x86_64 and arm64; all 375 Intel test cases pass through Rosetta on Apple Silicon with stems and visuals disabled. No Intel hardware available |
 
 ## Rules worth knowing before changing the engine
 
@@ -183,9 +186,70 @@ convertible to Camelot.
 | Each frame is normalised before it is added | So a loud drop does not outvote the four quiet minutes that share its key |
 | A key already in the tags wins | Detection fills a gap rather than overruling a person |
 
+**Key shift** is the key lock stretcher with its pitch scale set, so a deck has one path that
+changes pitch rather than two. It only stays in the path while there is a shift, or key lock has a
+tempo to hide: at a shift of zero the output is bit for bit what it was.
+
+| Decision | Why |
+| --- | --- |
+| The key a deck is "in" counts the shift and, with key lock off, the tempo | A deck six percent fast with no key lock is a semitone sharp, and matching what it was recorded in would clash |
+| A match goes to the key or its relative, the shortest way | They have the same notes. Moving Am three semitones to reach C would change the sound of a track for nothing |
+| A match works from the deck with no shift | So pressing it twice gives the same answer rather than adding to itself |
+| It stays between -6 and +5 | Pitch is what a shift costs, so no shift goes further than half an octave |
+| The hints go by the deck the room hears, then any that is playing | With the faders down, somebody is looking for the next record in the headphones, and that is when they are wanted most |
+| Sorting the Key column happens in the browser | The library has the key as text, in whichever spelling it arrived in, and no text sorts in wheel order. The column looked sortable before this and sorted by artist |
+
+A track the library had already analysed used to reach the deck with no key at all: `KnownTrack` had
+no field for one, and skipping the tempo pass skipped key detection with it. It has one now, and a
+key in the tags beats detection on a first load as well, which the table above already claimed.
+
 The honest limitation is the relative major: it shares all seven notes with its minor, and a
 progression touching neither leading tone is ambiguous to any method. Camelot notation is
 forgiving here, since a key and its relative share a number and mix anyway.
+
+## More from stems
+
+Three things, built in this order because each leans on the last: pads, an effect on one stem, and
+separating ahead of time. Measured with stems built by hand from tones, and a stand-in separator
+script; no real model was available while this was written.
+
+**Fixed on the way.** `retiredSeparations` was changed by three threads with no lock, and a separation
+arriving as a track loaded could land on the new track; a mutex the audio thread never takes now covers
+both. Stems were read to the mix's length, so a stale cache with shorter stems read past their end on
+the audio thread; each is now read to its own. A new track also kept the last one's stem knobs.
+
+| Decision | Why |
+| --- | --- |
+| A pad multiplies the knobs rather than moving them | Automix writes the vocal gain on every tick of a fade and puts it back afterwards. A pad that wrote the gain would be undone by it, or baked in |
+| Mix and stems cross over in 5 ms, on the direct path and the stretcher's feed | Real stems do not sum exactly to the mix, and a pad crosses between the two |
+| One effect on one stem per deck, fed before the stretcher | Under key lock the stems exist only on the way into the stretcher. A second stretcher per stem would double the cost and comb against the first |
+| The effect adds to the dry signal | Nothing about the dry path changes, and with it off the output is bit for bit what it was |
+| One queue for every separation | One separator, one worker. A deck's request goes first and stops a background job, which goes back in the queue |
+| Background work only while no deck is playing | Separation takes every core, and a dropout in the room costs more than a track not ready yet |
+| Written to a partial folder and renamed once checked | A killed separator used to leave a folder that loaded as stems. JUCE reports a killed child as having exited cleanly, so on Linux and macOS the separator is now started with `fork` and waited on directly |
+| A failed track is not tried again until it changes, except by hand | Automix would otherwise spend minutes again on a track that will not separate. A person pressing the button is asking for another go |
+| Free space comes through a probe tests can replace | The engine's tests used to skip on a nearly full temp folder, and so passed on one machine and skipped on another |
+
+Not verified: a real separation model or `stemsep` with any of this, how long a native separation takes
+to stop, Windows and macOS, and ThreadSanitizer. On Linux a killed OpenDJ takes its separator with it;
+anything the separator itself started is not covered.
+
+## Loudness and auto gain
+
+`src/analysis/Loudness.*` is ITU-R BS.1770 as EBU R128 uses it: the K-weighting, 400 ms blocks
+overlapping by 75%, an absolute gate at -70 LUFS and a relative one 10 LU under the result. The check is
+the one EBU Tech 3341 sets, a stereo 997 Hz sine at -23 dBFS reading -23 LUFS to within a tenth, and
+three synthetic tracks read within 0.05 LU of ffmpeg's `ebur128` filter.
+
+| Decision | Why |
+| --- | --- |
+| A gain of its own, not a move of the trim | The trim is the DJ's. A controller's trim knob sends where it physically is, so anything written there would be taken back off by the next touch |
+| Off to begin with | It changes how every track in somebody's set sounds |
+| A target of -14 LUFS | Where a hot club master comes down and an old one comes up, and neither is pushed into the soft clip above 0.7 for being levelled. It is a named constant |
+| Never lifted past its own peak | Being a little quiet is a smaller fault than distortion. A cut does not care |
+| No bump to `analysisVersion` | That would send a whole collection back through tempo and key detection to learn one number. A track measures in one pass as it loads and the answer is kept. A file that changes forgets it |
+| The peak is not kept | It is one pass over a track that has just been decoded, and not worth a column |
+| Automix's level match counts both tracks' auto gain | It reads levels off the track, from before any gain. Without this a track lifted 6 dB by auto gain still looks 6 dB quiet, and gets the same 6 dB again |
 
 ## Key lock
 
@@ -284,6 +348,39 @@ already turns an effect off at zero.
 | Binding only CC 0x00 of the DEPTH knob | Measured on real hardware: the knob broadcasts the same value on 0x00, 0x01 and 0x02 at once, so binding all three would write the mapping three times for one hand movement |
 | FX3 and FX ON/TAP left unmapped | OpenDJ has two effects, not three, and a continuous knob already has an off position; inventing a use for either button would be design bolted onto a limitation the hardware does not actually have on this engine |
 
+**Brake, backspin, reverse and censor** are the deck's, not the mixer's, because they move the
+playhead. Everything else in this section changes the sound of a track that keeps its place.
+
+| Decision | Why |
+| --- | --- |
+| The rate walks to zero a sample at a time | A step a block is heard as the pitch moving in stairs |
+| The level falls over the last 100 ms of a brake or backspin | A rate near zero is far below anything a speaker can play, so all that is left to hear is the thump of the signal stopping wherever it was |
+| The level is then left at zero rather than faded out | The ordinary fade-out renders at the tempo, which at the end of a brake is a chirp. Running off the front in reverse is the same |
+| Key lock steps aside for all four | A stretcher cannot run backwards, and the falling pitch is what a brake is |
+| With slip on, a brake or backspin drops back in on time rather than stopping | Stopping the deck is what they do because nothing else is running. With the music running underneath, landing on it is what slip already means |
+| Censor always uses the shadow playhead, whatever slip says | Landing back on time is what a censor is for |
+| Only these landings fade, over 5 ms either side | Landing is a jump to another part of the waveform, and a censor is the one effect that exists to be clean. Rolls and slip landed with a hard jump before these came along and still do |
+
+Landing used to arrive one block late for everything that uses the shadow playhead: it had not
+been moved for the block in which the landing happened. At 512 samples that is 10.7 ms.
+
+**Echo out** cuts the channel before the delay, so nothing new goes in, and raises the wet level and
+feedback to at least 0.85 and 0.7. It never lowers them from where the knob is. With it off the path
+is bit for bit what it was, which the existing unity tests hold it to.
+
+**The master slots** gained five effects. `Type` keeps its numbers, since a mapping can name one in
+`master_fx.type`, and settings name them in words; `menuOrder` is what the menu and `stepType` follow,
+so Plugin stays last.
+
+| Decision | Why |
+| --- | --- |
+| A beat clock in `MasterEffects`, sent the position by the engine's timer | A gate that starts wherever the button was pressed is out of time with the music. The timer is every 500 ms, so the clock runs on its own between visits |
+| A small difference eased out, a large one jumped to | A sliver is jitter between two threads, and must never be heard. Over a quarter of a beat is a seek, and the effect should be where the music now is |
+| The clock wraps at 64 beats | Every division fits a whole number of times, so wrapping never moves a gate or a sweep |
+| The stutter repeats what has just played | Recording the next slice would answer a slice late, and it is a button pressed in time |
+| Its ring stops being written while a slice is held | A long hold could otherwise overwrite what it is playing. It is four seconds, allocated in `prepare` |
+| Flanger and phaser feedback stops at 0.7, mixed half and half | Deep enough for the notches to be heard, and a test holds both under 2.0 for ten seconds of tone at full feedback |
+
 ## Waveforms
 
 Each deck draws the same analysis twice: a detail view that scrolls past a stationary playhead
@@ -356,10 +453,15 @@ rather than eight per cent fast.
 
 ## Mic input
 
-A mic from the device's inputs, laid over the mix after the sampler. Up to two inputs are enabled
-in Audio setup; the strip at the end of the sampler row turns the mic on, sets its level, meters
-it, and holds the talkover and routing switches. A controller reaches it through `mic.toggle`,
-`mic.gain` and `mic.talkover`.
+A mic from the device's inputs, laid over the mix after the sampler. Up to eight inputs are
+enabled in Audio setup; the strip at the end of the sampler row turns the mic on, sets its level,
+meters it, picks its input pair, and holds the talkover and routing switches. A controller reaches
+it through `mic.toggle`, `mic.gain` and `mic.talkover`.
+
+An aux line (#46) sits beside it: the same `MicInput` class in stereo, reading its own pair (3 and
+4 by default), with no talkover. It is processed before the mic, so talkover ducks it. When both
+are kept out of the speakers, the aux builds the recording mix and the mic adds itself to it.
+Controllers use `aux.toggle` and `aux.gain`.
 
 | Decision | Why |
 | --- | --- |
@@ -582,7 +684,7 @@ would fail.
 
 | Piece | Notes |
 | --- | --- |
-| SQLite schema | `src/library/Library.cpp`: folders, tracks, tags, tempo, and an analysis version, so a better analyser quietly invalidates old results |
+| SQLite schema | `src/library/Library.cpp`: folders, tracks, tags, tempo, loudness, and an analysis version, so a better analyser quietly invalidates old results |
 | Analyse once | `AnalysisCache`, asked before anything is decoded. `Deck::loadFile` takes a `KnownTrack` and skips the tempo pass |
 | Scanning | A quick tag pass so the browser fills in seconds, then analysis at low priority, written as it goes so it can be stopped and resumed. Up to four tracks are analysed at once, one per core with one core left over, since each worker holds a whole decoded track |
 | Tag reading | `TagReader.cpp` parses ID3v2.2 to 2.4 and ID3v1 directly, plus MP3 length from the Xing header. Opening a decoder for 13,000 files just to ask their length is far too slow |
@@ -602,6 +704,9 @@ without an engine: `AutoMixMath.h` for when to load and fade, `MixPoints.*` for 
 | The mix | Out at the start of the outro, but never more than 16 bars before the music ends; in at the incoming track's first bar with music. 32 beats when both sides have two phrases to spare, else 16 |
 | Bass swap | The incoming low EQ is killed for the first half of the fade, then the lows swap. Restored when the fade ends or automix stops |
 | Fallback | A grid with confidence under 0.3, or a plan whose moment has passed by the time the next track loads, gets the timed fade. "Next now" always does |
+| Vocals | With a separator installed, each track is separated while the one before it plays, and `vocalBars` marks a bar as sung when the vocal stem is over a quarter of the bar's level (about -12 dB) and above -40 dBFS. On one real song the bars fell either side of that with nothing between: 0 to 5% in its instrumental stretch, 30 to 90% elsewhere |
+| Keeping singers apart | The planner counts bars where both tracks sing, for the planned mix, the phrases up to 32 bars back and the shorter fade, and takes the fewest, then the planned length, then the nearest phrase. Where some remain, the outgoing vocal stem fades over the bar before the incoming vocals start. Stems that arrive after the phrase they would have moved the mix to leave the plan as it was |
+| Key lock | Turned on for the incoming deck when its tempo is changed to match, before it is heard. When automix stops, a deck it turned it on for gets the user's setting back, unless it is still playing, where that would be heard as the pitch jumping |
 
 Checked against the analysis of 20 tracks from a techno library before the thresholds were set:
 intros were found in 16. The constants are in `MixPoints.h`, named, so they can be retuned in one
@@ -666,7 +771,7 @@ audio device in JUCE's own `audio-device.xml` next to it.
 | Master, phones and cue mix levels | The channel faders and the crossfader |
 | Crossfader curve and per-channel assignment | EQ, filter, echo and reverb settings |
 | Tempo fader ranges, which decks are on screen | |
-| The waveform zoom | |
+| The waveform zoom, whether keys show as Camelot, and auto gain | |
 | The sampler pads, their files, loops and gains | |
 | The mic's level, talkover and routing | Whether the mic was on |
 | The window's size and position | |
@@ -680,6 +785,33 @@ audio device in JUCE's own `audio-device.xml` next to it.
 | Written to a temporary file and moved into place | An interrupted write leaves the previous settings, not half of the new ones |
 | Plain JSON | A setting can be corrected by hand before an interface for it exists |
 
+## MIDI learn
+
+`MidiLearner` works out what a control is from its messages, with no device and no threads, so it is
+tested message by message. `MidiControlSurface` feeds it, and applies and saves what it finds.
+
+| Message | Learned as |
+| --- | --- |
+| Note on | A button, at once, with the same note to light it. `pad.mode` keeps its velocity |
+| Pitch bend | `position14` for a jog wheel, the new `pitch14` for anything else continuous, a button for the rest |
+| Control change, for a press | A button, on its first value above zero |
+| Control change, for a position | `absolute` after six messages, or `absolute14` if number n and n + 32 both arrive |
+| Control change, for movement | `relative_offset` if its values stay near 64, otherwise `relative_twos` |
+
+| Decision | Why |
+| --- | --- |
+| Saved over the name, in the user's folder | Folders are already searched in order of precedence, so that copy replaces the shipped one and nothing else had to change. The shipped file stays as it was, and deleting the copy gets it back |
+| The mapping's Shift still works while learning | It is the only way to teach a shifted control. Learning Shift itself takes it like anything else |
+| What the action is decides how a control is read | A relative encoder and a fader can send the same bytes for a moment. Asked to go to a position, a control is a position |
+| A note lights itself, and a control change does not | Most controllers light a button with the note it sends, and a controller without that light ignores it |
+| Stops when the control stops, after 400 ms | A knob turned a little never sends six messages |
+| A learned control can be undone once | Learning over the wrong button takes away what it did, and a mistake with a controller in hand should not need a text editor |
+
+Mappings used to be fixed once loaded, so the MIDI thread read them with no lock. Learning changes them,
+so a mutex now covers that thread's lookup and dispatch, and every write. The audio thread never takes it.
+Each write was checked by reading the code, and a stress test feeds messages from a second thread while
+learning, but this has not been run under ThreadSanitizer: `tests/MidiLearn_test.cpp` is ready for it.
+
 ## What a mapping can reach
 
 Everything a person can do is in the action registry, named once and reachable from a mapping
@@ -691,9 +823,31 @@ would say so.
 | --- | --- | --- |
 | `deck.select` | `deck` | Puts that deck on screen in place of the one it shares a side with |
 | `deck.waveform_zoom` | value | Signed rungs of the zoom ladder, positive to zoom in. One zoom for every deck, so no deck is named |
+| `deck.key_up` | `deck` | Moves the pitch up a semitone |
+| `deck.key_down` | `deck` | Moves the pitch down a semitone |
+| `deck.key_reset` | `deck` | Back to the track's own key |
+| `deck.key_match` | `deck` | Shifts to the key of the deck a sync would follow |
+| `deck.brake` | `deck` | Slows the deck to a stop |
+| `deck.backspin` | `deck` | Flings the record backwards to a stop |
+| `deck.reverse_toggle` | `deck` | Plays backwards until pressed again |
+| `deck.censor` | `deck` | Backwards while held, landing back on time |
+| `mixer.echo_out_toggle` | `deck` | Takes the track away and leaves its echo |
+| `mixer.auto_gain_toggle` | nothing | Turns levelling by loudness on or off, for every deck |
+| `deck.stem_pad` | `deck`, `slot` | A stem pad while held: 0 instrumental, 1 acapella, 2 drums only, 3 no drums |
+| `deck.stem_pad_toggle` | `deck`, `slot` | The same pad, on until pressed again |
+| `deck.stem_fx` | `deck` | Turns the deck's stem effect on or off |
+| `deck.stem_fx_target` | `deck`, `slot` | Which stem it is on: 0 drums, 1 bass, 2 other, 3 vocals |
+| `deck.stem_fx_type` | `deck`, `slot` | 0 echo, 1 reverb, 2 low pass |
+| `deck.stem_fx_beats` | `deck`, `slot` | The echo's length: 0 a quarter beat, 1 a half, 2 one beat, 3 two |
+| `deck.stem_fx_amount` | `deck`, value | How much of it |
+| `stems.prepare_selected` | nothing | Prepares the stems of what the library has selected, or the playlist on show |
+| `stems.prepare_cancel` | nothing | Stops preparing |
+| `master_fx.type` | `deck`, `slot` | Picks an effect for unit `deck`: 0 echo, 1 reverb, 2 filter, 3 plugin, 4 flanger, 5 phaser, 6 gate, 7 bitcrusher, 8 stutter |
 | `deck.swap` | nothing | Swaps both sides at once. What a single deck-toggle button means |
 | `mixer.crossfader_assign` | `deck`, `slot` | 0 the A side, 1 neither, 2 the B side |
-| `sampler.trigger` | `slot` | Starts that pad; with shift, stops it |
+| `sampler.trigger` | `slot` | Starts that pad of the bank on show; with shift, stops it |
+| `sampler.bank` | `slot` | Puts bank `slot` (0 to 3) on the pads |
+| `sampler.next_bank` | nothing | Puts the next bank on the pads |
 | `sampler.stop` | `slot` | |
 | `sampler.gain` | value | The level of the whole sampler |
 | `pad.mode` | value | The pad mode a controller reports, as the code in its velocity, stored per deck |
@@ -701,6 +855,15 @@ would say so.
 | `mic.toggle` | nothing | Turns the mic on or off |
 | `mic.gain` | value | The mic's level; 0.5 is unity |
 | `mic.talkover` | nothing | Turns talkover on or off |
+| `aux.toggle` | nothing | Turns the aux line on or off |
+| `aux.gain` | value | The aux line's level; 0.5 is unity |
+| `deck.beatjump_forward` | `deck`, `slot` | Jumps forward by the length in `loopBeatsForSlot`, carrying a running loop |
+| `deck.beatjump_back` | `deck`, `slot` | The same, backwards |
+| `deck.quantize_toggle` | `deck` | Turns quantize on or off for the deck |
+| `deck.tap_tempo` | `deck` | One tap; four or more set the tempo, around the beat at the playhead |
+| `grid.downbeat_here` | `deck` | The playhead becomes the first beat of a bar |
+| `grid.shift_earlier` | `deck` | Slides the grid 5 ms earlier |
+| `grid.shift_later` | `deck` | Slides the grid 5 ms later |
 
 Plus the loop family: `loop.in`, `loop.out`, `loop.toggle`, `loop.beats`, `loop.roll`,
 `loop.halve`, `loop.double`, `loop.reloop`. `loop.beats` and `loop.roll` take a slot, which
@@ -710,9 +873,9 @@ Plus the loop family: `loop.in`, `loop.out`, `loop.toggle`, `loop.beats`, `loop.
 
 # What running it turned up
 
-Three real faults that no test caught, all found by building the thing and using it. They are
-kept together because they share a lesson: the audio path had no seam a test could reach without
-a sound card.
+Real faults that no test caught, all found by building the thing and using it. The first two
+exposed an audio path that had no seam a test could reach without a sound card; later faults
+exposed cases the tests did not cover.
 
 ## Decks C and D were silent
 
@@ -754,6 +917,51 @@ track was discarded as undecodable. `TrackDecoder` now reads in chunks and halve
 failure, keeping everything that does decode. A track whose reported length overruns what exists
 plays, which is the honest answer.
 
+## Bluetooth filter sweeps stopped playback
+
+**Status:** Resolved. The fix passes offline regression tests and the user confirmed it resolves
+the issue with Sony ULT WEAR Bluetooth headphones on macOS Apple Silicon.
+
+**Reported symptom.** While playing through Sony ULT WEAR Bluetooth headphones on macOS Apple
+Silicon, moving the filter stopped sound. The user described the sound service as failing and had
+to reconnect the headphones to resume playback. OpenDJ reported the device at 16 kHz. A CoreAudio
+service crash has not been established from logs.
+
+**Cause and reproduction.** Both channel and master filters used a fixed 22 kHz open cutoff and
+an 8 kHz high-pass endpoint. At a 16 kHz sample rate, a valid cutoff must be below the 8 kHz
+Nyquist frequency. An offline sweep from the centre to position 0.4 reproduced invalid channel
+samples and a master filter peak of approximately 7.7 million from a 0.1-amplitude sine wave.
+NaN and infinity could reach the output router, and invalid samples could persist in downstream
+echo and reverb state, explaining why returning the knob alone might not restore sound.
+
+**Fix.** The shared curves in `src/core/EffectCurves.h` scale their endpoints to at most 49% of
+the actual device sample rate: 7,840 Hz at 16 kHz. Both `Mixer` and `MasterEffects` use those
+curves and reset their smoothed cutoffs to the valid range during device preparation. Scaling
+the whole sweep preserves useful knob travel at low rates. `OutputRouter` also replaces NaN
+and infinity with silence before handing samples to the driver, in both routing modes.
+
+**Regression coverage.** The new cases in [Mixer_test.cpp](tests/Mixer_test.cpp),
+[MasterEffects_test.cpp](tests/MasterEffects_test.cpp) and
+[OutputRouter_test.cpp](tests/OutputRouter_test.cpp) failed before the fix and pass afterwards.
+They sweep at 8, 16, 22.05, 32, 44.1, 48 and 96 kHz, then return to 16 kHz. They check that samples
+remain finite, levels stay bounded, returning to centre restores audio without resetting the
+processor, and invalid samples are silenced at the device boundary. The master filter is tested
+at maximum resonance. All 375 native test entries and 375 Intel test cases through Rosetta pass
+with stems and visuals disabled.
+
+Run only these offline regression tests after building with the macOS script:
+
+```sh
+build-macos/arm64/RelWithDebInfo/tests/opendj-tests_artefacts/RelWithDebInfo/opendj-tests \
+    '[bluetooth],[device-safety]' --reporter compact
+```
+
+**Hardware verification.** After launching the rebuilt app, the user tested with the ULT WEAR
+headphones and confirmed that the fix resolved the reported filter-triggered sound failure.
+
+**Other launch observation.** The launch command built successfully and exited with code 0,
+but also printed `!! killing thread by force !!`. The cause of that warning remains unconfirmed.
+
 ---
 
 # The Roland DJ-202
@@ -791,14 +999,14 @@ MIDI version.
 
 # Working on this
 
-| Task | Windows | Linux |
-| --- | --- | --- |
-| Install dependencies | comes with VS 2022 Build Tools | `scripts/build.sh --deps` |
-| Build | `pwsh scripts/build.ps1` | `scripts/build.sh` |
-| Build and run | `pwsh scripts/build.ps1 -Run` | `scripts/build.sh --run` |
-| Run the tests | `pwsh scripts/build.ps1 -Test` | `ctest --test-dir build` |
-| Start from scratch | `pwsh scripts/build.ps1 -Clean` | `scripts/build.sh --clean` |
-| Build with ASIO | `pwsh scripts/build.ps1 -Asio` | not applicable |
+| Task | Windows | Linux | macOS |
+| --- | --- | --- | --- |
+| Install dependencies | comes with VS 2022 Build Tools | `scripts/build.sh --deps` | `scripts/build-macos.sh --deps` |
+| Build | `pwsh scripts/build.ps1` | `scripts/build.sh` | `scripts/build-macos.sh` |
+| Build and run | `pwsh scripts/build.ps1 -Run` | `scripts/build.sh --run` | `scripts/build-macos.sh --run` |
+| Run the tests | `pwsh scripts/build.ps1 -Test` | `ctest --test-dir build` | `scripts/build-macos.sh --test` |
+| Start from scratch | `pwsh scripts/build.ps1 -Clean` | `scripts/build.sh --clean` | `scripts/build-macos.sh --clean` |
+| Build with ASIO | `pwsh scripts/build.ps1 -Asio` | not applicable | not applicable |
 
 Pass audio files on the command line to start with tracks already on the decks, which is far
 faster than clicking through a file dialog while testing:

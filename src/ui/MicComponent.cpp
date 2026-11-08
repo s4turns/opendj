@@ -38,23 +38,34 @@ void MicComponent::Meter::paint (juce::Graphics& g)
 
 //==============================================================================
 
-MicComponent::MicComponent (AudioEngine& engineToUse) : engine (engineToUse)
+MicComponent::MicComponent (AudioEngine& engineToUse, MicInput& inputToShow, const juce::String& title)
+    : engine (engineToUse),
+      input (inputToShow),
+      name (title),
+      hasTalkover (inputToShow.getSource() == MicInput::Source::mono)
 {
-    heading.setText ("Mic", juce::dontSendNotification);
+    heading.setText (name, juce::dontSendNotification);
     heading.setColour (juce::Label::textColourId, juce::Colours::white.withAlpha (0.7f));
     heading.setFont (juce::FontOptions (12.0f));
     addAndMakeVisible (heading);
 
     onButton.setClickingTogglesState (true);
     onButton.setColour (juce::TextButton::buttonOnColourId, liveColour);
-    onButton.setTooltip ("Put the mic on air");
+    onButton.setTooltip ("Put the " + name.toLowerCase() + " on air");
     onButton.onClick = [this]
     {
         const auto on = onButton.getToggleState();
-        engine.getMic().setEnabled (on);
+        input.setEnabled (on);
 
-        if (on && engine.getNumInputChannels() == 0 && onMessage != nullptr)
-            onMessage ("The mic is on, but no input is selected. Choose one in Audio setup.");
+        if (! on || onMessage == nullptr)
+            return;
+
+        if (engine.getNumInputChannels() == 0)
+            onMessage ("The " + name.toLowerCase() + " is on, but no input is selected. Choose one in Audio setup.");
+        else if (2 * input.getInputPair() >= engine.getNumInputChannels())
+            onMessage ("The " + name.toLowerCase() + " is on, but the device has no inputs "
+                       + inputButton.getButtonText().fromFirstOccurrenceOf ("In ", false, false)
+                       + ". Pick another pair, or turn more inputs on in Audio setup.");
     };
     addAndMakeVisible (onButton);
 
@@ -62,9 +73,9 @@ MicComponent::MicComponent (AudioEngine& engineToUse) : engine (engineToUse)
     level.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
     level.setRange (0.0, 2.0, 0.001);
     level.setDoubleClickReturnValue (true, 1.0);
-    level.setTooltip ("The mic's level. Double-click for unity");
+    level.setTooltip ("The " + name.toLowerCase() + "'s level. Double-click for unity");
     level.setColour (juce::Slider::rotarySliderFillColourId, accentColour);
-    level.onValueChange = [this] { engine.getMic().setGain ((float) level.getValue()); };
+    level.onValueChange = [this] { input.setGain ((float) level.getValue()); };
     addAndMakeVisible (level);
 
     levelLabel.setText ("Level", juce::dontSendNotification);
@@ -80,8 +91,14 @@ MicComponent::MicComponent (AudioEngine& engineToUse) : engine (engineToUse)
     talkoverButton.setClickingTogglesState (true);
     talkoverButton.setColour (juce::TextButton::buttonOnColourId, accentColour);
     talkoverButton.setTooltip ("Drop the music by 10 dB while the mic is on");
-    talkoverButton.onClick = [this] { engine.getMic().setTalkover (talkoverButton.getToggleState()); };
-    addAndMakeVisible (talkoverButton);
+    talkoverButton.onClick = [this] { input.setTalkover (talkoverButton.getToggleState()); };
+    addChildComponent (talkoverButton);
+    talkoverButton.setVisible (hasTalkover);
+
+    inputButton.setTooltip ("Which pair of the audio device's inputs this reads. Click for the next pair. "
+                            "Turn inputs on in Audio setup");
+    inputButton.onClick = [this] { nextInputPair(); };
+    addAndMakeVisible (inputButton);
 
     routingButton.setClickingTogglesState (true);
     routingButton.setColour (juce::TextButton::buttonOnColourId, accentColour);
@@ -89,8 +106,8 @@ MicComponent::MicComponent (AudioEngine& engineToUse) : engine (engineToUse)
                               "Stream only: the recording and the stream, never the speakers");
     routingButton.onClick = [this]
     {
-        engine.getMic().setRouting (routingButton.getToggleState() ? MicInput::Routing::recordingOnly
-                                                                   : MicInput::Routing::everywhere);
+        input.setRouting (routingButton.getToggleState() ? MicInput::Routing::recordingOnly
+                                                         : MicInput::Routing::everywhere);
         updateControls();
     };
     addAndMakeVisible (routingButton);
@@ -107,19 +124,45 @@ void MicComponent::paint (juce::Graphics& g)
     g.fillRoundedRectangle (getLocalBounds().toFloat(), 5.0f);
 }
 
+namespace
+{
+    constexpr int headingWidth = 30, onWidth = 44, knobWidth = 42, meterWidth = 8, meterGap = 6,
+                  inputWidth = 56, talkoverWidth = 70, routingWidth = 80, marginWidth = 12;
+}
+
+int MicComponent::getPreferredWidth() const noexcept
+{
+    return marginWidth + headingWidth + onWidth + knobWidth + meterWidth + meterGap
+         + inputWidth + (hasTalkover ? talkoverWidth : 0) + routingWidth;
+}
+
 void MicComponent::resized()
 {
-    auto area = getLocalBounds().reduced (6, 4);
+    auto area = getLocalBounds().reduced (marginWidth / 2, 4);
 
-    heading.setBounds (area.removeFromLeft (30));
-    onButton.setBounds (area.removeFromLeft (48).reduced (2, 6));
-    auto knobCell = area.removeFromLeft (44).reduced (2);
+    heading.setBounds (area.removeFromLeft (headingWidth));
+    onButton.setBounds (area.removeFromLeft (onWidth).reduced (2, 6));
+    auto knobCell = area.removeFromLeft (knobWidth).reduced (2);
     levelLabel.setBounds (knobCell.removeFromBottom (12));
     level.setBounds (knobCell);
-    meter.setBounds (area.removeFromLeft (8).reduced (0, 6));
-    area.removeFromLeft (6);
-    talkoverButton.setBounds (area.removeFromLeft (72).reduced (2, 6));
+    meter.setBounds (area.removeFromLeft (meterWidth).reduced (0, 6));
+    area.removeFromLeft (meterGap);
+    inputButton.setBounds (area.removeFromLeft (inputWidth).reduced (2, 6));
+
+    if (hasTalkover)
+        talkoverButton.setBounds (area.removeFromLeft (talkoverWidth).reduced (2, 6));
+
     routingButton.setBounds (area.reduced (2, 6));
+}
+
+void MicComponent::nextInputPair()
+{
+    // Up to the pairs the device has on, and always at least the first, so
+    // the button still says something useful before any input is chosen.
+    const auto pairs = juce::jlimit (1, AudioEngine::maxInputChannels / 2,
+                                     (engine.getNumInputChannels() + 1) / 2);
+    input.setInputPair ((input.getInputPair() + 1) % pairs);
+    updateControls();
 }
 
 //==============================================================================
@@ -127,7 +170,7 @@ void MicComponent::resized()
 void MicComponent::timerCallback()
 {
     // Holds the loudest moment and falls from it, about 20 dB a second.
-    const auto peak = engine.getMic().getAndResetPeak();
+    const auto peak = input.getAndResetPeak();
     const auto fallen = meter.level * 0.92f;
     const auto next = juce::jmax (peak, fallen < 0.001f ? 0.0f : fallen);
 
@@ -142,7 +185,13 @@ void MicComponent::timerCallback()
 
 void MicComponent::updateControls()
 {
-    auto& mic = engine.getMic();
+    auto& mic = input;
+
+    const auto first = 2 * mic.getInputPair() + 1;
+    const auto pairText = "In " + juce::String (first) + "-" + juce::String (first + 1);
+
+    if (inputButton.getButtonText() != pairText)
+        inputButton.setButtonText (pairText);
 
     if (onButton.getToggleState() != mic.isEnabled())
         onButton.setToggleState (mic.isEnabled(), juce::dontSendNotification);

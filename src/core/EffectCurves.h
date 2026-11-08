@@ -24,7 +24,7 @@ constexpr float filterDeadZone = 0.02f;
 
 constexpr float filterLowestCutoff = 120.0f;
 constexpr float filterHighestCutoff = 8000.0f;
-constexpr float filterOpenLow = 22000.0f;   // a low pass this high is transparent
+constexpr float filterOpenLow = 22000.0f;   // open at music playback sample rates
 constexpr float filterOpenHigh = 15.0f;     // and a high pass this low likewise
 
 // Long enough for two beats at 60 BPM, which is slower than anything anyone
@@ -41,24 +41,38 @@ inline float echoFeedbackFor (float amount) noexcept
     return juce::jlimit (0.0f, 0.85f, amount * 0.85f);
 }
 
-/** Cutoff for the low pass half of the knob: transparent from the centre up. */
-inline float lowPassCutoffFor (float position)
+/** A cutoff must stay below Nyquist, with a little room before the tangent's
+    pole. Bluetooth voice profiles can run at 8 or 16 kHz, so the usual 22 kHz
+    open cutoff would otherwise make a sweep unstable and poison the audio. */
+inline float limitFilterCutoff (float cutoff, double sampleRate) noexcept
 {
+    return juce::jmin (cutoff, static_cast<float> (sampleRate * 0.49));
+}
+
+/** Cutoff for the low pass half of the knob: transparent from the centre up.
+    Scale the whole sweep to the device's usable range, avoiding a plateau
+    that simply clamping a fixed 22 kHz curve would leave near the centre. */
+inline float lowPassCutoffFor (float position, double sampleRate)
+{
+    const auto open = limitFilterCutoff (filterOpenLow, sampleRate);
+
     if (position >= 0.5f - filterDeadZone)
-        return filterOpenLow;
+        return open;
 
     const auto amount = juce::jlimit (0.0f, 1.0f, (0.5f - filterDeadZone - position) / (0.5f - filterDeadZone));
-    return filterOpenLow * std::pow (filterLowestCutoff / filterOpenLow, amount);
+    return open * std::pow (limitFilterCutoff (filterLowestCutoff, sampleRate) / open, amount);
 }
 
 /** And the high pass half: transparent from the centre down. */
-inline float highPassCutoffFor (float position)
+inline float highPassCutoffFor (float position, double sampleRate)
 {
+    const auto open = limitFilterCutoff (filterOpenHigh, sampleRate);
+
     if (position <= 0.5f + filterDeadZone)
-        return filterOpenHigh;
+        return open;
 
     const auto amount = juce::jlimit (0.0f, 1.0f, (position - 0.5f - filterDeadZone) / (0.5f - filterDeadZone));
-    return filterOpenHigh * std::pow (filterHighestCutoff / filterOpenHigh, amount);
+    return open * std::pow (limitFilterCutoff (filterHighestCutoff, sampleRate) / open, amount);
 }
 
 } // namespace opendj::effectCurves

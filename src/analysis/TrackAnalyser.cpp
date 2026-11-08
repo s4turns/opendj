@@ -5,6 +5,8 @@
 
 #include "analysis/TrackAnalyser.h"
 
+#include "analysis/Loudness.h"
+
 #include "analysis/KeyDetector.h"
 #include "core/Mixer.h"
 
@@ -698,12 +700,21 @@ std::shared_ptr<const TrackAnalysis> TrackAnalyser::withKnownTempo (const juce::
                                                                     double bpm,
                                                                     double firstBeatSeconds,
                                                                     float confidence,
-                                                                    Options options)
+                                                                    Options options,
+                                                                    MusicalKey key,
+                                                                    double loudnessLufs)
 {
     auto analysis = std::make_shared<TrackAnalysis>();
 
     if (! buildWaveforms (*analysis, audio, sampleRate, options))
         return analysis;
+
+    analysis->key = key;
+
+    // A library from before loudness was measured knows the tempo and not this.
+    // It is one pass over a track already in memory, and the far cheaper way to
+    // fill those in than sending the whole collection back through analysis.
+    analysis->loudnessLufs = loudnessLufs < 0.0 ? loudnessLufs : loudness::measureLufs (audio, sampleRate);
 
     if (bpm > 0.0)
     {
@@ -727,6 +738,7 @@ std::shared_ptr<const TrackAnalysis> TrackAnalyser::analyse (const juce::AudioBu
     // Before the tempo work, and not inside it: a track with no steady pulse
     // still has a key, and the tempo pass returns early when it finds nothing.
     analysis->key = KeyDetector::detect (audio, sampleRate);
+    analysis->loudnessLufs = loudness::measureLufs (audio, sampleRate);
 
     const auto envelopes = onsetEnvelopes (toMono (audio), sampleRate);
     const auto& envelope = envelopes.full;

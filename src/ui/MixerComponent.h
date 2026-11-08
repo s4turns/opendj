@@ -52,6 +52,7 @@ private:
     std::array<Strip, Mixer::numChannels> strips;
     juce::Slider crossfader;
     juce::ComboBox curveBox;
+    juce::TextButton autoGainButton { "Auto gain" };
     juce::Slider masterKnob;
     juce::Slider cueKnob;
     juce::Slider cueMixKnob;

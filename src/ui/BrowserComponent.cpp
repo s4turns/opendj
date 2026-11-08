@@ -5,12 +5,16 @@
 
 #include "ui/BrowserComponent.h"
 
+#include "library/RekordboxImport.h"
+
+#include <algorithm>
+
 namespace opendj
 {
 
 namespace
 {
-    enum Column { artist = 1, title, bpm, length, key, album };
+    enum Column { artist = 1, title, bpm, length, key, album, rating, comment };
 
     // A refresh no more often than this, however fast the scanner writes.
     constexpr int refreshIntervalMs = 400;
@@ -42,8 +46,24 @@ BrowserComponent::BrowserComponent (Library& libraryToUse, LibraryScanner& scann
     addFolderButton.onClick = [this] { addFolderClicked(); };
     addAndMakeVisible (addFolderButton);
 
+    importButton.setTooltip ("Import a rekordbox collection: File > Export Collection in xml format");
+    importButton.onClick = [this] { importClicked(); };
+    addAndMakeVisible (importButton);
+
     removeFolderButton.onClick = [this] { removeFolderClicked(); };
     addAndMakeVisible (removeFolderButton);
+
+    camelotButton.setTooltip ("Show keys as Camelot numbers rather than notes. Keys in green mix with what is playing");
+    camelotButton.setClickingTogglesState (true);
+    camelotButton.setColour (juce::TextButton::buttonOnColourId, accentColour.darker (0.4f));
+    camelotButton.onClick = [this]
+    {
+        setKeyNotation (camelotButton.getToggleState());
+
+        if (onKeyNotationChanged != nullptr)
+            onKeyNotationChanged (camelotKeys);
+    };
+    addAndMakeVisible (camelotButton);
 
     rescanButton.onClick = [this] { scanner.start(); };
     addAndMakeVisible (rescanButton);
@@ -65,6 +85,12 @@ BrowserComponent::BrowserComponent (Library& libraryToUse, LibraryScanner& scann
     header.addColumn ("Length", length, 60, 50, 80, juce::TableHeaderComponent::defaultFlags);
     header.addColumn ("Key", key, 50, 40, 80, juce::TableHeaderComponent::defaultFlags);
     header.addColumn ("Album", album, 180, 80, -1, juce::TableHeaderComponent::defaultFlags);
+
+    // Not sortable: the library has no index for them, and they are mostly
+    // empty until a collection is imported.
+    const auto unsortable = juce::TableHeaderComponent::defaultFlags & ~juce::TableHeaderComponent::sortable;
+    header.addColumn ("Rating", rating, 70, 50, 90, unsortable);
+    header.addColumn ("Comment", comment, 160, 60, -1, unsortable);
     header.setSortColumnId (artist, true);
     header.setStretchToFitActive (true);
 
@@ -101,6 +127,18 @@ juce::File BrowserComponent::getSelectedFile() const
 {
     const juce::ScopedLock lock (selectionLock);
     return selectedFile;
+}
+
+std::vector<juce::File> BrowserComponent::getSelectedFiles() const
+{
+    std::vector<juce::File> files;
+    const auto selected = table.getSelectedRows();
+
+    for (int i = 0; i < selected.size(); ++i)
+        if (const auto r = selected[i]; juce::isPositiveAndBelow (r, (int) rows.size()))
+            files.push_back (rows[(size_t) r].file);
+
+    return files;
 }
 
 void BrowserComponent::moveSelection (int rowsToMove)
@@ -145,6 +183,31 @@ void BrowserComponent::refreshNow()
 
     const auto keep = getSelectedFile();
     rows = library.query (query);
+
+    if (sortByKey)
+    {
+        // Unknown keys stay at the end in both directions: nobody sorting by key
+        // is looking for the tracks that have none.
+        std::vector<std::pair<int, size_t>> order;
+        order.reserve (rows.size());
+
+        for (size_t i = 0; i < rows.size(); ++i)
+        {
+            const auto wheel = MusicalKey::fromString (rows[i].key).wheelOrder();
+            order.emplace_back (wheel < 0 ? 1000 : (keySortForwards ? wheel : 100 - wheel), i);
+        }
+
+        std::stable_sort (order.begin(), order.end(), [] (const auto& a, const auto& b) { return a.first < b.first; });
+
+        std::vector<TrackRecord> sorted;
+        sorted.reserve (rows.size());
+
+        for (const auto& entry : order)
+            sorted.push_back (std::move (rows[entry.second]));
+
+        rows = std::move (sorted);
+    }
+
     table.updateContent();
 
     // Keep the highlight on the same track through a re-sort or a scan.
@@ -194,6 +257,10 @@ void BrowserComponent::refreshStatus()
     if (rows.size() < (size_t) library.countTracks() && ! progress.running)
         status = juce::String (rows.size()) + " shown  |  " + status;
 
+    if (stemStatus != nullptr)
+        if (const auto stems = stemStatus(); stems.isNotEmpty())
+            status = stems + "  |  " + status;
+
     statusLabel.setText (status, juce::dontSendNotification);
 }
 
@@ -222,6 +289,52 @@ void BrowserComponent::addFolderClicked()
             refreshFolders();
             scanner.start();
         }
+    });
+}
+
+void BrowserComponent::importClicked()
+{
+    importChooser = std::make_unique<juce::FileChooser> ("Import a rekordbox collection (xml)",
+                                                         juce::File(), "*.xml");
+
+    importChooser->launchAsync (juce::FileBrowserComponent::openMode
+                                | juce::FileBrowserComponent::canSelectFiles,
+                                [this] (const juce::FileChooser& chooser)
+    {
+        const auto xml = chooser.getResult();
+
+        if (! xml.existsAsFile())
+            return;
+
+        importButton.setEnabled (false);
+        importButton.setButtonText ("Importing...");
+
+        // A collection of thousands of tracks takes a while to write, so it is
+        // done away from the message thread and reported when it is done.
+        juce::Thread::launch ([safe = juce::Component::SafePointer<BrowserComponent> (this), &target = library, xml]
+        {
+            const auto collection = RekordboxImport::read (xml);
+            const auto summary = collection.error.isEmpty() ? RekordboxImport::importInto (target, collection)
+                                                            : RekordboxImportSummary();
+
+            juce::MessageManager::callAsync ([safe, collection, summary]
+            {
+                if (safe == nullptr)
+                    return;
+
+                safe->importButton.setEnabled (true);
+                safe->importButton.setButtonText ("Import...");
+                safe->refreshNow();
+
+                if (safe->onPlaylistsChanged != nullptr)
+                    safe->onPlaylistsChanged();
+
+                juce::AlertWindow::showMessageBoxAsync (
+                    collection.error.isEmpty() ? juce::MessageBoxIconType::InfoIcon : juce::MessageBoxIconType::WarningIcon,
+                    "Import rekordbox collection",
+                    collection.error.isEmpty() ? summary.describe() : collection.error);
+            });
+        });
     });
 }
 
@@ -285,9 +398,16 @@ int BrowserComponent::getNumRows()
 // Track table
 //==============================================================================
 
-void BrowserComponent::paintRowBackground (juce::Graphics& g, int row, int, int, bool selected)
+void BrowserComponent::paintRowBackground (juce::Graphics& g, int row, int, int height, bool selected)
 {
     g.fillAll (selected ? accentColour.withAlpha (0.3f) : (row % 2 == 0 ? rowColour : rowAltColour));
+
+    // A track's colour, as rekordbox and Serato show it: a stripe at the start.
+    if (juce::isPositiveAndBelow (row, (int) rows.size()) && rows[(size_t) row].colour != 0)
+    {
+        g.setColour (juce::Colour (rows[(size_t) row].colour));
+        g.fillRect (0, 1, 4, height - 2);
+    }
 }
 
 void BrowserComponent::paintCell (juce::Graphics& g, int row, int columnId, int width, int height, bool)
@@ -298,13 +418,31 @@ void BrowserComponent::paintCell (juce::Graphics& g, int row, int columnId, int 
     const auto& record = rows[(size_t) row];
     juce::String text;
     auto justification = juce::Justification::centredLeft;
+    auto colour = juce::Colours::lightgrey;
 
     switch (columnId)
     {
         case artist: text = record.artist; break;
         case title:  text = record.displayTitle(); break;
         case album:  text = record.album; break;
-        case key:    text = record.key; break;
+        case key:
+        {
+            // A key the parser cannot read is shown as it was written, rather
+            // than hiding what a file's tags actually say.
+            const auto parsed = MusicalKey::fromString (record.key);
+            text = ! parsed.isValid() ? record.key : (camelotKeys ? parsed.toCamelot() : parsed.toString());
+
+            switch (parsed.harmonyWith (harmonicReference))
+            {
+                case MusicalKey::Harmony::same:      colour = juce::Colour (0xff4ad991); break;
+                case MusicalKey::Harmony::relative:
+                case MusicalKey::Harmony::neighbour: colour = juce::Colour (0xffa6e8c6); break;
+                case MusicalKey::Harmony::clash:     break;
+            }
+            break;
+        }
+        case comment: text = record.comment; break;
+        case rating:  text = juce::String::repeatedString (juce::String::fromUTF8 ("\xe2\x98\x85"), record.rating); break;
         case length: text = formatLength (record.durationSeconds); justification = juce::Justification::centredRight; break;
         case bpm:
             text = record.bpm > 0.0 ? juce::String (record.bpm, 1) : (record.analysed ? "--" : "");
@@ -313,13 +451,51 @@ void BrowserComponent::paintCell (juce::Graphics& g, int row, int columnId, int 
         default: break;
     }
 
-    g.setColour (columnId == bpm && record.bpm > 0.0 ? accentColour : juce::Colours::lightgrey);
+    g.setColour (columnId == bpm && record.bpm > 0.0 ? accentColour : colour);
     g.setFont (juce::FontOptions (13.0f));
     g.drawText (text, 6, 0, width - 12, height, justification, true);
 }
 
+void BrowserComponent::setKeyNotation (bool camelot)
+{
+    camelotKeys = camelot;
+    camelotButton.setToggleState (camelot, juce::dontSendNotification);
+    table.repaint();
+}
+
+void BrowserComponent::setHarmonicReference (const MusicalKey& reference)
+{
+    if (reference.tonic == harmonicReference.tonic && reference.mode == harmonicReference.mode)
+        return;
+
+    harmonicReference = reference;
+    table.repaint();
+}
+
+juce::String BrowserComponent::getCellTooltip (int row, int columnId)
+{
+    if (columnId != key || ! juce::isPositiveAndBelow (row, (int) rows.size()) || ! harmonicReference.isValid())
+        return {};
+
+    const auto parsed = MusicalKey::fromString (rows[(size_t) row].key);
+    const auto playing = camelotKeys ? harmonicReference.toCamelot() : harmonicReference.toString();
+
+    switch (parsed.harmonyWith (harmonicReference))
+    {
+        case MusicalKey::Harmony::same:      return "The same key as what is playing, " + playing;
+        case MusicalKey::Harmony::relative:  return "The relative of what is playing, " + playing + ": the same notes";
+        case MusicalKey::Harmony::neighbour: return "One step round the wheel from what is playing, " + playing;
+        case MusicalKey::Harmony::clash:     break;
+    }
+
+    return {};
+}
+
 void BrowserComponent::sortOrderChanged (int columnId, bool forwards)
 {
+    sortByKey = columnId == key;
+    keySortForwards = forwards;
+
     switch (columnId)
     {
         case artist: query.sortBy = LibraryQuery::SortBy::artist; break;
@@ -344,12 +520,7 @@ void BrowserComponent::cellClicked (int row, int, const juce::MouseEvent& e)
     if (! table.isRowSelected (row))
         table.selectRow (row);
 
-    std::vector<juce::File> chosenFiles;
-    const auto selected = table.getSelectedRows();
-
-    for (int i = 0; i < selected.size(); ++i)
-        if (const auto r = selected[i]; juce::isPositiveAndBelow (r, (int) rows.size()))
-            chosenFiles.push_back (rows[(size_t) r].file);
+    const auto chosenFiles = getSelectedFiles();
 
     if (chosenFiles.empty())
         return;
@@ -385,6 +556,9 @@ void BrowserComponent::cellClicked (int row, int, const juce::MouseEvent& e)
 
     menu.addSubMenu (count == 1 ? juce::String ("Add to playlist")
                                 : "Add " + juce::String (count) + " tracks to playlist", playlists);
+
+    stemPrepareMenu.addTo (menu, count == 1 ? juce::String ("Prepare stems")
+                                            : "Prepare stems for " + juce::String (count) + " tracks", true);
 
     menu.showMenuAsync (juce::PopupMenu::Options(),
         [safe = juce::Component::SafePointer<BrowserComponent> (this), chosenFiles] (int chosen)
@@ -442,6 +616,10 @@ void BrowserComponent::resized()
     removeFolderButton.setBounds (toolbar.removeFromLeft (70));
     toolbar.removeFromLeft (6);
     rescanButton.setBounds (toolbar.removeFromLeft (70));
+    toolbar.removeFromLeft (6);
+    importButton.setBounds (toolbar.removeFromLeft (80));
+    toolbar.removeFromLeft (6);
+    camelotButton.setBounds (toolbar.removeFromLeft (70));
     toolbar.removeFromLeft (12);
     statusLabel.setBounds (toolbar.removeFromRight (juce::jmin (420, toolbar.getWidth() / 2)));
     toolbar.removeFromRight (12);

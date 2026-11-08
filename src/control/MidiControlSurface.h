@@ -8,6 +8,7 @@
 #include <juce_audio_devices/juce_audio_devices.h>
 
 #include "control/ActionDispatcher.h"
+#include "control/MidiLearn.h"
 #include "control/MidiMapping.h"
 
 #include <array>
@@ -15,9 +16,14 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 
 namespace opendj
 {
+
+/** Whether a control's light should be on. Apart from the surface so that what
+    the lights say can be checked with no controller attached. */
+bool feedbackStateFor (const AudioEngine& engine, const ActionDispatcher& dispatcher, const MidiControl& control);
 
 /** Connects a MIDI controller to the action dispatcher.
 
@@ -88,11 +94,31 @@ public:
     std::vector<LogEntry> getRecentMessages() const;
     void clearLog();
 
-    /** While a learn callback is set, incoming messages are reported to it
-        instead of being dispatched. */
-    void startLearning (std::function<void (int status, int number)> callback);
-    void stopLearning();
+    /** Takes the next control touched on the hardware for an action. Until then
+        messages teach it rather than do anything, except for the mapping's Shift,
+        which still has to work so that a shifted control can be learned. */
+    void startLearning (const LearnTarget& target);
+    void cancelLearning();
     bool isLearning() const;
+
+    /** Where learned mappings are saved. A mapping here takes the place of a
+        shipped one of the same name when mappings are next loaded, so the shipped
+        file is never touched, and deleting this copy gets it back. */
+    void setUserMappingFolder (const juce::File& folder);
+
+    /** What the last learn came to, in words, once and then empty. Message thread. */
+    juce::String takeLearnResult();
+
+    /** Puts the mapping back as it was before the last learn, on disk as well. */
+    bool canUndoLearn() const noexcept { return undoState.has_value(); }
+    void undoLearn();
+
+    /** Treats a message as though the open device had sent it, on the calling
+        thread. How tests reach what a controller reaches. */
+    void injectMessage (const juce::MidiMessage& message) { handleIncomingMidiMessage (nullptr, message); }
+
+    /** Applies whatever learning has finished. The timer calls this. Message thread. */
+    void pollLearning();
 
     /** Refreshes every mapped LED from the current engine state. */
     void refreshFeedback();
@@ -111,7 +137,8 @@ private:
     void sendInitMessages();
     void sendKeepAlive();
     float valueFor (const MidiControl& control, int number, int rawValue, int lowByte);
-    bool feedbackStateFor (const MidiControl& control) const;
+    void applyLearned (MidiControl control);
+    juce::File fileForMapping (const MidiMapping& mapping) const;
 
     static juce::String describe (const juce::MidiMessage& message);
 
@@ -122,6 +149,10 @@ private:
     std::unique_ptr<juce::MidiOutput> midiOutput;
     juce::String openDeviceName;
 
+    // The MIDI thread reads these as messages arrive, and learning now changes
+    // them while it does. Never touched by the audio thread, and only ever waited
+    // on for the length of one message.
+    mutable std::mutex mappingMutex;
     std::vector<MidiMapping> mappings;
     int selectedMapping = -1;
     juce::StringArray warnings;
@@ -139,7 +170,23 @@ private:
     static constexpr size_t maxLogEntries = 200;
 
     mutable std::mutex learnMutex;
-    std::function<void (int, int)> learnCallback;
+    std::optional<MidiLearner> learner;
+    std::optional<MidiControl> learned;     // finished on the MIDI thread, applied on the message thread
+    juce::uint32 lastLearnMessageMs = 0;
+
+    /** How long a control has to stay still before what was seen of it is taken. */
+    static constexpr juce::uint32 learnQuietMs = 400;
+
+    juce::String learnResult;               // message thread
+    juce::File userMappingFolder;           // message thread
+
+    struct UndoState
+    {
+        std::optional<MidiMapping> before;  // nothing means the learn created the mapping
+        int previousSelection = -1;
+    };
+
+    std::optional<UndoState> undoState;     // message thread
 
     // Last state sent for each feedback light, so only changes go out.
     std::map<int, bool> lastFeedbackState;

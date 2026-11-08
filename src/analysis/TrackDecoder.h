@@ -41,10 +41,13 @@ public:
     /** Returns null when the file could not be read. `failureReason`, if given,
         is filled in with something specific enough to act on: which of the
         several possible causes it actually was. Guessing at three of them in a
-        dialog helps nobody. */
+        dialog helps nobody. `ranOutOfMemory`, if given, says whether it was
+        memory rather than the file, for a caller that would otherwise throw a
+        file away for it. */
     static std::unique_ptr<DecodedAudio> decode (juce::AudioFormatManager& formatManager,
                                                  const juce::File& file,
-                                                 juce::String* failureReason = nullptr);
+                                                 juce::String* failureReason = nullptr,
+                                                 bool* ranOutOfMemory = nullptr);
 };
 
 } // namespace opendj

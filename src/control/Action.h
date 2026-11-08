@@ -31,6 +31,16 @@ enum class Action
 
     deckKeyLockToggle,  ///< tempo changes stop shifting the pitch
 
+    deckKeyUp,          ///< press moves the pitch up a semitone
+    deckKeyDown,        ///< press moves the pitch down a semitone
+    deckKeyReset,       ///< press goes back to the track's own key
+    deckKeyMatch,       ///< press shifts to the key of the deck a sync would follow
+
+    deckBrake,          ///< press slows the deck to a stop
+    deckBackspin,       ///< press flings the record backwards to a stop
+    deckReverseToggle,  ///< plays backwards until pressed again
+    deckCensor,         ///< backwards while held, landing back on time
+
     /** Brings a deck on screen in place of the one it shares a side with.
         `deck` names the deck to show; a press with no deck named swaps
         whichever side that control belongs to, which is what a controller's
@@ -59,6 +69,19 @@ enum class Action
     deckStem,
     deckStemToggle,     ///< press flips that stem between silent and full
 
+    /** The stem pads. slot selects one: 0 no vocals, 1 acapella, 2 drums only,
+        3 no drums. They do nothing until the track has stems. */
+    deckStemPad,        ///< on for as long as it is held, then back to any latched pad
+    deckStemPadToggle,  ///< press latches it, and pressing it again turns it off
+
+    /** One effect on one stem of the deck. They do nothing until the track has
+        stems, except that the choices are remembered. */
+    deckStemFx,         ///< press turns it on and off; off lets the tail ring out
+    deckStemFxTarget,   ///< slot picks the stem: 0 drums, 1 bass, 2 other, 3 vocals
+    deckStemFxType,     ///< slot picks the effect: 0 echo, 1 reverb, 2 low pass
+    deckStemFxBeats,    ///< slot picks the echo length: 0 is 1/4, then 1/2, 1 and 2 beats
+    deckStemFxAmount,   ///< how much of it, or for the low pass how far it closes
+
     // Performance pads. slot selects the pad, 0 to 7.
     hotCue,             ///< press sets an empty slot, or jumps to a set one
     hotCueClear,
@@ -85,6 +108,18 @@ enum class Action
     loopDouble,
     loopReloop,
 
+    // Beat jump. slot is an index into loopBeatsForSlot(), so a controller
+    // can have one button per size, as it does for loop lengths.
+    beatJumpForward,
+    beatJumpBack,
+    deckQuantizeToggle, ///< cues and loops snap to the beat grid
+
+    // Beat grid editing. deck selects the deck.
+    deckTapTempo,       ///< each press is a tap; four or more set the tempo
+    gridDownbeatHere,   ///< the playhead becomes the first beat of a bar
+    gridShiftEarlier,   ///< slides the grid 5 ms earlier
+    gridShiftLater,     ///< slides the grid 5 ms later
+
     // Mixer. deck selects the channel; slot selects the EQ band for deckEq.
     channelFader,
     channelEq,          ///< slot 0 low, 1 mid, 2 high
@@ -93,6 +128,8 @@ enum class Action
     channelFilter,      ///< 0.5 is out of the way, down is a low pass, up a high pass
     channelEcho,        ///< 0 is off, a beat-synced echo above that
     channelReverb,      ///< 0 is off, a wash of tail above that
+    channelEchoOutToggle, ///< press takes the track away and leaves its echo
+    autoGainToggle,     ///< press turns levelling by loudness on or off, for every deck
 
     /** Arms echo or reverb as the effect a shared depth knob controls next.
         slot picks it: 0 echo, 1 reverb. For a controller with one FX knob
@@ -120,13 +157,15 @@ enum class Action
     masterFxOn,         ///< on while the value is above half, for a held button
     masterFxWet,        ///< how much of the effect is heard
     masterFxParam,      ///< slot picks the parameter, 0 or 1, of the current effect
-    masterFxType,       ///< press picks an effect: slot 0 echo, 1 reverb, 2 filter, 3 plugin
+    masterFxType,       ///< press picks an effect: slot 0 echo, 1 reverb, 2 filter, 3 plugin, 4 flanger, 5 phaser, 6 gate, 7 bitcrusher, 8 stutter
     masterFxNextType,   ///< press steps on to the next effect
 
     // Sampler. slot selects the pad, 0 to 7; deck is unused, because the
     // sampler sits over the whole mix rather than on one channel.
-    samplerTrigger,     ///< press starts that slot from the beginning
+    samplerTrigger,     ///< press starts that pad of the bank on show from the beginning
     samplerStop,
+    samplerBank,        ///< press puts bank `slot` (0 to 3) on the pads
+    samplerNextBank,    ///< press steps on to the next bank
     samplerGain,        ///< the level of the whole sampler
 
     // Mic. deck and slot are unused: like the sampler, it sits over the whole mix.
@@ -134,8 +173,16 @@ enum class Action
     micGain,            ///< the mic's level; 0.5 is unity, 1 about +6 dB
     micTalkover,        ///< press turns talkover on or off
 
+    // Aux line, such as browser audio. deck and slot are unused.
+    auxToggle,          ///< press turns the aux on or off
+    auxGain,            ///< the aux's level; 0.5 is unity, 1 about +6 dB
+
     // Track browser. deck and slot are unused.
     browseScroll,       ///< value is signed rows to move the selection, not normalised
+
+    // Stems ahead of time. deck and slot are unused.
+    stemsPrepareSelected,   ///< press queues the list on show: the library's selection, or the whole playlist on show
+    stemsPrepareCancel,     ///< press forgets the queue; a deck's own request carries on
 
     // Modifier, held rather than toggled.
     shift
@@ -164,5 +211,13 @@ Action actionFromString (const juce::String& name);
 
 /** True when the action carries a continuous value rather than a press. */
 bool isContinuous (Action action);
+
+/** Whether a deck or a slot means anything to an action, so that an interface
+    need only ask for what it uses. Master effects take a unit as their deck. */
+bool actionTakesDeck (Action action);
+bool actionTakesSlot (Action action);
+
+/** The last action there is, for walking all of them. */
+inline constexpr Action lastAction = Action::shift;
 
 } // namespace opendj

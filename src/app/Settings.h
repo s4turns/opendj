@@ -50,6 +50,9 @@ struct SessionState
     /** How far each tempo fader travels, as a percentage either side of zero. */
     std::array<double, Mixer::numChannels> tempoRanges { 8.0, 8.0, 8.0, 8.0 };
 
+    /** Whether each deck snaps cues and loops to the beat grid. */
+    std::array<bool, Mixer::numChannels> quantize {};
+
     /** Which deck is on screen on each side. */
     std::array<int, 2> visibleDecks { 0, 1 };
 
@@ -57,6 +60,13 @@ struct SessionState
         playhead. One number for every deck: two waveforms side by side are
         there to be compared, and two scales make that harder. */
     double waveformZoomSeconds = waveform::defaultZoomSeconds;
+
+    /** Keys shown as Camelot numbers, 8A, rather than as notes, Am. */
+    bool camelotKeys = false;
+
+    /** Tracks levelled by their measured loudness. Off to begin with, since it
+        changes how every track in an existing set sounds. */
+    bool autoGain = false;
 
     /** Where the master and cue busses go. Separate pairs by default: a split
         turns the master mono and puts it in one speaker, which nobody should
@@ -70,8 +80,25 @@ struct SessionState
         means the pad was empty, or its file has since moved. */
     std::array<juce::String, Sampler::numSlots> samplerFiles {};
     std::array<bool, Sampler::numSlots> samplerLooping {};
-    std::array<float, Sampler::numSlots> samplerGains { 1.0f, 1.0f, 1.0f, 1.0f,
-                                                        1.0f, 1.0f, 1.0f, 1.0f };
+    std::array<float, Sampler::numSlots> samplerGains = filled (1.0f);
+
+    /** Whether each pad follows the music's tempo, and the tempo of its
+        sound: kept because a tempo set by hand, or taken from the deck a
+        sample was recorded from, cannot be found again from the file. 0 is
+        unknown. */
+    std::array<bool, Sampler::numSlots> samplerSync {};
+    std::array<double, Sampler::numSlots> samplerBpms {};
+
+    /** The bank on the pads. */
+    int samplerBank = 0;
+
+    template <typename T>
+    static std::array<T, Sampler::numSlots> filled (T value)
+    {
+        std::array<T, Sampler::numSlots> values;
+        values.fill (value);
+        return values;
+    }
 
     /** One master effect unit: which effect it holds, and the wet level and
         parameters of every effect it can hold, so each comes back as left. */
@@ -106,6 +133,14 @@ struct SessionState
     float micGain = 1.0f;
     bool micTalkover = false;
     MicInput::Routing micRouting = MicInput::Routing::everywhere;
+    int micInputPair = 0;
+
+    /** The aux line's level, where it is heard, and which pair of inputs it
+        reads. Not whether it is on, for the same reason as the mic: a line
+        nobody remembers leaving open should not reach the room. */
+    float auxGain = 1.0f;
+    MicInput::Routing auxRouting = MicInput::Routing::everywhere;
+    int auxInputPair = 1;
 
     /** What the record button writes, and where. WAV by default, because a
         recording is a master to work from later rather than something to
@@ -143,6 +178,10 @@ struct SessionState
 
     /** Writes them back and leaves the mic off. */
     void applyTo (MicInput& mic) const;
+
+    /** The same for the aux line: level, routing and input pair, never on. */
+    void captureAuxFrom (const MicInput& aux);
+    void applyAuxTo (MicInput& aux) const;
 
     /** Round trips through JSON. Anything missing keeps its default, so a file
         written by an older build still loads and only the new settings start

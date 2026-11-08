@@ -6,10 +6,12 @@
 #include "core/AudioEngine.h"
 
 #include "core/TempoMath.h"
+#include "analysis/TrackAnalyser.h"
 
 #include <algorithm>
 
 #include <cmath>
+#include <new>
 
 namespace opendj
 {
@@ -44,7 +46,9 @@ namespace
     }
 }
 
-AudioEngine::AudioEngine()
+AudioEngine::AudioEngine (StemSeparator::Models stemModels)
+    : stemSeparator (stemModels),
+      stemQueue (makeStemQueueConfig())
 {
     formatManager.registerBasicFormats();
 
@@ -52,6 +56,27 @@ AudioEngine::AudioEngine()
     {
         decks[(size_t) i] = std::make_unique<Deck> (i, formatManager);
         echoBeats[(size_t) i].store (1.0, std::memory_order_relaxed);
+
+        // A pad can be pressed from the MIDI thread, which should not wait on
+        // a database, so the cues are written from a loader thread instead.
+        decks[(size_t) i]->onHotCuesChanged = [this] (const juce::File& file, const HotCues& cues)
+        {
+            loaderPool.addJob ([this, file, cues]
+            {
+                if (auto* cache = analysisCache.load (std::memory_order_acquire))
+                    cache->storeHotCues (file, cues);
+            });
+        };
+
+        // The same for a grid set by hand.
+        decks[(size_t) i]->onBeatGridChanged = [this] (const juce::File& file, double bpm, double firstBeat)
+        {
+            loaderPool.addJob ([this, file, bpm, firstBeat]
+            {
+                if (auto* cache = analysisCache.load (std::memory_order_acquire))
+                    cache->storeBeatGrid (file, bpm, firstBeat);
+            });
+        };
     }
 
     // Every frame the visualiser finishes is offered to the broadcast, which
@@ -107,7 +132,7 @@ void AudioEngine::stop()
     // Waiting here is the point: a decode still running when the decks are
     // freed is the same crash by a different route.
     loaderPool.removeAllJobs (true, 5000);
-    separatorPool.removeAllJobs (true, 5000);
+    stemQueue.shutdown();
 
     // A recording still open would otherwise be left without its final flush.
     if (recorder.isRecording())
@@ -277,6 +302,9 @@ void AudioEngine::loadTrackAsync (int deckIndex, const juce::File& file,
     if (loading[(size_t) deckIndex].exchange (true, std::memory_order_relaxed))
         return;
 
+    // Left on, the new track would come up silent with nothing to say why.
+    mixer.setChannelEchoOut (deckIndex, false);
+
     loaderPool.addJob ([this, deckIndex, file, onComplete = std::move (onComplete)]
     {
         auto& deck = *decks[(size_t) deckIndex];
@@ -290,6 +318,12 @@ void AudioEngine::loadTrackAsync (int deckIndex, const juce::File& file,
         if (succeeded && cache != nullptr && ! (known.has_value() && known->analysed))
             if (const auto analysis = deck.getAnalysis(); analysis != nullptr)
                 cache->store (file, *analysis, deck.getLengthSeconds());
+
+        // A track analysed before loudness was measured has just been measured,
+        // and that is the one part of this load worth keeping.
+        if (succeeded && cache != nullptr && known.has_value() && known->analysed && known->loudnessLufs >= 0.0)
+            if (const auto analysis = deck.getAnalysis(); analysis != nullptr && analysis->loudnessLufs < 0.0)
+                cache->storeLoudness (file, analysis->loudnessLufs);
 
         // A track separated on some earlier day costs only a decode, so the
         // stems are there the moment it starts playing.
@@ -323,12 +357,22 @@ void AudioEngine::loadSampleAsync (int slot, const juce::File& file,
         juce::String failureReason;
         auto decoded = TrackDecoder::decode (formatManager, file, &failureReason);
 
+        // A loop or a phrase long enough to have a tempo gets one, so it can
+        // be synced. Two bars at the slowest tempo worth syncing is about four
+        // seconds; anything shorter is a stab, and a stab has no tempo.
+        auto bpm = 0.0;
+
+        if (decoded != nullptr && decoded->lengthSeconds() >= 4.0)
+            if (const auto analysis = TrackAnalyser::analyse (decoded->audio, decoded->sampleRate);
+                analysis->hasTempo() && analysis->confidence >= 0.3f)
+                bpm = analysis->bpm;
+
         // Decoding is the slow part and happens here; installing is one atomic
         // store and happens on the message thread, which owns the slot.
         juce::MessageManager::callAsync (
             [this, slot, file, name = file.getFileNameWithoutExtension(),
              decoded = std::shared_ptr<DecodedAudio> (std::move (decoded)),
-             failureReason, onComplete]() mutable
+             failureReason, onComplete, bpm]() mutable
             {
                 auto error = failureReason;
 
@@ -337,7 +381,7 @@ void AudioEngine::loadSampleAsync (int slot, const juce::File& file,
                     auto owned = std::make_unique<DecodedAudio> (std::move (*decoded));
                     error = {};
 
-                    if (! sampler.installSlot (slot, std::move (owned), name, &error, file)
+                    if (! sampler.installSlot (slot, std::move (owned), name, &error, file, bpm)
                         && error.isEmpty())
                         error = "That sound could not be loaded.";
                 }
@@ -350,6 +394,163 @@ void AudioEngine::loadSampleAsync (int slot, const juce::File& file,
                     onComplete (error);
             });
     });
+}
+
+void AudioEngine::captureSampleAsync (int slot, int deckIndex, double beats, const juce::File& folder,
+                                     std::function<void (juce::String)> onComplete)
+{
+    const auto fail = [&onComplete] (const juce::String& reason)
+    {
+        if (onComplete != nullptr)
+            onComplete (reason);
+    };
+
+    if (! juce::isPositiveAndBelow (deckIndex, numDecks) || ! juce::isPositiveAndBelow (slot, Sampler::numSlots))
+        return fail ("There is no such deck or pad.");
+
+    auto& deck = *decks[(size_t) deckIndex];
+    const auto analysis = deck.getAnalysis();
+    const auto file = deck.getLoadedFile();
+
+    if (! deck.isLoaded() || analysis == nullptr)
+        return fail ("Load a track on the deck first.");
+
+    if (! analysis->hasTempo())
+        return fail ("The track has no beat grid, so there is no beat to record from. "
+                     "Set one by clicking its BPM.");
+
+    // The loop if one is running, which is what a DJ means by "that bit";
+    // otherwise whole beats from the beat at or behind the playhead.
+    auto start = analysis->beatAtOrBehindSeconds (deck.getPositionSeconds());
+    auto length = beats * analysis->secondsPerBeat();
+
+    if (deck.isLoopEnabled() && deck.hasLoop())
+    {
+        start = deck.getLoopStartSeconds();
+        length = deck.getLoopEndSeconds() - start;
+    }
+
+    if (length <= 0.0 || length > 60.0)
+        return fail ("A sample has to be under a minute long.");
+
+    const auto bpm = analysis->bpm;
+    const auto name = deck.getTrackTitle() + " " + juce::String (bpm, 1) + " BPM";
+
+    loaderPool.addJob ([this, slot, file, start, length, bpm, name, folder, onComplete]
+    {
+        juce::String reason;
+        auto decoded = TrackDecoder::decode (formatManager, file, &reason);
+        juce::File written;
+
+        if (decoded != nullptr)
+        {
+            const auto rate = decoded->sampleRate;
+            const auto first = juce::jlimit (0, decoded->audio.getNumSamples(), (int) std::lround (start * rate));
+            const auto count = juce::jlimit (0, decoded->audio.getNumSamples() - first, (int) std::lround (length * rate));
+
+            if (count <= 0)
+            {
+                decoded = nullptr;
+                reason = "That part of the track is empty.";
+            }
+            else
+            {
+                juce::AudioBuffer<float> slice (decoded->audio.getNumChannels(), count);
+
+                for (int ch = 0; ch < slice.getNumChannels(); ++ch)
+                    slice.copyFrom (ch, 0, decoded->audio, ch, first, count);
+
+                decoded->audio = std::move (slice);
+
+                // Kept as a file, so the pad comes back after a restart like
+                // any other and can be dragged into another program.
+                folder.createDirectory();
+                written = folder.getNonexistentChildFile (juce::File::createLegalFileName (name), ".wav", false);
+
+                juce::WavAudioFormat wav;
+                std::unique_ptr<juce::OutputStream> stream (written.createOutputStream());
+
+                if (stream != nullptr)
+                {
+                    const auto options = juce::AudioFormatWriterOptions()
+                                             .withSampleRate (rate)
+                                             .withNumChannels (decoded->audio.getNumChannels())
+                                             .withBitsPerSample (24);
+
+                    if (auto writer = wav.createWriterFor (stream, options); writer != nullptr)
+                        writer->writeFromAudioSampleBuffer (decoded->audio, 0, decoded->audio.getNumSamples());
+                }
+
+                if (written.getSize() <= 0)
+                    written = juce::File();   // the pad still gets the sound, just not after a restart
+            }
+        }
+
+        juce::MessageManager::callAsync (
+            [this, slot, name, bpm, written, reason, onComplete,
+             decoded = std::shared_ptr<DecodedAudio> (std::move (decoded))]() mutable
+            {
+                auto error = reason;
+
+                if (decoded != nullptr)
+                {
+                    error = {};
+
+                    if (! sampler.installSlot (slot, std::make_unique<DecodedAudio> (std::move (*decoded)),
+                                               name, &error, written, bpm)
+                        && error.isEmpty())
+                        error = "The sample could not be put on the pad.";
+                }
+                else if (error.isEmpty())
+                {
+                    error = "The track could not be read again to record from it.";
+                }
+
+                if (onComplete != nullptr)
+                    onComplete (error);
+            });
+    });
+}
+
+double AudioEngine::getMasterTempo() const
+{
+    for (int i = 0; i < numDecks; ++i)
+        if (decks[(size_t) i]->isPlaying())
+            if (const auto bpm = getEffectiveBpm (i); bpm > 0.0)
+                return bpm;
+
+    return 0.0;
+}
+
+juce::File AudioEngine::defaultSampleFolder()
+{
+    return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+               .getChildFile ("OpenDJ").getChildFile ("Samples");
+}
+
+void AudioEngine::setAutoGainEnabled (bool shouldLevel)
+{
+    for (auto& deck : decks)
+        deck->setAutoGainEnabled (shouldLevel);
+}
+
+bool AudioEngine::matchDeckKey (int followerIndex, int leaderIndex)
+{
+    if (! juce::isPositiveAndBelow (followerIndex, numDecks) || ! juce::isPositiveAndBelow (leaderIndex, numDecks)
+        || followerIndex == leaderIndex)
+        return false;
+
+    auto& follower = *decks[(size_t) followerIndex];
+    const auto target = decks[(size_t) leaderIndex]->getEffectiveKey();
+    const auto current = follower.getEffectiveKey();
+
+    if (! target.isValid() || ! current.isValid())
+        return false;
+
+    // From where it would be with no shift at all, so that matching twice gives
+    // the same answer and a shift already there is not added to.
+    follower.setKeyShift (current.transposed (-follower.getKeyShift()).semitonesToMatch (target));
+    return true;
 }
 
 double AudioEngine::getEffectiveBpm (int deckIndex) const
@@ -366,42 +567,144 @@ double AudioEngine::getEffectiveBpm (int deckIndex) const
     return analysis->bpm * deck.getTempoRatio();
 }
 
-void AudioEngine::separateDeckAsync (int deckIndex, std::function<void (bool)> onComplete)
+StemQueue::Config AudioEngine::makeStemQueueConfig()
 {
-    if (! juce::isPositiveAndBelow (deckIndex, numDecks) || ! stemSeparator.isAvailable())
+    StemQueue::Config config;
+
+    config.work = [this] (const juce::File& track,
+                          const std::function<void (float)>& onProgress,
+                          const std::atomic<bool>& stop)
+    {
+        return stemSeparator.prepare (formatManager, track, onProgress, stop);
+    };
+
+    config.anyDeckPlaying = [this]
+    {
+        return std::any_of (decks.begin(), decks.end(), [] (const auto& deck) { return deck->isPlaying(); });
+    };
+
+    config.freeBytes = [this] { return stemSeparator.getFreeBytes(); };
+    config.onReady = [this] (const juce::File& track) { giveStemsToDecks (track); };
+
+    config.onADeck = [this] (const juce::File& track)
+    {
+        return std::any_of (decks.begin(), decks.end(), [&track] (const auto& deck) { return deck->holdsFile (track); });
+    };
+
+    return config;
+}
+
+void AudioEngine::giveStemsToDecks (const juce::File& track)
+{
+    // Decoded only if a deck wants it: a list prepared ahead of time would
+    // otherwise pass through memory at 600 MB a track for nothing. A load racing
+    // this finds the stems for itself, since they are in place by now.
+    //
+    // This is the queue's worker, so the decks are asked under their own lock:
+    // a track retired by a load is freed on the message thread.
+    std::shared_ptr<const SeparatedTrack> stems;
+
+    for (auto& deck : decks)
+    {
+        if (deck->hasStems() || ! deck->holdsFile (track))
+            continue;
+
+        if (stems == nullptr)
+        {
+            auto broken = false;
+
+            try
+            {
+                stems = stemSeparator.loadFromCache (formatManager, track, &broken);
+            }
+            catch (const std::bad_alloc&)
+            {
+                broken = false;
+            }
+
+            if (stems == nullptr)
+            {
+                // It said it was there and will not decode. Without this, asking
+                // again would get the same entry for ever. Not for want of
+                // memory, though, which is no fault of minutes of good work.
+                if (broken)
+                    stemSeparator.discardCacheEntry (track);
+
+                return;
+            }
+        }
+
+        deck->setSeparation (stems, track);
+    }
+}
+
+void AudioEngine::separateDeckAsync (int deckIndex, std::function<void (bool)> onComplete, bool byHand)
+{
+    const auto tell = [onComplete = std::move (onComplete)] (bool succeeded)
+    {
+        if (onComplete != nullptr)
+            juce::MessageManager::callAsync ([onComplete, succeeded] { onComplete (succeeded); });
+    };
+
+    const auto file = juce::isPositiveAndBelow (deckIndex, numDecks) ? decks[(size_t) deckIndex]->getLoadedFile()
+                                                                     : juce::File();
+
+    if (! file.existsAsFile() || ! stemSeparator.isAvailable())
+    {
+        tell (false);
         return;
+    }
+
+    // Nothing here says the deck is busy. That belonged to the job rather than
+    // to the deck, and it stopped a new track on this deck asking for its stems
+    // while the last one's were still running.
+    //
+    // A request given up on, because the deck moved on to another track before
+    // its turn came or the engine is stopping, is not a failure to report.
+    stemQueue.requestNow (file, [tell] (StemOutcome outcome)
+    {
+        if (outcome != StemOutcome::stopped)
+            tell (outcome == StemOutcome::ready);
+    }, byHand);
+}
+
+bool AudioEngine::isDeckSeparating (int deckIndex) const
+{
+    if (! juce::isPositiveAndBelow (deckIndex, numDecks))
+        return false;
 
     const auto file = decks[(size_t) deckIndex]->getLoadedFile();
+    return file != juce::File() && stemQueue.isRequested (file);
+}
 
-    if (! file.existsAsFile())
+float AudioEngine::getSeparationProgress (int deckIndex) const
+{
+    return juce::isPositiveAndBelow (deckIndex, numDecks)
+        ? stemQueue.getFractionFor (decks[(size_t) deckIndex]->getLoadedFile())
+        : 0.0f;
+}
+
+void AudioEngine::prepareStems (const std::vector<juce::File>& tracks)
+{
+    if (! stemSeparator.isAvailable())
         return;
 
-    // One separation at a time, per deck and across the pool: it is minutes of
-    // work on every core the machine has, and two at once would starve both.
-    if (separating[(size_t) deckIndex].exchange (true, std::memory_order_relaxed))
-        return;
+    // A playlist keeps tracks that have since moved or gone. Each would fail in
+    // a moment, and three together would halt the lane as though the machine
+    // were at fault, with the rest of the list behind them.
+    std::vector<juce::File> there;
+    there.reserve (tracks.size());
 
-    separationProgress[(size_t) deckIndex].store (0.0f, std::memory_order_relaxed);
+    for (const auto& track : tracks)
+        if (track.existsAsFile())
+            there.push_back (track);
 
-    separatorPool.addJob ([this, deckIndex, file, onComplete = std::move (onComplete)]
-    {
-        auto separation = stemSeparator.separate (formatManager, file,
-                                                  [this, deckIndex] (float progress)
-        {
-            separationProgress[(size_t) deckIndex].store (progress, std::memory_order_relaxed);
-        });
+    stemQueue.requestInBackground (there);
+}
 
-        if (separation != nullptr)
-            decks[(size_t) deckIndex]->setSeparation (separation, file);
-
-        separating[(size_t) deckIndex].store (false, std::memory_order_relaxed);
-
-        if (onComplete != nullptr)
-        {
-            const auto succeeded = separation != nullptr;
-            juce::MessageManager::callAsync ([onComplete, succeeded] { onComplete (succeeded); });
-        }
-    });
+void AudioEngine::cancelStemPreparation()
+{
+    stemQueue.cancelBackground();
 }
 
 int AudioEngine::findSyncLeader (int followerIndex) const
@@ -584,7 +887,7 @@ void AudioEngine::prepareToPlay (double sampleRate, int blockSize)
     masterBuffer.setSize (2, blockSize, false, true, true);
     cueBuffer.setSize (2, blockSize, false, true, true);
     recordingBuffer.setSize (2, blockSize, false, true, true);
-    inputBuffer.setSize (2, blockSize, false, true, true);
+    inputBuffer.setSize (maxInputChannels, blockSize, false, true, true);
 
     for (auto& deck : decks)
         deck->prepare (sampleRate, blockSize);
@@ -592,6 +895,7 @@ void AudioEngine::prepareToPlay (double sampleRate, int blockSize)
     mixer.prepare (sampleRate, blockSize);
     sampler.prepare (sampleRate);
     mic.prepare (sampleRate);
+    aux.prepare (sampleRate);
 }
 
 void AudioEngine::audioDeviceAboutToStart (juce::AudioIODevice* device)
@@ -627,22 +931,22 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputCha
 void AudioEngine::renderNextBlock (float* const* outputs, int numOutputChannels, int numSamples,
                                   const float* const* inputs, int numInputChannels)
 {
-    // The mic's inputs are copied before the outputs are cleared, in case a
-    // backend hands over input and output channels that share memory. Two at
-    // most, which is all the mic reads.
-    const float* micChannels[2] = { nullptr, nullptr };
-    auto numMicChannels = 0;
+    // The inputs are copied before the outputs are cleared, in case a backend
+    // hands over input and output channels that share memory. Only the active
+    // ones, packed together, which is how the mic and aux count their pairs.
+    const float* inputChannels[maxInputChannels] = {};
+    auto numActiveInputs = 0;
 
     if (inputs != nullptr && numSamples > 0 && numSamples <= inputBuffer.getNumSamples())
     {
-        for (int ch = 0; ch < numInputChannels && numMicChannels < 2; ++ch)
+        for (int ch = 0; ch < numInputChannels && numActiveInputs < maxInputChannels; ++ch)
         {
             if (inputs[ch] == nullptr)
                 continue;
 
-            inputBuffer.copyFrom (numMicChannels, 0, inputs[ch], numSamples);
-            micChannels[numMicChannels] = inputBuffer.getReadPointer (numMicChannels);
-            ++numMicChannels;
+            inputBuffer.copyFrom (numActiveInputs, 0, inputs[ch], numSamples);
+            inputChannels[numActiveInputs] = inputBuffer.getReadPointer (numActiveInputs);
+            ++numActiveInputs;
         }
     }
 
@@ -679,11 +983,14 @@ void AudioEngine::renderNextBlock (float* const* outputs, int numOutputChannels,
     // a sound laid over the mix rather than one of the things being mixed.
     sampler.processBlock (masterView, cueView, numSamples);
 
-    // The mic joins last, over the music and the sampler, and ducks them for
-    // talkover. When it is kept out of the speakers it builds the mix to record
-    // and broadcast in a buffer of its own, and the taps below read that.
+    // The aux joins next and the mic last, over the music and the sampler, so
+    // talkover ducks the aux along with everything else. Either can be kept
+    // out of the speakers, and then builds the mix to record and broadcast in
+    // a buffer of its own; the mic adds itself to that one when the aux made
+    // it, and the taps below read it.
     juce::AudioBuffer<float> recordingView (recordingBuffer.getArrayOfWritePointers(), 2, numSamples);
-    const auto& tap = mic.processBlock (micChannels, numMicChannels, masterView, recordingView, numSamples)
+    const auto auxSeparate = aux.processBlock (inputChannels, numActiveInputs, masterView, recordingView, numSamples);
+    const auto& tap = mic.processBlock (inputChannels, numActiveInputs, masterView, recordingView, numSamples, auxSeparate)
                     ? recordingView
                     : masterView;
 
@@ -732,10 +1039,28 @@ void AudioEngine::updateEchoTimes()
         const auto beatSeconds = bpm > 0.0 ? 60.0 / bpm : 0.5;
 
         mixer.setChannelEchoTime (i, beatSeconds * echoBeats[(size_t) i].load (std::memory_order_relaxed));
+
+        // The stem effect wants the beat as recorded and not at the fader. Under
+        // a stretcher it sits ahead of what the fader does to the tempo, and the
+        // deck knows that better than this does.
+        auto& deck = *decks[(size_t) i];
+        const auto analysis = deck.getAnalysis();
+        deck.setStemFxBeatSeconds (analysis != nullptr && analysis->hasTempo() ? analysis->secondsPerBeat() : 0.5);
     }
 
     const auto tempoDeck = findMasterTempoDeck();
     mixer.getMasterEffects().setBeatSeconds (tempoDeck >= 0 ? 60.0 / getEffectiveBpm (tempoDeck) : 0.5);
+
+    // With nothing to follow, the gate and the sweeps carry on from their own
+    // clock at whatever tempo they were told last.
+    if (tempoDeck >= 0)
+    {
+        const auto& deck = *decks[(size_t) tempoDeck];
+
+        if (const auto analysis = deck.getAnalysis(); analysis != nullptr && analysis->hasTempo())
+            mixer.getMasterEffects().setBeatPosition ((deck.getPositionSeconds() - analysis->firstBeatSeconds)
+                                                      / analysis->secondsPerBeat());
+    }
 }
 
 int AudioEngine::findMasterTempoDeck() const
@@ -835,6 +1160,9 @@ void AudioEngine::timerCallback()
 
     // The tempo fader moves, tracks change, and the echo has to follow both.
     updateEchoTimes();
+
+    // So do synced samples.
+    sampler.setTempoReference (getMasterTempo());
 }
 
 } // namespace opendj

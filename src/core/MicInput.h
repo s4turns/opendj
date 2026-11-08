@@ -12,7 +12,8 @@
 namespace opendj
 {
 
-/** A microphone, laid over the mix the way the sampler is.
+/** A microphone, or a stereo line such as browser or system audio, laid over
+    the mix the way the sampler is.
 
     The mic joins after the mixer and the sampler, so no fader or crossfader
     can take a voice away. Two things set it apart from anything else in the
@@ -39,7 +40,24 @@ public:
         for a voice to sit on top without the music stopping. */
     static constexpr float talkoverDecibels = -10.0f;
 
-    MicInput();
+    /** How the chosen pair of inputs is heard. A mic is mono, so the pair is
+        summed and the voice sits in the middle. A line input (the aux) keeps
+        left and right apart. */
+    enum class Source
+    {
+        mono,
+        stereo
+    };
+
+    explicit MicInput (Source sourceType = Source::mono);
+
+    Source getSource() const noexcept { return source; }
+
+    /** Which pair of the device's active inputs this listens to: 0 is the
+        first two, 1 the next two, and so on. A pair the device does not have
+        is silent. Safe from any thread. */
+    void setInputPair (int pairIndex) noexcept { inputPair.store (juce::jmax (0, pairIndex), std::memory_order_relaxed); }
+    int getInputPair() const noexcept { return inputPair.load (std::memory_order_relaxed); }
 
     void prepare (double sampleRate);
 
@@ -71,18 +89,25 @@ public:
 
         Returns true when `recording` was written and is that mix, false when
         `room` already is. Both buffers are stereo. `inputs` may be null or hold
-        null channels, and the voice is then silent. The first two channels are
-        summed rather than averaged: a mic is mono, inputs are offered in
-        pairs, and a mic plugged into either half of a pair should arrive at
-        full level, not at half.
+        null channels; null channels are skipped when counting pairs, and a
+        missing pair is silent. A mono source sums its pair rather than
+        averaging it: inputs are offered in pairs, and a mic plugged into
+        either half of one should arrive at full level, not at half.
+
+        `recordingIsSeparate` says an earlier source already built `recording`
+        as a mix of its own. This one is then added to it as well as to the
+        room, so two sources kept out of the speakers both reach the stream.
 
         Audio thread: allocates nothing, locks nothing. */
     bool processBlock (const float* const* inputs, int numInputChannels,
                        juce::AudioBuffer<float>& room,
                        juce::AudioBuffer<float>& recording,
-                       int numSamples) noexcept;
+                       int numSamples,
+                       bool recordingIsSeparate = false) noexcept;
 
 private:
+    const Source source;
+    std::atomic<int> inputPair { 0 };
     std::atomic<bool> enabled { false };
     std::atomic<float> gain { 1.0f };
     std::atomic<bool> talkover { false };

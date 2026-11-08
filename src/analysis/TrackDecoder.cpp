@@ -27,9 +27,13 @@ namespace
 
 std::unique_ptr<DecodedAudio> TrackDecoder::decode (juce::AudioFormatManager& formatManager,
                                                     const juce::File& file,
-                                                    juce::String* failureReason)
+                                                    juce::String* failureReason,
+                                                    bool* ranOutOfMemory)
 {
     report (failureReason, {});
+
+    if (ranOutOfMemory != nullptr)
+        *ranOutOfMemory = false;
 
     if (! file.existsAsFile())
     {
@@ -97,6 +101,9 @@ std::unique_ptr<DecodedAudio> TrackDecoder::decode (juce::AudioFormatManager& fo
     }
     catch (const std::bad_alloc&)
     {
+        if (ranOutOfMemory != nullptr)
+            *ranOutOfMemory = true;
+
         report (failureReason,
                 "There was not enough memory for " + describeLength (seconds) + " of audio.");
         return nullptr;

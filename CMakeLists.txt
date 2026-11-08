@@ -21,8 +21,10 @@ set(OPENDJ_ASIO_SDK_PATH "" CACHE PATH "Path to a local copy of the Steinberg AS
 # ---------------------------------------------------------------------------
 # Dependencies
 # ---------------------------------------------------------------------------
+# Keep the existing default, while allowing platform scripts to isolate their
+# dependency sources and build trees with -DFETCHCONTENT_BASE_DIR.
+set(FETCHCONTENT_BASE_DIR "${CMAKE_SOURCE_DIR}/external" CACHE PATH "")
 include(FetchContent)
-set(FETCHCONTENT_BASE_DIR "${CMAKE_SOURCE_DIR}/external" CACHE PATH "" FORCE)
 
 FetchContent_Declare(JUCE
     GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
@@ -134,6 +136,60 @@ if(OpenVINO_FOUND)
     endif()
 else()
     message(STATUS "OpenVINO not found: OpenDJ will build without stem separation")
+endif()
+
+# ONNX Runtime puts stem separation on a GPU OpenVINO cannot reach: NVIDIA
+# through CUDA, or a Mac's through Core ML. Optional like OpenVINO, and found
+# only where asked for, as the root of one of Microsoft's release archives;
+# setup-windows.ps1 fetches the CUDA one and build.ps1 passes it here.
+set(OPENDJ_ONNXRUNTIME_ROOT "" CACHE PATH "Root of an ONNX Runtime release archive, for stems on the GPU")
+
+file(TO_CMAKE_PATH "${OPENDJ_ONNXRUNTIME_ROOT}" OPENDJ_ONNXRUNTIME_ROOT)
+
+if(OPENDJ_ONNXRUNTIME_ROOT AND EXISTS "${OPENDJ_ONNXRUNTIME_ROOT}/include/onnxruntime_cxx_api.h")
+    find_library(OPENDJ_ONNXRUNTIME_LIBRARY NAMES onnxruntime
+        PATHS "${OPENDJ_ONNXRUNTIME_ROOT}/lib" NO_DEFAULT_PATH REQUIRED)
+
+    add_library(opendj_onnxruntime INTERFACE)
+    target_include_directories(opendj_onnxruntime SYSTEM INTERFACE "${OPENDJ_ONNXRUNTIME_ROOT}/include")
+    target_link_libraries(opendj_onnxruntime INTERFACE "${OPENDJ_ONNXRUNTIME_LIBRARY}")
+    target_compile_definitions(opendj_onnxruntime INTERFACE OPENDJ_HAVE_ONNXRUNTIME=1)
+    # The real file behind libonnxruntime.dylib's symlinks, for copying.
+    file(REAL_PATH "${OPENDJ_ONNXRUNTIME_LIBRARY}" OPENDJ_ONNXRUNTIME_LIBRARY_FILE)
+    set(OPENDJ_HAVE_ONNXRUNTIME ON)
+
+    message(STATUS "ONNX Runtime found: stems can be separated on the GPU")
+
+    # The runtime and its CUDA provider go next to the program, as OpenVINO's
+    # do. NVIDIA's own libraries do not: they are 1.5 GB, and StemModel finds
+    # them where setup-windows.ps1 put them. The Mac app carries the runtime in
+    # its Frameworks folder, so it runs without the archive it was built from;
+    # the library is found there by its install name, libonnxruntime.1.dylib.
+    function(opendj_use_onnxruntime target)
+        target_link_libraries(${target} PRIVATE opendj_onnxruntime)
+        get_target_property(bundle ${target} MACOSX_BUNDLE)
+
+        if(WIN32)
+            foreach(dll onnxruntime onnxruntime_providers_shared onnxruntime_providers_cuda)
+                if(EXISTS "${OPENDJ_ONNXRUNTIME_ROOT}/lib/${dll}.dll")
+                    add_custom_command(TARGET ${target} POST_BUILD
+                        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                            "${OPENDJ_ONNXRUNTIME_ROOT}/lib/${dll}.dll" "$<TARGET_FILE_DIR:${target}>")
+                endif()
+            endforeach()
+        elseif(APPLE AND bundle)
+            add_custom_command(TARGET ${target} POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_BUNDLE_CONTENT_DIR:${target}>/Frameworks"
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${OPENDJ_ONNXRUNTIME_LIBRARY_FILE}" "$<TARGET_BUNDLE_CONTENT_DIR:${target}>/Frameworks/libonnxruntime.1.dylib")
+            # Only the bundle's own folder: CMake would otherwise also add the
+            # archive's, a path on the build machine.
+            set_property(TARGET ${target} APPEND PROPERTY INSTALL_RPATH "@executable_path/../Frameworks")
+            set_property(TARGET ${target} PROPERTY BUILD_WITH_INSTALL_RPATH ON)
+        else()
+            set_property(TARGET ${target} APPEND PROPERTY BUILD_RPATH "${OPENDJ_ONNXRUNTIME_ROOT}/lib")
+        endif()
+    endfunction()
 endif()
 
 # projectM draws the MilkDrop visuals, both in the window and into the
@@ -248,6 +304,7 @@ set(OPENDJ_ENGINE_SOURCES
     ${CMAKE_SOURCE_DIR}/src/core/MicInput.cpp
     ${CMAKE_SOURCE_DIR}/src/core/Mixer.cpp
     ${CMAKE_SOURCE_DIR}/src/core/MasterEffects.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/StemEffect.cpp
     ${CMAKE_SOURCE_DIR}/src/core/PluginHost.cpp
     ${CMAKE_SOURCE_DIR}/src/core/OutputRouter.cpp
     ${CMAKE_SOURCE_DIR}/src/stream/Broadcaster.cpp
@@ -258,25 +315,36 @@ set(OPENDJ_ENGINE_SOURCES
     ${CMAKE_SOURCE_DIR}/src/core/SetRecorder.cpp
     ${CMAKE_SOURCE_DIR}/src/core/Mp3Writer.cpp
     ${CMAKE_SOURCE_DIR}/src/analysis/KeyDetector.cpp
+    ${CMAKE_SOURCE_DIR}/src/analysis/Loudness.cpp
     ${CMAKE_SOURCE_DIR}/src/analysis/TrackAnalysis.cpp
     ${CMAKE_SOURCE_DIR}/src/analysis/TrackAnalyser.cpp
     ${CMAKE_SOURCE_DIR}/src/analysis/TrackDecoder.cpp
     ${CMAKE_SOURCE_DIR}/src/analysis/StemDsp.cpp
+    ${CMAKE_SOURCE_DIR}/src/analysis/StemQueue.cpp
     ${CMAKE_SOURCE_DIR}/src/analysis/StemSeparator.cpp
     ${CMAKE_SOURCE_DIR}/src/analysis/StemModel.cpp
     ${CMAKE_SOURCE_DIR}/src/control/Action.cpp
     ${CMAKE_SOURCE_DIR}/src/control/ActionDispatcher.cpp
     ${CMAKE_SOURCE_DIR}/src/control/MidiMapping.cpp
+    ${CMAKE_SOURCE_DIR}/src/control/MidiLearn.cpp
     ${CMAKE_SOURCE_DIR}/src/control/MidiControlSurface.cpp
     ${CMAKE_SOURCE_DIR}/src/control/AlsaMidiCompat.cpp
     ${CMAKE_SOURCE_DIR}/src/library/Library.cpp
     ${CMAKE_SOURCE_DIR}/src/library/LibraryScanner.cpp
+    ${CMAKE_SOURCE_DIR}/src/library/RekordboxImport.cpp
     ${CMAKE_SOURCE_DIR}/src/library/TagReader.cpp
     ${CMAKE_SOURCE_DIR}/src/visual/Visualizer.cpp)
 
 # ---------------------------------------------------------------------------
 # Application target
 # ---------------------------------------------------------------------------
+set(OPENDJ_MACOS_APP_OPTIONS)
+if(APPLE)
+    list(APPEND OPENDJ_MACOS_APP_OPTIONS
+        MICROPHONE_PERMISSION_ENABLED TRUE
+        MICROPHONE_PERMISSION_TEXT "OpenDJ uses audio input for the microphone mixer and broadcasts.")
+endif()
+
 juce_add_gui_app(OpenDJ
     PRODUCT_NAME  "OpenDJ"
     COMPANY_NAME  "OpenDJ"
@@ -287,7 +355,12 @@ juce_add_gui_app(OpenDJ
     # from these: an .ico on Windows, an .icns in a macOS bundle.
     ICON_BIG      ${CMAKE_SOURCE_DIR}/images/icon.png
     ICON_SMALL    ${CMAKE_SOURCE_DIR}/images/icon-256.png
-    NEEDS_CURL    FALSE)
+    NEEDS_CURL    FALSE
+    ${OPENDJ_MACOS_APP_OPTIONS})
+
+if(APPLE)
+    juce_add_bundle_resources_directory(OpenDJ "${CMAKE_SOURCE_DIR}/mappings")
+endif()
 
 juce_generate_juce_header(OpenDJ)
 
@@ -299,6 +372,7 @@ target_sources(OpenDJ PRIVATE
     src/ui/BeatMatchComponent.cpp
     src/ui/BrowserComponent.cpp
     src/ui/DeckComponent.cpp
+    src/ui/BeatGridEditor.cpp
     src/ui/MidiSetupComponent.cpp
     src/ui/PlatterComponent.cpp
     src/ui/WaveformComponent.cpp
@@ -349,6 +423,10 @@ if(OpenVINO_FOUND)
     if(WIN32)
         opendj_copy_openvino_dlls(OpenDJ)
     endif()
+endif()
+
+if(OPENDJ_HAVE_ONNXRUNTIME)
+    opendj_use_onnxruntime(OpenDJ)
 endif()
 
 if(OPENDJ_VISUALIZER_AVAILABLE)

@@ -83,6 +83,23 @@ private:
             juce::JUCEApplication::getInstance()->systemRequestedQuit();
         }
 
+        // A freshly shown window does not always hand keyboard focus to its
+        // content: on X11 (Linux) it does not, so the key shortcuts — F11 for
+        // full screen, the deck cue and play keys, the sampler pads — did nothing
+        // until the window was clicked. Giving the content the keys whenever the
+        // window becomes active fixes that at launch and on every refocus, and the
+        // check that nothing is focused yet keeps it from stealing the caret from
+        // the library search box when the window is clicked back into.
+        void activeWindowStatusChanged() override
+        {
+            DocumentWindow::activeWindowStatusChanged();
+
+            if (isActiveWindow()
+                && juce::Component::getCurrentlyFocusedComponent() == nullptr)
+                if (auto* content = getContentComponent())
+                    content->grabKeyboardFocus();
+        }
+
     private:
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainWindow)
     };

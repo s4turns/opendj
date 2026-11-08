@@ -201,3 +201,128 @@ TEST_CASE ("a mic on either half of an input pair arrives at full level", "[mic]
 
     REQUIRE_THAT (h.lastRoom(), WithinAbs (0.3f, 1.0e-4f));
 }
+
+//==============================================================================
+// Input pairs and the stereo aux
+//==============================================================================
+
+namespace
+{
+    /** Runs a source for long enough to finish fading in, over silent music,
+        with each input channel held at a steady level. */
+    void settle (MicInput& source, juce::AudioBuffer<float>& room, juce::AudioBuffer<float>& recording,
+                 const std::vector<float>& levels, bool recordingIsSeparate = false)
+    {
+        std::vector<std::vector<float>> channels;
+        std::vector<const float*> pointers;
+
+        for (const auto level : levels)
+            channels.emplace_back ((size_t) blockSize, level);
+
+        for (const auto& channel : channels)
+            pointers.push_back (channel.data());
+
+        for (int b = 0; b < 10; ++b)
+        {
+            room.clear();
+
+            if (! recordingIsSeparate)
+                recording.clear();
+
+            source.processBlock (pointers.data(), (int) pointers.size(), room, recording, blockSize,
+                                 recordingIsSeparate);
+        }
+    }
+}
+
+TEST_CASE ("an input pair past the first reads the inputs it names", "[mic][aux]")
+{
+    MicInput mic;
+    mic.prepare (sampleRate);
+    mic.setEnabled (true);
+    mic.setInputPair (1);
+
+    juce::AudioBuffer<float> room (2, blockSize), recording (2, blockSize);
+    settle (mic, room, recording, { 0.5f, 0.5f, 0.1f, 0.2f });
+
+    // Inputs 3 and 4, summed: the first pair is not heard at all.
+    REQUIRE_THAT (room.getSample (0, blockSize - 1), WithinAbs (0.3f, 1.0e-4f));
+    REQUIRE_THAT (room.getSample (1, blockSize - 1), WithinAbs (0.3f, 1.0e-4f));
+}
+
+TEST_CASE ("a pair the device does not have is silence", "[mic][aux]")
+{
+    MicInput aux (MicInput::Source::stereo);
+    aux.prepare (sampleRate);
+    aux.setEnabled (true);
+    aux.setInputPair (2);
+
+    juce::AudioBuffer<float> room (2, blockSize), recording (2, blockSize);
+    settle (aux, room, recording, { 0.5f, 0.5f });
+
+    REQUIRE (room.getSample (0, blockSize - 1) == 0.0f);
+    REQUIRE (room.getSample (1, blockSize - 1) == 0.0f);
+}
+
+TEST_CASE ("the aux keeps left and right apart", "[mic][aux]")
+{
+    MicInput aux (MicInput::Source::stereo);
+    aux.prepare (sampleRate);
+    aux.setEnabled (true);
+
+    juce::AudioBuffer<float> room (2, blockSize), recording (2, blockSize);
+    settle (aux, room, recording, { 0.1f, 0.4f });
+
+    REQUIRE_THAT (room.getSample (0, blockSize - 1), WithinAbs (0.1f, 1.0e-4f));
+    REQUIRE_THAT (room.getSample (1, blockSize - 1), WithinAbs (0.4f, 1.0e-4f));
+}
+
+TEST_CASE ("an aux pair with one channel is heard on both sides", "[mic][aux]")
+{
+    MicInput aux (MicInput::Source::stereo);
+    aux.prepare (sampleRate);
+    aux.setEnabled (true);
+
+    juce::AudioBuffer<float> room (2, blockSize), recording (2, blockSize);
+    settle (aux, room, recording, { 0.25f });
+
+    REQUIRE_THAT (room.getSample (0, blockSize - 1), WithinAbs (0.25f, 1.0e-4f));
+    REQUIRE_THAT (room.getSample (1, blockSize - 1), WithinAbs (0.25f, 1.0e-4f));
+}
+
+TEST_CASE ("the mic adds itself to a recording mix the aux already made", "[mic][aux]")
+{
+    juce::AudioBuffer<float> room (2, blockSize), recording (2, blockSize);
+
+    MicInput aux (MicInput::Source::stereo);
+    aux.prepare (sampleRate);
+    aux.setEnabled (true);
+    aux.setRouting (MicInput::Routing::recordingOnly);
+
+    MicInput mic;
+    mic.prepare (sampleRate);
+    mic.setEnabled (true);
+    mic.setInputPair (1);
+
+    std::vector<float> line ((size_t) blockSize, 0.2f);
+    std::vector<float> voice ((size_t) blockSize, 0.1f);
+    const float* inputs[] = { line.data(), line.data(), voice.data(), voice.data() };
+
+    auto separate = false;
+
+    for (int b = 0; b < 10; ++b)
+    {
+        room.clear();
+        recording.clear();
+
+        const auto auxSeparate = aux.processBlock (inputs, 4, room, recording, blockSize);
+        separate = mic.processBlock (inputs, 4, room, recording, blockSize, auxSeparate);
+    }
+
+    // The room hears only the mic; the stream hears both.
+    REQUIRE (separate);
+    REQUIRE_THAT (room.getSample (0, blockSize - 1), WithinAbs (0.2f, 1.0e-4f));
+    REQUIRE_THAT (recording.getSample (0, blockSize - 1), WithinAbs (0.4f, 1.0e-4f));
+    REQUIRE_THAT (recording.getSample (1, blockSize - 1), WithinAbs (0.4f, 1.0e-4f));
+}
+

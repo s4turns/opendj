@@ -7,6 +7,8 @@
 
 #include "library/Library.h"
 
+#include <sqlite3.h>
+
 using Catch::Matchers::WithinAbs;
 
 namespace
@@ -325,4 +327,297 @@ TEST_CASE ("deleting a playlist removes its entries and renaming keeps them", "[
     REQUIRE (f.library.deletePlaylist (id));
     REQUIRE (f.library.getPlaylists().empty());
     REQUIRE (f.library.getPlaylistFiles (id).empty());
+}
+
+TEST_CASE ("hot cues round trip by path and come back with the track", "[library][hotcue]")
+{
+    Fixture fixture;
+
+    REQUIRE (fixture.library.upsertTrack (fixture.recordFor (fixture.first, "Yeah", "Boys Noize")) != 0);
+
+    for (const auto cue : fixture.library.getHotCues (fixture.first))
+        REQUIRE (cue < 0.0);
+
+    auto cues = opendj::noHotCues();
+    cues[0] = 12.5;
+    cues[7] = 200.0;
+    REQUIRE (fixture.library.setHotCues (fixture.first, cues));
+
+    const auto stored = fixture.library.getHotCues (fixture.first);
+    REQUIRE_THAT (stored[0], WithinAbs (12.5, 1.0e-9));
+    REQUIRE_THAT (stored[7], WithinAbs (200.0, 1.0e-9));
+    REQUIRE (stored[3] < 0.0);
+
+    // The deck asks through the cache when it loads.
+    const auto known = fixture.library.lookup (fixture.first);
+    REQUIRE (known.has_value());
+    REQUIRE_THAT (known->hotCues[0], WithinAbs (12.5, 1.0e-9));
+
+    // Clearing a pad is writing every pad again without it.
+    cues[0] = -1.0;
+    fixture.library.storeHotCues (fixture.first, cues);
+    REQUIRE (fixture.library.getHotCues (fixture.first)[0] < 0.0);
+    REQUIRE_THAT (fixture.library.getHotCues (fixture.first)[7], WithinAbs (200.0, 1.0e-9));
+
+    // Another file has its own.
+    REQUIRE (fixture.library.getHotCues (fixture.second)[7] < 0.0);
+}
+
+TEST_CASE ("hot cue names round trip and survive the position being rewritten", "[library][hotcue]")
+{
+    Fixture fixture;
+
+    REQUIRE (fixture.library.upsertTrack (fixture.recordFor (fixture.first, "Yeah", "Boys Noize")) != 0);
+
+    auto cues = opendj::noHotCues();
+    cues[0] = 12.5;
+    cues[4] = 88.0;
+    REQUIRE (fixture.library.setHotCues (fixture.first, cues));
+
+    // A name is kept on the same row as the position.
+    fixture.library.setHotCueName (fixture.first, 0, cues[0], "intro");
+    fixture.library.setHotCueName (fixture.first, 4, cues[4], "drop");
+
+    auto names = fixture.library.getHotCueNames (fixture.first);
+    REQUIRE (names[0] == "intro");
+    REQUIRE (names[4] == "drop");
+    REQUIRE (names[1].isEmpty());
+
+    // Rewriting the positions (what a pad press does) must not wipe the names.
+    cues[0] = 15.0;
+    fixture.library.storeHotCues (fixture.first, cues);
+    REQUIRE_THAT (fixture.library.getHotCues (fixture.first)[0], WithinAbs (15.0, 1.0e-9));
+    names = fixture.library.getHotCueNames (fixture.first);
+    REQUIRE (names[0] == "intro");
+    REQUIRE (names[4] == "drop");
+
+    // Clearing a pad drops its name with it.
+    cues[0] = -1.0;
+    fixture.library.storeHotCues (fixture.first, cues);
+    REQUIRE (fixture.library.getHotCueNames (fixture.first)[0].isEmpty());
+    REQUIRE (fixture.library.getHotCueNames (fixture.first)[4] == "drop");
+}
+
+TEST_CASE ("hot cues outlive the track being removed and found again", "[library][hotcue]")
+{
+    Fixture fixture;
+
+    REQUIRE (fixture.library.upsertTrack (fixture.recordFor (fixture.first, "Yeah", "Boys Noize")) != 0);
+
+    auto cues = opendj::noHotCues();
+    cues[2] = 30.0;
+    REQUIRE (fixture.library.setHotCues (fixture.first, cues));
+
+    REQUIRE (fixture.library.removeTrack (fixture.first));
+    REQUIRE (fixture.library.upsertTrack (fixture.recordFor (fixture.first, "Yeah", "Boys Noize")) != 0);
+
+    REQUIRE_THAT (fixture.library.getHotCues (fixture.first)[2], WithinAbs (30.0, 1.0e-9));
+}
+
+TEST_CASE ("rating, colour and comment are kept and survive a rescan", "[library]")
+{
+    Fixture fixture;
+
+    REQUIRE_FALSE (fixture.library.setTrackDetails (fixture.first, 4, 0xffff007fu, "peak time"));   // not in the library yet
+
+    REQUIRE (fixture.library.upsertTrack (fixture.recordFor (fixture.first, "Yeah", "Boys Noize")) != 0);
+    REQUIRE (fixture.library.setTrackDetails (fixture.first, 4, 0xffff007fu, "peak time"));
+
+    // The scanner writes tags over and over; it must not wipe these.
+    REQUIRE (fixture.library.upsertTrack (fixture.recordFor (fixture.first, "Yeah (edit)", "Boys Noize")) != 0);
+
+    const auto record = fixture.library.findTrack (fixture.first);
+    REQUIRE (record.has_value());
+    REQUIRE (record->title == "Yeah (edit)");
+    REQUIRE (record->rating == 4);
+    REQUIRE (record->colour == 0xffff007fu);
+    REQUIRE (record->comment == "peak time");
+
+    REQUIRE (fixture.library.setTrackDetails (fixture.first, 9, 0, {}));
+    REQUIRE (fixture.library.findTrack (fixture.first)->rating == 5);
+}
+
+TEST_CASE ("a library made before ratings and hot cues is upgraded in place", "[library]")
+{
+    const auto folder = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                            .getChildFile ("opendj-library-upgrade-" + juce::String (juce::Random::getSystemRandom().nextInt64()));
+    REQUIRE (folder.createDirectory());
+    const auto databaseFile = folder.getChildFile ("library.sqlite");
+
+    // The first schema's track table, with one track in it.
+    {
+        sqlite3* raw = nullptr;
+        REQUIRE (sqlite3_open (databaseFile.getFullPathName().toRawUTF8(), &raw) == SQLITE_OK);
+        REQUIRE (sqlite3_exec (raw,
+            "CREATE TABLE tracks (id INTEGER PRIMARY KEY, path TEXT NOT NULL UNIQUE,"
+            " file_size INTEGER NOT NULL DEFAULT 0, file_modified INTEGER NOT NULL DEFAULT 0,"
+            " title TEXT NOT NULL DEFAULT '', artist TEXT NOT NULL DEFAULT '', album TEXT NOT NULL DEFAULT '',"
+            " genre TEXT NOT NULL DEFAULT '', key TEXT NOT NULL DEFAULT '', duration_seconds REAL NOT NULL DEFAULT 0,"
+            " bpm REAL NOT NULL DEFAULT 0, first_beat_seconds REAL NOT NULL DEFAULT 0,"
+            " tempo_confidence REAL NOT NULL DEFAULT 0, analysis_version INTEGER NOT NULL DEFAULT 0,"
+            " added_at INTEGER NOT NULL DEFAULT 0, last_played_at INTEGER NOT NULL DEFAULT 0);"
+            "INSERT INTO tracks (path, title) VALUES ('/music/old.mp3', 'Old');",
+            nullptr, nullptr, nullptr) == SQLITE_OK);
+        sqlite3_close (raw);
+    }
+
+    {
+        opendj::Library library;
+        REQUIRE (library.open (databaseFile).wasOk());
+
+        const auto old = library.findTrack (juce::File ("/music/old.mp3"));
+        REQUIRE (old.has_value());
+        REQUIRE (old->title == "Old");
+        REQUIRE (old->rating == 0);
+
+        REQUIRE (library.setTrackDetails (juce::File ("/music/old.mp3"), 3, 0, "kept"));
+
+        auto cues = opendj::noHotCues();
+        cues[1] = 4.0;
+        REQUIRE (library.setHotCues (juce::File ("/music/old.mp3"), cues));
+    }
+
+    // And opening it again finds nothing more to do.
+    {
+        opendj::Library library;
+        REQUIRE (library.open (databaseFile).wasOk());
+        REQUIRE (library.findTrack (juce::File ("/music/old.mp3"))->comment == "kept");
+        REQUIRE_THAT (library.getHotCues (juce::File ("/music/old.mp3"))[1], WithinAbs (4.0, 1.0e-9));
+    }
+
+    folder.deleteRecursively();
+}
+
+TEST_CASE ("a grid set by hand comes back and outranks the analyser", "[library][cache][grid]")
+{
+    Fixture fixture;
+    fixture.library.upsertTrack (fixture.recordFor (fixture.first, "Yeah", "Boys Noize"));
+    fixture.library.store (fixture.first, analysisAt (128.0), 300.0);
+
+    fixture.library.storeBeatGrid (fixture.first, 127.5, 0.4);
+
+    auto known = fixture.library.lookup (fixture.first);
+    REQUIRE (known.has_value());
+    REQUIRE (known->analysed);
+    REQUIRE_THAT (known->bpm, WithinAbs (127.5, 1.0e-9));
+    REQUIRE_THAT (known->firstBeatSeconds, WithinAbs (0.4, 1.0e-9));
+
+    // A later analysis of the same file, or an import, must not undo it.
+    fixture.library.store (fixture.first, analysisAt (64.0), 300.0);
+
+    known = fixture.library.lookup (fixture.first);
+    REQUIRE_THAT (known->bpm, WithinAbs (127.5, 1.0e-9));
+    REQUIRE_THAT (known->firstBeatSeconds, WithinAbs (0.4, 1.0e-9));
+    REQUIRE_THAT (fixture.library.findTrack (fixture.first)->bpm, WithinAbs (127.5, 1.0e-9));
+}
+
+TEST_CASE ("a changed file drops a grid set by hand", "[library][cache][grid]")
+{
+    Fixture fixture;
+    fixture.library.upsertTrack (fixture.recordFor (fixture.first, "Yeah", "Boys Noize"));
+    fixture.library.store (fixture.first, analysisAt (128.0), 300.0);
+    fixture.library.storeBeatGrid (fixture.first, 127.5, 0.4);
+
+    // A different recording now: its own analysis wins again.
+    REQUIRE (fixture.first.replaceWithText ("a different recording altogether"));
+    fixture.library.upsertTrack (fixture.recordFor (fixture.first, "Yeah", "Boys Noize"));
+    fixture.library.store (fixture.first, analysisAt (130.0), 300.0);
+
+    const auto known = fixture.library.lookup (fixture.first);
+    REQUIRE (known.has_value());
+    REQUIRE_THAT (known->bpm, WithinAbs (130.0, 1.0e-9));
+}
+
+TEST_CASE ("the library hands a deck the key it knows", "[library][key]")
+{
+    Fixture fixture;
+
+    const auto file = fixture.folder.getChildFile ("keyed.wav");
+    REQUIRE (file.replaceWithText ("not really audio"));
+
+    auto record = fixture.recordFor (file, "Keyed", "");
+    record.key = "8A";
+    REQUIRE (fixture.library.upsertTrack (record) > 0);
+
+    const auto known = fixture.library.lookup (file);
+    REQUIRE (known.has_value());
+    REQUIRE (known->key.toString() == "Am");
+
+    // Whether or not the rest of the analysis can be trusted: a key from the
+    // tags is as good on a track that has never been analysed.
+    REQUIRE_FALSE (known->analysed);
+}
+
+TEST_CASE ("loudness is kept with an analysed track", "[library][loudness]")
+{
+    Fixture fixture;
+
+    REQUIRE (fixture.library.getLoudness (fixture.first) == 0.0);
+
+    auto analysis = analysisAt (128.0);
+    analysis.loudnessLufs = -9.5;
+    fixture.library.store (fixture.first, analysis, 300.0);
+
+    REQUIRE_THAT (fixture.library.getLoudness (fixture.first), Catch::Matchers::WithinAbs (-9.5, 1.0e-9));
+
+    const auto known = fixture.library.lookup (fixture.first);
+    REQUIRE (known.has_value());
+    REQUIRE (known->analysed);
+    REQUIRE_THAT (known->loudnessLufs, Catch::Matchers::WithinAbs (-9.5, 1.0e-9));
+}
+
+TEST_CASE ("a track analysed before loudness existed can have it filled in", "[library][loudness]")
+{
+    Fixture fixture;
+
+    fixture.library.store (fixture.first, analysisAt (128.0), 300.0);
+    REQUIRE (fixture.library.lookup (fixture.first)->loudnessLufs == 0.0);
+    REQUIRE (fixture.library.lookup (fixture.first)->analysed);
+
+    fixture.library.storeLoudness (fixture.first, -11.0);
+    REQUIRE_THAT (fixture.library.lookup (fixture.first)->loudnessLufs, Catch::Matchers::WithinAbs (-11.0, 1.0e-9));
+}
+
+TEST_CASE ("a file that changed forgets its loudness", "[library][loudness]")
+{
+    Fixture fixture;
+
+    auto analysis = analysisAt (128.0);
+    analysis.loudnessLufs = -9.5;
+    fixture.library.store (fixture.first, analysis, 300.0);
+
+    // What a rescan does on finding a different file at the same path.
+    auto record = fixture.recordFor (fixture.first, "Yeah", "Boys Noize");
+    record.fileSize += 1000;
+    record.fileModified += 1000;
+    fixture.library.upsertTrack (record);
+
+    REQUIRE (fixture.library.getLoudness (fixture.first) == 0.0);
+}
+
+TEST_CASE ("an older library gains the loudness column and keeps its tracks", "[library][loudness]")
+{
+    Fixture fixture;
+    fixture.library.store (fixture.first, analysisAt (128.0), 300.0);
+
+    const auto file = fixture.folder.getChildFile ("library.sqlite");
+    fixture.library.close();
+
+    // Taken back to how it was before the column, then reopened.
+    {
+        sqlite3* database = nullptr;
+        REQUIRE (sqlite3_open (file.getFullPathName().toRawUTF8(), &database) == SQLITE_OK);
+        REQUIRE (sqlite3_exec (database, "ALTER TABLE tracks DROP COLUMN loudness_lufs", nullptr, nullptr, nullptr) == SQLITE_OK);
+        sqlite3_close (database);
+    }
+
+    REQUIRE (fixture.library.open (file).wasOk());
+
+    const auto known = fixture.library.lookup (fixture.first);
+    REQUIRE (known.has_value());
+    REQUIRE (known->analysed);
+    REQUIRE (known->loudnessLufs == 0.0);
+
+    fixture.library.storeLoudness (fixture.first, -12.0);
+    REQUIRE_THAT (fixture.library.getLoudness (fixture.first), Catch::Matchers::WithinAbs (-12.0, 1.0e-9));
 }

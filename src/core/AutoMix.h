@@ -10,6 +10,7 @@
 #include "core/AudioEngine.h"
 #include "core/MixPoints.h"
 
+#include <array>
 #include <functional>
 #include <memory>
 #include <vector>
@@ -79,6 +80,21 @@ public:
     void setLoop (bool shouldLoop) noexcept { loop = shouldLoop; }
     bool isLooping() const noexcept { return loop; }
 
+    /** Turn on key lock for a deck whose tempo is changed to match, so it
+        stays in its own key. On by default. A deck automix turned it on for
+        gets the user's setting back when automix stops, unless it is still
+        playing, where the change would be heard as a jump in pitch. */
+    void setKeyLock (bool shouldLock) noexcept { keyLock = shouldLock; }
+    bool isKeyLocking() const noexcept { return keyLock; }
+
+    /** Keep two vocals from being sung over each other. Each track is
+        separated while the one before it plays, where a separator is
+        installed; the mix is planned around the vocals and, where they still
+        meet, the outgoing ones make way. On by default; without stems the
+        mix is planned as before. */
+    void setVocalAware (bool shouldAvoid);
+    bool isVocalAware() const noexcept { return vocalAware; }
+
     /** Index in the queue of the track on air, or -1. */
     int getCurrentIndex() const noexcept { return currentIndex; }
 
@@ -109,6 +125,9 @@ private:
     void finishFade (int outgoingDeck);
     void planNextMix();
     void restoreLowEq();
+    void restoreVocals();
+    void requestStems (int deckIndex);
+    std::vector<bool> vocalsOn (int deckIndex) const;
     void changed();
 
     /** The most a track is stretched to match the one it is mixed into. */
@@ -123,7 +142,13 @@ private:
     double fadeSeconds = 12.0;
     bool loop = true;
     bool smart = true;
+    bool keyLock = true;
+    bool vocalAware = true;
     automix::MixPlan plan;
+
+    // The grids the plan was made from. A grid edited since means the phrase
+    // the plan aims for has moved, so it is made again.
+    std::weak_ptr<const TrackAnalysis> plannedOutgoing, plannedIncoming;
 
     int onAirDeck = -1;
     int currentIndex = -1;
@@ -143,6 +168,19 @@ private:
     /** The low EQ the user had on each side, while a smart fade swaps them. */
     bool swappingLows = false;
     float outgoingLow = 0.5f, incomingLow = 0.5f;
+
+    /** The outgoing vocals' gain the user had, while a fade hands them over. */
+    int vocalHandoffBar = -1;
+    double fadeBars = 0.0;
+    float outgoingVocals = 1.0f;
+
+    /** Key lock as each of decks A and B had it before automix turned it on;
+        -1 where automix has not touched it. */
+    std::array<int, 2> keyLockBefore { -1, -1 };
+
+    // Each deck's trim before automix first matched a track's level on it,
+    // negative when it has not, so stopping can put it back.
+    std::array<float, 2> trimBefore { -1.0f, -1.0f };
 
     /** Callbacks from the loader arrive later, on the message thread, and
         must not touch an object that has gone. */

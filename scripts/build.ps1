@@ -47,6 +47,15 @@ if (-not $env:OpenVINO_DIR) {
     }
 }
 
+# ONNX Runtime with CUDA, for stems on an NVIDIA card, where
+# setup-windows.ps1 unpacks it. Without it the build separates through
+# OpenVINO alone.
+$onnxRuntimeArgs = @()
+$onnxRuntimeRoot = Join-Path $HOME '.local\share\opendj\onnxruntime-gpu'
+if (Test-Path (Join-Path $onnxRuntimeRoot 'include\onnxruntime_cxx_api.h')) {
+    $onnxRuntimeArgs = @("-DOPENDJ_ONNXRUNTIME_ROOT=$onnxRuntimeRoot")
+}
+
 $asioArgs = @()
 
 if ($Asio) {
@@ -125,7 +134,7 @@ if ($Clean -and (Test-Path $buildDir)) {
 }
 
 Write-Host "Configuring ($Config)..." -ForegroundColor Cyan
-& $cmake -S $repoRoot -B $buildDir @generatorArgs @asioArgs @openvinoArgs
+& $cmake -S $repoRoot -B $buildDir @generatorArgs @asioArgs @openvinoArgs @onnxRuntimeArgs
 if ($LASTEXITCODE -ne 0) { throw "Configure failed with exit code $LASTEXITCODE." }
 
 Write-Host 'Building...' -ForegroundColor Cyan

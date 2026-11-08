@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <iostream>
+#include <utility>
 
 namespace opendj
 {
@@ -283,9 +284,12 @@ int MidiControlSurface::loadMappingsFromFolder (const juce::File& folder)
         for (const auto& warning : fileWarnings)
             warnings.add (mapping.name + ": " + warning);
 
+        std::lock_guard<std::mutex> lock (mappingMutex);
         mappings.push_back (std::move (mapping));
         ++loaded;
     }
+
+    std::lock_guard<std::mutex> lock (mappingMutex);
 
     if (selectedMapping < 0 && ! mappings.empty())
         selectedMapping = 0;
@@ -323,6 +327,7 @@ bool MidiControlSurface::selectMapping (const juce::String& mappingName)
 {
     if (mappingName.isEmpty())
     {
+        std::lock_guard<std::mutex> lock (mappingMutex);
         selectedMapping = -1;
         return true;
     }
@@ -331,7 +336,11 @@ bool MidiControlSurface::selectMapping (const juce::String& mappingName)
     {
         if (mappings[i].name == mappingName)
         {
-            selectedMapping = static_cast<int> (i);
+            {
+                std::lock_guard<std::mutex> lock (mappingMutex);
+                selectedMapping = static_cast<int> (i);
+            }
+
             lastFeedbackState.clear();
             sendInitMessages();
             refreshFeedback();
@@ -386,23 +395,7 @@ void MidiControlSurface::handleIncomingMidiMessage (juce::MidiInput*, const juce
     const auto number = numberOf (message);
     const auto rawValue = valueOf (message);
 
-    {
-        std::lock_guard<std::mutex> lock (learnMutex);
-
-        if (learnCallback != nullptr)
-        {
-            auto callback = learnCallback;
-            juce::MessageManager::callAsync ([callback, status, number] { callback (status, number); });
-
-            std::lock_guard<std::mutex> logLock (logMutex);
-            log.push_front ({ describe (message), "learning" });
-
-            while (log.size() > maxLogEntries)
-                log.pop_back();
-
-            return;
-        }
-    }
+    std::lock_guard<std::mutex> mappingLock (mappingMutex);
 
     const MidiControl* control = nullptr;
 
@@ -432,6 +425,36 @@ void MidiControlSurface::handleIncomingMidiMessage (juce::MidiInput*, const juce
             // which on the DJ-202 is hot cue mode, chosen by nobody.
             if (control != nullptr && control->action == Action::padMode)
                 control = nullptr;
+        }
+    }
+
+    // Learning takes everything but Shift, which has to keep working or there
+    // would be no way to teach it a shifted control.
+    {
+        std::lock_guard<std::mutex> lock (learnMutex);
+
+        if (learner.has_value()
+            && (learner->getTarget().action == Action::shift
+                || control == nullptr || control->action != Action::shift))
+        {
+            lastLearnMessageMs = juce::Time::getMillisecondCounter();
+
+            // valueOf is the note's velocity, and for a pitch bend the high byte,
+            // which is all a learner looks at.
+            if (auto found = learner->feed (status, number, rawValue))
+            {
+                found->requiresShift = dispatcher.isShiftHeld();
+                learned = std::move (found);
+                learner.reset();
+            }
+
+            std::lock_guard<std::mutex> logLock (logMutex);
+            log.push_front ({ describe (message), "learning" });
+
+            while (log.size() > maxLogEntries)
+                log.pop_back();
+
+            return;
         }
     }
 
@@ -500,6 +523,13 @@ float MidiControlSurface::valueFor (const MidiControl& control, int number, int 
                 delta += range;
 
             return static_cast<float> (delta) * (control.inverted ? -1.0f : 1.0f);
+        }
+
+        case ValueMode::pitchBend14:
+        {
+            const auto position = ((rawValue & 0x7F) << 7) | (lowByte & 0x7F);
+            const auto value = position / 16383.0f;
+            return control.inverted ? 1.0f - value : value;
         }
 
         case ValueMode::button:
@@ -583,29 +613,180 @@ void MidiControlSurface::clearLog()
     log.clear();
 }
 
-void MidiControlSurface::startLearning (std::function<void (int, int)> callback)
+void MidiControlSurface::startLearning (const LearnTarget& target)
 {
     std::lock_guard<std::mutex> lock (learnMutex);
-    learnCallback = std::move (callback);
+    learner.emplace (target);
+    learned.reset();
 }
 
-void MidiControlSurface::stopLearning()
+void MidiControlSurface::cancelLearning()
 {
     std::lock_guard<std::mutex> lock (learnMutex);
-    learnCallback = nullptr;
+    learner.reset();
+    learned.reset();
 }
 
 bool MidiControlSurface::isLearning() const
 {
     std::lock_guard<std::mutex> lock (learnMutex);
-    return learnCallback != nullptr;
+    return learner.has_value() || learned.has_value();
+}
+
+void MidiControlSurface::setUserMappingFolder (const juce::File& folder)
+{
+    userMappingFolder = folder;
+}
+
+juce::String MidiControlSurface::takeLearnResult()
+{
+    return std::exchange (learnResult, {});
+}
+
+juce::File MidiControlSurface::fileForMapping (const MidiMapping& mapping) const
+{
+    return userMappingFolder.getChildFile (juce::File::createLegalFileName (mapping.name) + ".json");
+}
+
+void MidiControlSurface::pollLearning()
+{
+    std::optional<MidiControl> finished;
+
+    {
+        std::lock_guard<std::mutex> lock (learnMutex);
+
+        // A knob turned a little and let go never reaches enough messages to
+        // decide by, and letting go is the signal to go with what there is.
+        if (learner.has_value() && learner->hasSeenAnything()
+            && juce::Time::getMillisecondCounter() - lastLearnMessageMs > learnQuietMs)
+        {
+            learned = learner->finish();
+
+            if (learned.has_value())
+                learned->requiresShift = dispatcher.isShiftHeld();
+
+            learner.reset();
+        }
+
+        finished = std::exchange (learned, std::nullopt);
+    }
+
+    if (finished.has_value())
+        applyLearned (std::move (*finished));
+}
+
+void MidiControlSurface::applyLearned (MidiControl control)
+{
+    UndoState undo;
+    undo.previousSelection = selectedMapping;
+
+    juce::String replaced;
+    MidiMapping saved;
+
+    {
+        std::lock_guard<std::mutex> lock (mappingMutex);
+
+        // With no mapping to add to, the controller gets one of its own, named
+        // after it so that it is picked up the next time it is plugged in.
+        if (! juce::isPositiveAndBelow (selectedMapping, static_cast<int> (mappings.size())))
+        {
+            MidiMapping fresh;
+            fresh.name = openDeviceName.isNotEmpty() ? openDeviceName : juce::String ("My controller");
+            fresh.description = "Learned from the hardware in OpenDJ.";
+
+            if (openDeviceName.isNotEmpty())
+                fresh.deviceNameHints.add (openDeviceName);
+
+            // A mapping of that name may be there already and merely not chosen.
+            auto index = -1;
+
+            for (size_t i = 0; i < mappings.size(); ++i)
+                if (mappings[i].name == fresh.name)
+                    index = static_cast<int> (i);
+
+            if (index < 0)
+            {
+                mappings.push_back (std::move (fresh));
+                index = static_cast<int> (mappings.size()) - 1;
+            }
+            else
+            {
+                undo.before = mappings[(size_t) index];
+            }
+
+            selectedMapping = index;
+        }
+        else
+        {
+            undo.before = mappings[(size_t) selectedMapping];
+        }
+
+        auto& mapping = mappings[(size_t) selectedMapping];
+        replaced = mapping.addOrReplace (control);
+        saved = mapping;
+    }
+
+    undoState = std::move (undo);
+    lastFeedbackState.clear();
+
+    learnResult = "Learned " + control.name;
+
+    if (replaced.isNotEmpty() && replaced != control.name)
+        learnResult << ", which was " << replaced;
+
+    if (userMappingFolder == juce::File())
+    {
+        learnResult << ". Not saved: there is nowhere to keep it";
+    }
+    else if (const auto result = saved.saveToFile (fileForMapping (saved)); result.failed())
+    {
+        learnResult << ". Not saved: " << result.getErrorMessage();
+    }
+}
+
+void MidiControlSurface::undoLearn()
+{
+    if (! undoState.has_value())
+        return;
+
+    MidiMapping restored;
+    auto removedFile = juce::File();
+
+    {
+        std::lock_guard<std::mutex> lock (mappingMutex);
+
+        if (! juce::isPositiveAndBelow (selectedMapping, static_cast<int> (mappings.size())))
+            return;
+
+        if (undoState->before.has_value())
+        {
+            mappings[(size_t) selectedMapping] = *undoState->before;
+            restored = *undoState->before;
+        }
+        else
+        {
+            // That learn is what made the mapping, so nothing of it stays.
+            removedFile = fileForMapping (mappings[(size_t) selectedMapping]);
+            mappings.erase (mappings.begin() + selectedMapping);
+        }
+
+        selectedMapping = juce::jmin (undoState->previousSelection, static_cast<int> (mappings.size()) - 1);
+    }
+
+    if (restored.name.isNotEmpty() && userMappingFolder != juce::File())
+        restored.saveToFile (fileForMapping (restored));
+    else if (removedFile != juce::File() && userMappingFolder != juce::File())
+        removedFile.deleteFile();
+
+    undoState.reset();
+    lastFeedbackState.clear();
 }
 
 //==============================================================================
 // Feedback
 //==============================================================================
 
-bool MidiControlSurface::feedbackStateFor (const MidiControl& control) const
+bool feedbackStateFor (const AudioEngine& engine, const ActionDispatcher& dispatcher, const MidiControl& control)
 {
     const auto deckIndex = juce::jlimit (0, AudioEngine::numDecks - 1, control.deck);
     auto& deck = const_cast<AudioEngine&> (engine).getDeck (deckIndex);
@@ -625,6 +806,9 @@ bool MidiControlSurface::feedbackStateFor (const MidiControl& control) const
         case Action::deckKeyLockToggle:
             return deck.isKeyLockEnabled();
 
+        case Action::deckQuantizeToggle:
+            return deck.isQuantizeEnabled();
+
         case Action::loopIn:
         case Action::loopOut:
         case Action::loopToggle:
@@ -634,6 +818,22 @@ bool MidiControlSurface::feedbackStateFor (const MidiControl& control) const
 
         case Action::hotCue:
             return deck.hasHotCue (control.slot);
+
+        case Action::deckStemPad:
+        case Action::deckStemPadToggle:
+            return deck.getStemPad() == control.slot;
+
+        case Action::deckStemFx:
+            return deck.isStemFxEnabled();
+
+        case Action::deckStemFxTarget:
+            return static_cast<int> (deck.getStemFxTarget()) == control.slot;
+
+        case Action::deckStemFxType:
+            return static_cast<int> (deck.getStemFxType()) == control.slot;
+
+        case Action::deckStemFxBeats:
+            return deck.getStemFxBeats() == control.slot;
 
         case Action::channelCue:
         case Action::channelCueToggle:
@@ -652,6 +852,9 @@ bool MidiControlSurface::feedbackStateFor (const MidiControl& control) const
 
         case Action::micTalkover:
             return const_cast<AudioEngine&> (engine).getMic().isTalkoverEnabled();
+
+        case Action::auxToggle:
+            return const_cast<AudioEngine&> (engine).getAux().isEnabled();
 
         default:
             return false;
@@ -673,7 +876,7 @@ void MidiControlSurface::refreshFeedback()
         if (control.feedbackNumber < 0)
             continue;
 
-        const auto state = feedbackStateFor (control);
+        const auto state = feedbackStateFor (engine, dispatcher, control);
         const auto key = (control.status & 0x0F) * 128 + control.feedbackNumber;
 
         if (const auto existing = lastFeedbackState.find (key);
@@ -699,6 +902,7 @@ void MidiControlSurface::timerCallback()
     // Before the lights: a controller that has dropped back into standalone
     // mode is not listening to them anyway.
     sendKeepAlive();
+    pollLearning();
     refreshFeedback();
 }
 

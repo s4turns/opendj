@@ -55,6 +55,13 @@ namespace
     }
 }
 
+namespace
+{
+    /** One press of a grid nudge: small enough to land a kick, five presses
+        to move a whole sixteenth at 128 BPM. */
+    constexpr double gridShiftSeconds = 0.005;
+}
+
 void ActionDispatcher::dispatch (const ActionMessage& message)
 {
     const auto deckIndex = juce::jlimit (0, AudioEngine::numDecks - 1, message.deck);
@@ -114,6 +121,47 @@ void ActionDispatcher::dispatch (const ActionMessage& message)
                 deck.toggleKeyLock();
             break;
 
+        case Action::deckKeyUp:
+            if (pressed)
+                deck.setKeyShift (deck.getKeyShift() + 1);
+            break;
+
+        case Action::deckKeyDown:
+            if (pressed)
+                deck.setKeyShift (deck.getKeyShift() - 1);
+            break;
+
+        case Action::deckKeyReset:
+            if (pressed)
+                deck.setKeyShift (0);
+            break;
+
+        case Action::deckKeyMatch:
+            if (pressed)
+                if (const auto leader = engine.findSyncLeader (deckIndex); leader >= 0)
+                    engine.matchDeckKey (deckIndex, leader);
+            break;
+
+        case Action::deckBrake:
+            if (pressed)
+                deck.brake();
+            break;
+
+        case Action::deckBackspin:
+            if (pressed)
+                deck.backspin();
+            break;
+
+        case Action::deckReverseToggle:
+            if (pressed)
+                deck.toggleReverse();
+            break;
+
+        case Action::deckCensor:
+            // Momentary, like a roll: letting go is what brings the music back.
+            deck.setCensor (pressed);
+            break;
+
         case Action::deckSelect:
             if (pressed && deckSelectHandler != nullptr)
                 deckSelectHandler (deckIndex);
@@ -145,6 +193,18 @@ void ActionDispatcher::dispatch (const ActionMessage& message)
             if (browseScrollHandler != nullptr)
                 browseScrollHandler (juce::roundToInt (message.value));
             notify = false;   // the browser redraws itself
+            break;
+
+        case Action::stemsPrepareSelected:
+            if (pressed && prepareStemsHandler != nullptr)
+                prepareStemsHandler();
+            notify = false;   // the browser's status line follows the queue
+            break;
+
+        case Action::stemsPrepareCancel:
+            if (pressed)
+                engine.cancelStemPreparation();
+            notify = false;
             break;
 
         case Action::deckTempo:
@@ -238,6 +298,41 @@ void ActionDispatcher::dispatch (const ActionMessage& message)
                 deck.reloop();
             break;
 
+        case Action::beatJumpForward:
+            if (pressed)
+                deck.beatJump (loopBeatsForSlot (message.slot));
+            break;
+
+        case Action::beatJumpBack:
+            if (pressed)
+                deck.beatJump (-loopBeatsForSlot (message.slot));
+            break;
+
+        case Action::deckQuantizeToggle:
+            if (pressed)
+                deck.toggleQuantize();
+            break;
+
+        case Action::deckTapTempo:
+            if (pressed)
+                deck.tapTempo (juce::Time::getMillisecondCounterHiRes() * 0.001);
+            break;
+
+        case Action::gridDownbeatHere:
+            if (pressed)
+                deck.setDownbeatHere();
+            break;
+
+        case Action::gridShiftEarlier:
+            if (pressed)
+                deck.shiftGrid (-gridShiftSeconds);
+            break;
+
+        case Action::gridShiftLater:
+            if (pressed)
+                deck.shiftGrid (gridShiftSeconds);
+            break;
+
         case Action::hotCueClear:
             if (pressed)
                 deck.clearHotCue (message.slot);
@@ -296,21 +391,73 @@ void ActionDispatcher::dispatch (const ActionMessage& message)
             }
             break;
 
+        case Action::deckStemPad:
+            // Momentary, like the channel cue: the slot is not clamped, because
+            // a pad that does not exist should do nothing, not act as the last.
+            deck.holdStemPad (message.slot, pressed);
+            break;
+
+        case Action::deckStemPadToggle:
+            if (pressed)
+                deck.toggleStemPad (message.slot);
+            break;
+
+        case Action::deckStemFx:
+            if (pressed)
+                deck.toggleStemFx();
+            break;
+
+        // The slots are not clamped, for the same reason the pads' are not: a
+        // choice that does not exist should do nothing, not act as the last.
+        case Action::deckStemFxTarget:
+            if (pressed)
+                deck.setStemFxTarget (static_cast<Stem> (message.slot));
+            break;
+
+        case Action::deckStemFxType:
+            if (pressed)
+                deck.setStemFxType (static_cast<StemEffect::Type> (message.slot));
+            break;
+
+        case Action::deckStemFxBeats:
+            if (pressed)
+                deck.setStemFxBeats (message.slot);
+            break;
+
+        case Action::deckStemFxAmount:
+            deck.setStemFxAmount (message.value);
+            break;
+
         case Action::samplerTrigger:
             // Shift turns a pad into its own stop button, which is the only way
             // to end a looping slot on hardware with one row of pads.
+            // The slot is a pad of the bank on show, as on any controller
+            // with one row of pads and a bank button.
             if (pressed)
             {
+                auto& sampler = engine.getSampler();
+                const auto slot = sampler.slotForPad (message.slot);
+
                 if (shiftHeld.load (std::memory_order_relaxed))
-                    engine.getSampler().stop (message.slot);
+                    sampler.stop (slot);
                 else
-                    engine.getSampler().trigger (message.slot);
+                    sampler.trigger (slot);
             }
             break;
 
         case Action::samplerStop:
             if (pressed)
-                engine.getSampler().stop (message.slot);
+                engine.getSampler().stop (engine.getSampler().slotForPad (message.slot));
+            break;
+
+        case Action::samplerBank:
+            if (pressed)
+                engine.getSampler().setBank (message.slot);
+            break;
+
+        case Action::samplerNextBank:
+            if (pressed)
+                engine.getSampler().setBank ((engine.getSampler().getBank() + 1) % Sampler::numBanks);
             break;
 
         case Action::samplerGain:
@@ -331,6 +478,15 @@ void ActionDispatcher::dispatch (const ActionMessage& message)
                 engine.getMic().setTalkover (! engine.getMic().isTalkoverEnabled());
             break;
 
+        case Action::auxToggle:
+            if (pressed)
+                engine.getAux().setEnabled (! engine.getAux().isEnabled());
+            break;
+
+        case Action::auxGain:
+            engine.getAux().setGain (message.value * 2.0f);
+            break;
+
         case Action::channelFilter:
             mixer.setChannelFilter (deckIndex, message.value);
             break;
@@ -341,6 +497,16 @@ void ActionDispatcher::dispatch (const ActionMessage& message)
 
         case Action::channelReverb:
             mixer.setChannelReverb (deckIndex, message.value);
+            break;
+
+        case Action::channelEchoOutToggle:
+            if (pressed)
+                mixer.setChannelEchoOut (deckIndex, ! mixer.isChannelEchoOut (deckIndex));
+            break;
+
+        case Action::autoGainToggle:
+            if (pressed)
+                engine.setAutoGainEnabled (! engine.isAutoGainEnabled());
             break;
 
         case Action::channelFxSelect:

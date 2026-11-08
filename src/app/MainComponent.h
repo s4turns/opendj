@@ -107,6 +107,10 @@ private:
     void stepWaveformZoom (int steps);
     void applyWaveformZoom();
 
+    /** What a press of the prepare action means: the whole playlist on show, or
+        the library's selection. */
+    void prepareStemsForListOnShow();
+
     /** Swaps one side for the deck behind it. */
     void swapSide (int side);
 
@@ -157,6 +161,9 @@ private:
     juce::Array<juce::File> findTextureFolders() const;
 
     void loadOntoDeck (const juce::File& file, int deckIndex);
+    /** Where the user's own files of a kind go, whether it exists yet or not. */
+    juce::File userDataFolder (const juce::String& name) const;
+
     /** Every folder that may hold a kind of data file -- "mappings", or
         "presets" for the visualiser -- in precedence order: the user's own
         under their data home, then beside the executable while developing,
@@ -206,6 +213,7 @@ private:
     std::unique_ptr<MasterFxComponent> masterFxView;
     std::unique_ptr<SamplerComponent> samplerView;
     std::unique_ptr<MicComponent> micView;
+    std::unique_ptr<MicComponent> auxView;
 
     juce::StretchableLayoutManager verticalLayout;
     std::unique_ptr<juce::StretchableLayoutResizerBar> resizerBar;

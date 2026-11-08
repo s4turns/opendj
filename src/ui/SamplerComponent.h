@@ -16,7 +16,8 @@ namespace opendj
 
 {
 
-/** A row of eight pads with a level beside them.
+/** A row of eight pads with a level beside them, and a bank button that puts
+    each of the four banks on the pads in turn.
 
     Loading is where a sampler is either usable or not, so there are three ways
     in: click an empty pad, drop a file on any pad, or take Load from the pad's
@@ -56,14 +57,20 @@ private:
         bool loaded = false;
         bool playing = false;
         bool looping = false;
+        bool synced = false;
     };
 
     void timerCallback() override;
 
-    void padClicked (int slot, const juce::MouseEvent& e);
-    void showPadMenu (int slot);
+    // Pads are numbered 0 to 7 on screen; the slot behind each depends on
+    // the bank, which is the sampler's, so a controller and the screen agree.
+    int slotOf (int pad) const noexcept { return engine.getSampler().slotForPad (pad); }
+
+    void padClicked (int pad, const juce::MouseEvent& e);
+    void showPadMenu (int pad);
     void chooseFileFor (int slot);
     void loadInto (int slot, const juce::File& file);
+    void recordInto (int slot, int deck, double beats);
 
     /** Which pad a point is over, or -1. Used by the file drop. */
     int padAt (juce::Point<int> position) const;
@@ -71,7 +78,8 @@ private:
     AudioEngine& engine;
 
     juce::Label heading;
-    std::array<Pad, Sampler::numSlots> pads;
+    std::array<Pad, Sampler::numPads> pads;
+    juce::TextButton bankButton;
     juce::Slider level;
     juce::Label levelLabel;
     juce::TextButton cueButton { "Cue" };

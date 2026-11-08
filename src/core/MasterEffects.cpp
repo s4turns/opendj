@@ -33,6 +33,38 @@ namespace
     // From a gentle slope to a sweep that sings, without reaching the whistle
     // a filter left at the end of its travel would otherwise make.
     float resonanceFor (float normalised) noexcept  { return 0.5f + 4.5f * juce::jlimit (0.0f, 1.0f, normalised); }
+
+    // Both sweeps mix half and half at full wet, which is where the notches are
+    // deepest, and keep their feedback well under one so a notch cannot sing.
+    constexpr float sweepFeedbackLimit = 0.7f;
+
+    constexpr float flangerShortestMs = 0.5f;
+    constexpr float flangerLongestMs = 6.0f;
+
+    constexpr float phaserLowestHz = 200.0f;
+    constexpr float phaserHighestHz = 4000.0f;
+    constexpr int phaserUpdateSamples = 16;     // the coefficient does not need every sample
+
+    // Fast enough to chop, slow enough not to click on each edge.
+    constexpr double gateEdgeSeconds = 0.003;
+
+    float crushBitsFor (float normalised) noexcept      { return 16.0f - 14.0f * juce::jlimit (0.0f, 1.0f, normalised); }
+    double crushHoldFor (float normalised) noexcept     { return std::pow (40.0, (double) juce::jlimit (0.0f, 1.0f, normalised)); }
+
+    // The dip at each end of a repeat, so that a slice cut mid waveform does
+    // not tick every time it comes round.
+    constexpr double stutterEdgeSeconds = 0.002;
+
+    double wrapBeat (double beats) noexcept
+    {
+        const auto wrapped = std::fmod (beats, MasterEffects::beatCycle);
+        return wrapped < 0.0 ? wrapped + MasterEffects::beatCycle : wrapped;
+    }
+
+    float sweepShape (double phase) noexcept
+    {
+        return 0.5f - 0.5f * (float) std::cos (juce::MathConstants<double>::twoPi * phase);
+    }
 }
 
 //==============================================================================
@@ -45,6 +77,11 @@ juce::String MasterEffects::getTypeName (Type type)
         case Type::reverb: return "Reverb";
         case Type::filter: return "Filter";
         case Type::plugin: return "Plugin";
+        case Type::flanger:    return "Flanger";
+        case Type::phaser:     return "Phaser";
+        case Type::gate:       return "Gate";
+        case Type::bitcrusher: return "Bitcrusher";
+        case Type::stutter:    return "Stutter";
     }
 
     return {};
@@ -57,7 +94,12 @@ juce::String MasterEffects::getParamName (Type type, int param)
         { "Beats",  "Feedback" },
         { "Size",   "Damping" },
         { "Cutoff", "Resonance" },
-        { "P1",     "P2" }
+        { "P1",     "P2" },
+        { "Beats",  "Feedback" },
+        { "Beats",  "Depth" },
+        { "Beats",  "Width" },
+        { "Bits",   "Hold" },
+        { "Beats",  "Decay" }
     };
 
     return isValidParam (param) ? names[indexOf (type)][param] : "";
@@ -79,6 +121,32 @@ juce::String MasterEffects::echoDivisionName (int index)
 {
     static const char* const names[] { "1/8", "1/4", "1/2", "1", "2", "4" };
     return names[juce::jlimit (0, (int) echoDivisions.size() - 1, index)];
+}
+
+juce::String MasterEffects::getDivisionText (Type type, int param, float normalised)
+{
+    if (param != 0)
+        return {};
+
+    switch (type)
+    {
+        case Type::echo:
+        case Type::gate:
+        case Type::stutter:
+            return echoDivisionName (echoDivisionIndexFor (normalised));
+
+        case Type::flanger:
+        case Type::phaser:
+            return juce::String (sweepDivisions[(size_t) echoDivisionIndexFor (normalised)], 0);
+
+        case Type::reverb:
+        case Type::filter:
+        case Type::plugin:
+        case Type::bitcrusher:
+            break;
+    }
+
+    return {};
 }
 
 //==============================================================================
@@ -134,10 +202,17 @@ MasterEffects::Type MasterEffects::getType (int slot) const noexcept
 
 void MasterEffects::stepType (int slot)
 {
-    auto next = (Type) (((int) getType (slot) + 1) % numTypes);
+    const auto current = getType (slot);
+    size_t place = 0;
+
+    for (size_t i = 0; i < menuOrder.size(); ++i)
+        if (menuOrder[i] == current)
+            place = i;
+
+    auto next = menuOrder[(place + 1) % menuOrder.size()];
 
     if (next == Type::plugin && getPlugin (slot) == nullptr)
-        next = (Type) (((int) next + 1) % numTypes);
+        next = menuOrder[(place + 2) % menuOrder.size()];
 
     setType (slot, next);
 }
@@ -205,6 +280,11 @@ float MasterEffects::getParamFor (int slot, Type type, int param) const noexcept
 void MasterEffects::setBeatSeconds (double seconds)
 {
     beatSeconds.store (seconds > 0.0 ? seconds : 0.5, std::memory_order_relaxed);
+}
+
+void MasterEffects::setBeatPosition (double beats)
+{
+    beatPositionHint.store (wrapBeat (beats), std::memory_order_relaxed);
 }
 
 double MasterEffects::getEchoSeconds (int slot) const noexcept
@@ -342,10 +422,20 @@ void MasterEffects::Slot::prepare (const juce::dsp::ProcessSpec& spec)
     filterLowCutoff.reset (spec.sampleRate, smoothingSeconds);
     filterHighCutoff.reset (spec.sampleRate, smoothingSeconds);
     filterResonance.reset (spec.sampleRate, smoothingSeconds);
-    filterLowCutoff.setCurrentAndTargetValue (filterOpenLow);
-    filterHighCutoff.setCurrentAndTargetValue (filterOpenHigh);
-    filterLow.setCutoffFrequency (filterOpenLow);
-    filterHigh.setCutoffFrequency (filterOpenHigh);
+    const auto openLow = lowPassCutoffFor (0.5f, spec.sampleRate);
+    const auto openHigh = highPassCutoffFor (0.5f, spec.sampleRate);
+    filterLowCutoff.setCurrentAndTargetValue (openLow);
+    filterHighCutoff.setCurrentAndTargetValue (openHigh);
+    filterLow.setCutoffFrequency (openLow);
+    filterHigh.setCutoffFrequency (openHigh);
+
+    flangerLine.setMaximumDelayInSamples (juce::jmax (4, (int) (flangerLongestMs * 0.002 * spec.sampleRate)));
+    flangerLine.prepare (spec);
+
+    gateGain.reset (spec.sampleRate, gateEdgeSeconds);
+    gateGain.setCurrentAndTargetValue (1.0f);
+
+    stutterRing.setSize (2, juce::jmax (64, (int) (maxEchoSeconds * spec.sampleRate)), false, true, false);
 
     typeGain.reset (spec.sampleRate, typeFadeSeconds);
     typeGain.setCurrentAndTargetValue (1.0f);
@@ -368,6 +458,27 @@ void MasterEffects::Slot::reset()
     filterLow.reset();
     filterHigh.reset();
     dryDelay.reset();
+
+    flangerLine.reset();
+    flangerDelayNow[0] = flangerDelayNow[1] = 0.0f;
+
+    for (int ch = 0; ch < 2; ++ch)
+    {
+        phaserLast[ch] = 0.0f;
+        phaserCoefficient[ch] = 0.0f;
+
+        for (int stage = 0; stage < phaserStages; ++stage)
+            phaserIn[ch][stage] = phaserOut[ch][stage] = 0.0f;
+    }
+
+    phaserCountdown = 0;
+    crushHeld[0] = crushHeld[1] = 0.0f;
+    crushCounter = 0.0;
+
+    stutterRing.clear();
+    stutterWrite = stutterStart = stutterLength = stutterOffset = 0;
+    stutterGain = 1.0f;
+    stutterHeld = false;
 }
 
 void MasterEffects::prepare (const juce::dsp::ProcessSpec& spec)
@@ -417,9 +528,28 @@ void MasterEffects::process (juce::AudioBuffer<float>& buffer, int numSamples)
     // through in pieces the scratch buffers can hold, rather than read past.
     const auto chunk = slots[0].scratch.getNumSamples();
 
+    if (const auto hint = beatPositionHint.exchange (-1.0, std::memory_order_relaxed); hint >= 0.0)
+    {
+        // The shortest way round the cycle. A sliver is timing jitter between
+        // the threads and is eased out so it can never be heard; anything larger
+        // is a seek, and the effect should simply be where the music now is.
+        const auto error = wrapBeat (hint - beatClock + beatCycle * 0.5) - beatCycle * 0.5;
+        beatClock = wrapBeat (beatClock + (std::abs (error) > 0.25 ? error : error * 0.25));
+    }
+
+    const auto beatsPerSample = 1.0 / (getBeatSeconds() * sampleRate);
+
     for (int start = 0; start < numSamples; start += chunk)
+    {
+        const auto length = juce::jmin (chunk, numSamples - start);
+
         for (auto& slot : slots)
-            processSlot (slot, buffer, start, juce::jmin (chunk, numSamples - start));
+            processSlot (slot, buffer, start, length);
+
+        beatClock = wrapBeat (beatClock + length * beatsPerSample);
+    }
+
+    beatClockForUi.store (beatClock, std::memory_order_relaxed);
 }
 
 bool MasterEffects::swapPluginIfPossible (Slot& slot)
@@ -578,8 +708,8 @@ void MasterEffects::processSlot (Slot& slot, juce::AudioBuffer<float>& buffer, i
 
         case Type::filter:
         {
-            slot.filterLowCutoff.setTargetValue (lowPassCutoffFor (p0));
-            slot.filterHighCutoff.setTargetValue (highPassCutoffFor (p0));
+            slot.filterLowCutoff.setTargetValue (lowPassCutoffFor (p0, sampleRate));
+            slot.filterHighCutoff.setTargetValue (highPassCutoffFor (p0, sampleRate));
             slot.filterResonance.setTargetValue (resonanceFor (p1));
 
             for (int i = 0; i < numSamples; ++i)
@@ -608,6 +738,205 @@ void MasterEffects::processSlot (Slot& slot, juce::AudioBuffer<float>& buffer, i
                     channels[ch][i] = dry + (filtered - dry) * mix;
                 }
             }
+            break;
+        }
+
+        case Type::flanger:
+        {
+            const auto sweepBeats = sweepDivisions[(size_t) echoDivisionIndexFor (p0)];
+            const auto feedback = juce::jlimit (0.0f, 1.0f, p1) * sweepFeedbackLimit;
+            const auto beatsPerSample = 1.0 / (getBeatSeconds() * sampleRate);
+            const auto msToSamples = (float) (sampleRate * 0.001);
+            float* channels[] { left, right };
+
+            for (int i = 0; i < numSamples; ++i)
+            {
+                const auto mix = slot.wetGain.getNextValue() * slot.send.getNextValue()
+                               * slot.typeGain.getNextValue();
+                const auto phase = (beatClock + i * beatsPerSample) / sweepBeats;
+
+                for (int ch = 0; ch < 2; ++ch)
+                {
+                    // A quarter of a sweep apart, which is what makes it move
+                    // across the stereo field rather than only up and down.
+                    const auto sweep = sweepShape (phase + (ch == 1 ? 0.25 : 0.0));
+                    const auto target = (flangerShortestMs + (flangerLongestMs - flangerShortestMs) * sweep) * msToSamples;
+
+                    // Eased, so that a seek moving the clock cannot jump the
+                    // delay and click.
+                    slot.flangerDelayNow[ch] += (target - slot.flangerDelayNow[ch]) * 0.01f;
+
+                    const auto dry = channels[ch][i];
+                    const auto delayed = slot.flangerLine.popSample (ch, slot.flangerDelayNow[ch]);
+                    slot.flangerLine.pushSample (ch, dry + delayed * feedback);
+                    channels[ch][i] = dry + (delayed - dry) * 0.5f * mix;
+                }
+            }
+            break;
+        }
+
+        case Type::phaser:
+        {
+            const auto sweepBeats = sweepDivisions[(size_t) echoDivisionIndexFor (p0)];
+            const auto feedback = juce::jlimit (0.0f, 1.0f, p1) * sweepFeedbackLimit;
+            const auto beatsPerSample = 1.0 / (getBeatSeconds() * sampleRate);
+            const auto highest = juce::jmin (phaserHighestHz, (float) (sampleRate * 0.45));
+            float* channels[] { left, right };
+
+            for (int i = 0; i < numSamples; ++i)
+            {
+                if (--slot.phaserCountdown <= 0)
+                {
+                    slot.phaserCountdown = phaserUpdateSamples;
+                    const auto phase = (beatClock + i * beatsPerSample) / sweepBeats;
+
+                    for (int ch = 0; ch < 2; ++ch)
+                    {
+                        const auto sweep = sweepShape (phase + (ch == 1 ? 0.25 : 0.0));
+                        const auto hz = phaserLowestHz * std::pow (highest / phaserLowestHz, sweep);
+                        const auto t = (float) std::tan (juce::MathConstants<double>::pi * hz / sampleRate);
+                        slot.phaserCoefficient[ch] = (t - 1.0f) / (t + 1.0f);
+                    }
+                }
+
+                const auto mix = slot.wetGain.getNextValue() * slot.send.getNextValue()
+                               * slot.typeGain.getNextValue();
+
+                for (int ch = 0; ch < 2; ++ch)
+                {
+                    const auto dry = channels[ch][i];
+                    const auto a = slot.phaserCoefficient[ch];
+                    auto y = dry + slot.phaserLast[ch] * feedback;
+
+                    for (int stage = 0; stage < Slot::phaserStages; ++stage)
+                    {
+                        const auto output = a * y + slot.phaserIn[ch][stage] - a * slot.phaserOut[ch][stage];
+                        slot.phaserIn[ch][stage] = y;
+                        slot.phaserOut[ch][stage] = output;
+                        y = output;
+                    }
+
+                    slot.phaserLast[ch] = y;
+                    channels[ch][i] = dry + (y - dry) * 0.5f * mix;
+                }
+            }
+            break;
+        }
+
+        case Type::gate:
+        {
+            const auto beats = echoDivisions[(size_t) echoDivisionIndexFor (p0)];
+            const auto openFor = 0.1 + 0.8 * (double) juce::jlimit (0.0f, 1.0f, p1);
+            const auto beatsPerSample = 1.0 / (getBeatSeconds() * sampleRate);
+            float* channels[] { left, right };
+
+            for (int i = 0; i < numSamples; ++i)
+            {
+                // Measured from the beat grid, so that the chop lands with the
+                // music, whatever moment the button happened to be pressed.
+                const auto inCycle = std::fmod (beatClock + i * beatsPerSample, beats) / beats;
+                slot.gateGain.setTargetValue (inCycle < openFor ? 1.0f : 0.0f);
+
+                const auto mix = slot.wetGain.getNextValue() * slot.send.getNextValue()
+                               * slot.typeGain.getNextValue();
+                const auto gain = 1.0f + (slot.gateGain.getNextValue() - 1.0f) * mix;
+
+                channels[0][i] *= gain;
+                channels[1][i] *= gain;
+            }
+            break;
+        }
+
+        case Type::bitcrusher:
+        {
+            const auto steps = std::pow (2.0f, crushBitsFor (p0) - 1.0f);
+            const auto hold = crushHoldFor (p1);
+            float* channels[] { left, right };
+
+            for (int i = 0; i < numSamples; ++i)
+            {
+                const auto mix = slot.wetGain.getNextValue() * slot.send.getNextValue()
+                               * slot.typeGain.getNextValue();
+
+                slot.crushCounter += 1.0;
+                const auto take = slot.crushCounter >= hold;
+
+                if (take)
+                    slot.crushCounter -= hold;
+
+                for (int ch = 0; ch < 2; ++ch)
+                {
+                    const auto dry = channels[ch][i];
+
+                    if (take)
+                        slot.crushHeld[ch] = std::round (dry * steps) / steps;
+
+                    channels[ch][i] = dry + (slot.crushHeld[ch] - dry) * mix;
+                }
+            }
+            break;
+        }
+
+        case Type::stutter:
+        {
+            const auto ringLength = slot.stutterRing.getNumSamples();
+            const auto beats = echoDivisions[(size_t) echoDivisionIndexFor (p0)];
+            const auto wanted = juce::jlimit (64, ringLength, (int) (beats * getBeatSeconds() * sampleRate));
+            const auto perRepeat = 1.0f - 0.5f * juce::jlimit (0.0f, 1.0f, p1);
+            const auto edge = juce::jmax (1.0f, (float) (stutterEdgeSeconds * sampleRate));
+            const auto on = slot.enabled.load (std::memory_order_relaxed);
+            float* channels[] { left, right };
+            float* ring[] { slot.stutterRing.getWritePointer (0), slot.stutterRing.getWritePointer (1) };
+
+            // What has just played, taken the moment the button goes down, so
+            // that it answers at once instead of a slice later.
+            const auto takeSlice = [&]
+            {
+                slot.stutterLength = wanted;
+                slot.stutterStart = (slot.stutterWrite - wanted + ringLength) % ringLength;
+                slot.stutterOffset = 0;
+            };
+
+            if (on && ! slot.stutterHeld)
+            {
+                slot.stutterHeld = true;
+                slot.stutterGain = 1.0f;
+                takeSlice();
+            }
+
+            for (int i = 0; i < numSamples; ++i)
+            {
+                const auto mix = slot.wetGain.getNextValue() * slot.send.getNextValue()
+                               * slot.typeGain.getNextValue();
+
+                if (slot.stutterHeld)
+                {
+                    const auto fromEnd = (float) juce::jmin (slot.stutterOffset, slot.stutterLength - 1 - slot.stutterOffset);
+                    const auto level = juce::jmin (1.0f, fromEnd / edge) * slot.stutterGain;
+                    const auto at = (slot.stutterStart + slot.stutterOffset) % ringLength;
+
+                    for (int ch = 0; ch < 2; ++ch)
+                        channels[ch][i] += (ring[ch][at] * level - channels[ch][i]) * mix;
+
+                    if (++slot.stutterOffset >= slot.stutterLength)
+                    {
+                        // A change of length takes effect as the slice comes round.
+                        slot.stutterGain *= perRepeat;
+                        takeSlice();
+                    }
+                }
+                else
+                {
+                    ring[0][slot.stutterWrite] = channels[0][i];
+                    ring[1][slot.stutterWrite] = channels[1][i];
+                    slot.stutterWrite = (slot.stutterWrite + 1) % ringLength;
+                }
+            }
+
+            // Let go only once the level has come all the way back to the dry.
+            if (! on && slot.stutterHeld && ! slot.send.isSmoothing())
+                slot.stutterHeld = false;
+
             break;
         }
 

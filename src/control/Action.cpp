@@ -17,7 +17,7 @@ namespace
 
     // One table, read in both directions, so a name can never disagree with
     // itself between the parser and the writer.
-    constexpr std::array<Entry, 58> actionNames
+    constexpr std::array<Entry, 88> actionNames
     {{
         { Action::deckPlayToggle,   "deck.play_toggle" },
         { Action::deckPlay,         "deck.play" },
@@ -27,6 +27,14 @@ namespace
         { Action::deckLoadSelected, "deck.load" },
         { Action::deckKeyLockToggle, "deck.keylock_toggle" },
         { Action::deckSlipToggle,   "deck.slip_toggle" },
+        { Action::deckKeyUp,        "deck.key_up" },
+        { Action::deckKeyDown,      "deck.key_down" },
+        { Action::deckKeyReset,     "deck.key_reset" },
+        { Action::deckKeyMatch,     "deck.key_match" },
+        { Action::deckBrake,        "deck.brake" },
+        { Action::deckBackspin,     "deck.backspin" },
+        { Action::deckReverseToggle, "deck.reverse_toggle" },
+        { Action::deckCensor,       "deck.censor" },
         { Action::deckSelect,       "deck.select" },
         { Action::deckSwap,         "deck.swap" },
         { Action::deckTempo,        "deck.tempo" },
@@ -34,6 +42,13 @@ namespace
         { Action::deckSeek,         "deck.seek" },
         { Action::deckStem,         "deck.stem" },
         { Action::deckStemToggle,   "deck.stem_toggle" },
+        { Action::deckStemPad,      "deck.stem_pad" },
+        { Action::deckStemPadToggle, "deck.stem_pad_toggle" },
+        { Action::deckStemFx,       "deck.stem_fx" },
+        { Action::deckStemFxTarget, "deck.stem_fx_target" },
+        { Action::deckStemFxType,   "deck.stem_fx_type" },
+        { Action::deckStemFxBeats,  "deck.stem_fx_beats" },
+        { Action::deckStemFxAmount, "deck.stem_fx_amount" },
         { Action::jogTouch,         "jog.touch" },
         { Action::jogTurn,          "jog.turn" },
         { Action::hotCue,           "pad.hotcue" },
@@ -48,6 +63,13 @@ namespace
         { Action::loopHalve,        "loop.halve" },
         { Action::loopDouble,       "loop.double" },
         { Action::loopReloop,       "loop.reloop" },
+        { Action::beatJumpForward,  "deck.beatjump_forward" },
+        { Action::beatJumpBack,     "deck.beatjump_back" },
+        { Action::deckQuantizeToggle, "deck.quantize_toggle" },
+        { Action::deckTapTempo,     "deck.tap_tempo" },
+        { Action::gridDownbeatHere, "grid.downbeat_here" },
+        { Action::gridShiftEarlier, "grid.shift_earlier" },
+        { Action::gridShiftLater,   "grid.shift_later" },
         { Action::channelFader,     "mixer.fader" },
         { Action::channelEq,        "mixer.eq" },
         { Action::channelCueToggle, "mixer.cue_toggle" },
@@ -55,6 +77,8 @@ namespace
         { Action::channelFilter,    "mixer.filter" },
         { Action::channelEcho,      "mixer.echo" },
         { Action::channelReverb,    "mixer.reverb" },
+        { Action::channelEchoOutToggle, "mixer.echo_out_toggle" },
+        { Action::autoGainToggle,   "mixer.auto_gain_toggle" },
         { Action::channelFxSelect,  "mixer.fx_select" },
         { Action::channelFxDepth,   "mixer.fx_depth" },
         { Action::channelCrossfaderAssign, "mixer.crossfader_assign" },
@@ -70,12 +94,18 @@ namespace
         { Action::masterFxNextType, "master_fx.next_type" },
         { Action::samplerTrigger,   "sampler.trigger" },
         { Action::samplerStop,      "sampler.stop" },
+        { Action::samplerBank,      "sampler.bank" },
+        { Action::samplerNextBank,  "sampler.next_bank" },
         { Action::samplerGain,      "sampler.gain" },
         { Action::micToggle,        "mic.toggle" },
         { Action::micGain,          "mic.gain" },
         { Action::micTalkover,      "mic.talkover" },
+        { Action::auxToggle,        "aux.toggle" },
+        { Action::auxGain,          "aux.gain" },
         { Action::deckWaveformZoom, "deck.waveform_zoom" },
         { Action::browseScroll,     "browse.scroll" },
+        { Action::stemsPrepareSelected, "stems.prepare_selected" },
+        { Action::stemsPrepareCancel, "stems.prepare_cancel" },
         { Action::shift,            "modifier.shift" }
     }};
 }
@@ -108,6 +138,72 @@ double loopBeatsForSlot (int slot)
     return lengths[juce::jlimit (0, count - 1, slot)];
 }
 
+bool actionTakesDeck (Action action)
+{
+    switch (action)
+    {
+        case Action::none:
+        case Action::shift:
+        case Action::deckSwap:
+        case Action::deckWaveformZoom:
+        case Action::crossfader:
+        case Action::masterGain:
+        case Action::cueGain:
+        case Action::cueMix:
+        case Action::autoGainToggle:
+        case Action::samplerTrigger:
+        case Action::samplerStop:
+        case Action::samplerBank:
+        case Action::samplerNextBank:
+        case Action::samplerGain:
+        case Action::micToggle:
+        case Action::micGain:
+        case Action::micTalkover:
+        case Action::auxToggle:
+        case Action::auxGain:
+        case Action::browseScroll:
+        case Action::stemsPrepareSelected:
+        case Action::stemsPrepareCancel:
+            return false;
+
+        default:
+            return true;
+    }
+}
+
+bool actionTakesSlot (Action action)
+{
+    switch (action)
+    {
+        case Action::deckStem:
+        case Action::deckStemToggle:
+        case Action::deckStemPad:
+        case Action::deckStemPadToggle:
+        case Action::deckStemFxTarget:
+        case Action::deckStemFxType:
+        case Action::deckStemFxBeats:
+        case Action::hotCue:
+        case Action::hotCueClear:
+        case Action::padLoop:
+        case Action::loopBeats:
+        case Action::loopRoll:
+        case Action::beatJumpForward:
+        case Action::beatJumpBack:
+        case Action::channelEq:
+        case Action::channelFxSelect:
+        case Action::channelCrossfaderAssign:
+        case Action::masterFxParam:
+        case Action::masterFxType:
+        case Action::samplerTrigger:
+        case Action::samplerStop:
+        case Action::samplerBank:
+            return true;
+
+        default:
+            return false;
+    }
+}
+
 bool isContinuous (Action action)
 {
     switch (action)
@@ -116,6 +212,7 @@ bool isContinuous (Action action)
         case Action::deckTrim:
         case Action::deckSeek:
         case Action::deckStem:
+        case Action::deckStemFxAmount:
         case Action::jogTurn:
         case Action::channelFader:
         case Action::channelEq:
@@ -131,6 +228,7 @@ bool isContinuous (Action action)
         case Action::masterFxParam:
         case Action::samplerGain:
         case Action::micGain:
+        case Action::auxGain:
         case Action::padMode:       // a code carried in the velocity, not a press
         case Action::deckWaveformZoom:
         case Action::browseScroll:

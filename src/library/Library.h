@@ -40,6 +40,12 @@ struct TrackRecord
     juce::int64 fileSize = 0;
     juce::int64 fileModified = 0;   ///< milliseconds since the epoch
 
+    // What a person said about the track, rather than what the file or the
+    // analyser did. Set with setTrackDetails(); upsertTrack() leaves them be.
+    int rating = 0;                 ///< 0 to 5 stars, 0 unrated
+    juce::uint32 colour = 0;        ///< ARGB, 0 for none
+    juce::String comment;
+
     /** Title, or the file name when there is none. */
     juce::String displayTitle() const;
 };
@@ -135,6 +141,30 @@ public:
     int countTracks() const;
     int countAnalysed() const;
 
+    /** Rating, colour and comment for a track already in the library. */
+    bool setTrackDetails (const juce::File& file, int rating, juce::uint32 colour, const juce::String& comment);
+
+    //==========================================================================
+    // Hot cues
+    //
+    // By path, like playlists, so a rescan that drops and re-adds a file does
+    // not lose them. They are kept when the file's tags change, since a cue is
+    // a place in the audio and editing a title does not move it.
+    //==========================================================================
+
+    /** A track's integrated loudness in LUFS, 0 when it has not been measured.
+        Separate from the record, like the hot cues, because a person can edit
+        everything else about a track and nothing can edit this. */
+    double getLoudness (const juce::File& file) const;
+    bool setLoudness (const juce::File& file, double lufs);
+    void storeLoudness (const juce::File& file, double lufs) override { setLoudness (file, lufs); }
+
+    HotCues getHotCues (const juce::File& file) const;
+    bool setHotCues (const juce::File& file, const HotCues& cues);
+
+    HotCueNames getHotCueNames (const juce::File& file) override;
+    void setHotCueName (const juce::File& file, int slot, double seconds, const juce::String& name) override;
+
     //==========================================================================
     // Playlists
     //
@@ -165,6 +195,8 @@ public:
 
     std::optional<KnownTrack> lookup (const juce::File& file) override;
     void store (const juce::File& file, const TrackAnalysis& analysis, double durationSeconds) override;
+    void storeHotCues (const juce::File& file, const HotCues& cues) override;
+    void storeBeatGrid (const juce::File& file, double bpm, double firstBeatSeconds) override;
 
 private:
     class Statement;
@@ -173,6 +205,9 @@ private:
     std::vector<juce::File> readPlaylistFiles (juce::int64 id) const;
     bool writePlaylistFiles (juce::int64 id, const std::vector<juce::File>& files);
     juce::Result createSchema();
+    bool addColumnIfMissing (const char* table, const char* column, const char* definition);
+    HotCues readHotCues (const juce::File& file) const;
+    HotCueNames readHotCueNames (const juce::File& file) const;
     static TrackRecord recordFromRow (Statement& statement);
     static bool isFileUnchanged (const TrackRecord& record, const juce::File& file);
     void changed();

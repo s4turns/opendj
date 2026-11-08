@@ -1,5 +1,6 @@
 # Build output
 build/
+build-macos/
 out/
 cmake-build-*/
 _deps/

@@ -14,18 +14,23 @@
 namespace opendj
 {
 
-/** The mic's strip, at the end of the sampler row: on, level, a meter,
-    talkover, and whether the speakers hear it.
+/** A strip for one of the device's inputs, at the end of the sampler row:
+    on, level, a meter, which pair of inputs it reads, and whether the
+    speakers hear it. The mic's strip also has talkover; the aux strip, for a
+    stereo line such as browser audio, does not.
 
     On is the one control here that matters in the middle of a set, so it turns
-    red while the mic is live. Everything reads the engine back on a timer,
+    red while the input is live. Everything reads the engine back on a timer,
     because a controller can change it too.
 */
 class MicComponent final : public juce::Component,
                            private juce::Timer
 {
 public:
-    explicit MicComponent (AudioEngine& engineToUse);
+    MicComponent (AudioEngine& engineToUse, MicInput& inputToShow, const juce::String& title);
+
+    /** The width the strip needs to show all of its controls. */
+    int getPreferredWidth() const noexcept;
     ~MicComponent() override;
 
     void paint (juce::Graphics& g) override;
@@ -49,13 +54,20 @@ private:
     /** Brings every control into line with the engine without firing it. */
     void updateControls();
 
+    /** Steps on to the next pair the device offers, round to the first. */
+    void nextInputPair();
+
     AudioEngine& engine;
+    MicInput& input;
+    const juce::String name;
+    const bool hasTalkover;
 
     juce::Label heading;
     juce::TextButton onButton { "On" };
     juce::Slider level;
     juce::Label levelLabel;
     Meter meter;
+    juce::TextButton inputButton;
     juce::TextButton talkoverButton { "Talkover" };
     juce::TextButton routingButton { "Everywhere" };
 

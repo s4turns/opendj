@@ -9,6 +9,7 @@
 #include <juce_audio_formats/juce_audio_formats.h>
 
 #include "analysis/AnalysisCache.h"
+#include "analysis/StemQueue.h"
 #include "analysis/StemSeparator.h"
 #include "core/Deck.h"
 #include "core/MicInput.h"
@@ -41,7 +42,9 @@ class AudioEngine final : private juce::AudioIODeviceCallback,
 public:
     static constexpr int numDecks = Mixer::numChannels;
 
-    AudioEngine();
+    /** Tests say which stem models count, so that a stand-in separator is what
+        runs on a machine that has real ones installed. */
+    explicit AudioEngine (StemSeparator::Models stemModels = StemSeparator::Models::useInstalled);
     ~AudioEngine() override;
 
     /** Opens an output device and starts the engine. Returns an error string,
@@ -93,11 +96,38 @@ public:
         sampler, with talkover and a choice of whether the speakers hear it. */
     MicInput& getMic() noexcept { return mic; }
 
+    /** A stereo line from the device's inputs, such as browser or system
+        audio through a loopback device, laid over the mix before the mic so
+        talkover ducks it along with the music. */
+    MicInput& getAux() noexcept { return aux; }
+
+    /** The most device inputs the engine reads: four pairs, enough for a mic
+        and a line on any interface, and a fixed size so the audio thread
+        never has to grow a buffer. */
+    static constexpr int maxInputChannels = 8;
+
     /** Reads a file into a sampler slot on a background thread. The callback
         runs on the message thread, with an empty string on success and the
         reason on failure. */
     void loadSampleAsync (int slot, const juce::File& file,
                           std::function<void (juce::String)> onComplete = {});
+
+    /** Records a sample from a deck into a sampler slot: the loop if the deck
+        is looping, otherwise `beats` beats from the beat at or behind the
+        playhead. Taken from the track itself rather than the deck's output,
+        so it is exact to the sample, free of the EQ and effects, and lands on
+        the grid. Written as a WAV into `folder` so it survives a restart, and
+        given the track's tempo so it can be synced. Message thread; the
+        callback runs on the message thread with an empty string on success. */
+    void captureSampleAsync (int slot, int deckIndex, double beats, const juce::File& folder,
+                             std::function<void (juce::String)> onComplete = {});
+
+    /** The tempo the music is at now: the lowest playing deck with a beat
+        grid, at its pitch. 0 when none is. What synced samples follow. */
+    double getMasterTempo() const;
+
+    /** Where captured samples are written unless told otherwise. */
+    static juce::File defaultSampleFolder();
 
     /** Decodes and analyses a file on a background thread, then swaps it onto
         the deck. Decoding a long track and finding its beat grid takes a second
@@ -114,24 +144,43 @@ public:
         analysisCache.store (cache, std::memory_order_release);
     }
 
-    /** Separates the track on a deck into its four parts, in the background,
-        and hands them to the deck when they are ready. Does nothing if the
-        deck is empty or no separator is installed. */
-    void separateDeckAsync (int deckIndex, std::function<void (bool)> onComplete = {});
-
-    bool isDeckSeparating (int deckIndex) const noexcept
+    /** The installed cache, for the interface to read and write track metadata
+        such as hot cue names. Null when none is installed. */
+    AnalysisCache* getAnalysisCache() const noexcept
     {
-        return juce::isPositiveAndBelow (deckIndex, numDecks)
-            && separating[(size_t) deckIndex].load (std::memory_order_relaxed);
+        return analysisCache.load (std::memory_order_acquire);
     }
+
+    /** Separates the track on a deck into its four parts, in the background,
+        and hands them to the deck when they are ready. It runs ahead of anything
+        being prepared. Told false on the message thread if there is nothing to
+        separate, no separator, or it failed. Told nothing if the request was
+        given up: the deck had another track by its turn, or the engine stopped.
+
+        `byHand` is a person pressing the button, which tries again a track that
+        failed earlier this session. Automix asks without it, so that it cannot
+        spend minutes again on a track that will not separate. */
+    void separateDeckAsync (int deckIndex, std::function<void (bool)> onComplete = {}, bool byHand = false);
+
+    /** True from a deck asking for its track's stems until they arrive, and while
+        its track happens to be the one being prepared. */
+    bool isDeckSeparating (int deckIndex) const;
 
     /** How far along a separation is, from 0 to 1. */
-    float getSeparationProgress (int deckIndex) const noexcept
-    {
-        return juce::isPositiveAndBelow (deckIndex, numDecks)
-            ? separationProgress[(size_t) deckIndex].load (std::memory_order_relaxed)
-            : 0.0f;
-    }
+    float getSeparationProgress (int deckIndex) const;
+
+    /** Separates tracks ahead of time, so that when one is loaded its stems are
+        there at once. Only while no deck is playing, and keeping nothing in
+        memory, unless the track turns out to be on a deck that has none. Files
+        that are not there are left out. */
+    void prepareStems (const std::vector<juce::File>& tracks);
+
+    /** Forgets the tracks being prepared. What a deck asked for carries on. */
+    void cancelStemPreparation();
+
+    bool isPreparingStems() const { return stemQueue.isPreparing(); }
+
+    StemQueue::Progress getStemQueueProgress() const { return stemQueue.getProgress(); }
 
     StemSeparator& getStemSeparator() noexcept { return stemSeparator; }
 
@@ -152,6 +201,16 @@ public:
         the feature: the answer is the deck that is playing, has a grid, and is
         nearest, which is what somebody pressing sync means by "the other one". */
     int findSyncLeader (int followerIndex) const;
+
+    /** Levels every deck's track by its measured loudness, or stops doing so. */
+    void setAutoGainEnabled (bool shouldLevel);
+    bool isAutoGainEnabled() const noexcept { return decks[0]->isAutoGainEnabled(); }
+
+    /** Shifts one deck the shortest way to the key another is playing in, or to
+        its relative, which has the same notes. Leaves the tempo alone, and
+        replaces any shift the deck already had. Returns false when either key is
+        not known, and changes nothing. */
+    bool matchDeckKey (int followerIndex, int leaderIndex);
 
     /** The deck's analysed tempo scaled by its tempo fader, or 0 with no grid. */
     double getEffectiveBpm (int deckIndex) const;
@@ -312,16 +371,19 @@ private:
     std::atomic<AnalysisCache*> analysisCache { nullptr };
 
     StemSeparator stemSeparator;
-    juce::ThreadPool separatorPool { juce::ThreadPoolOptions{}.withNumberOfThreads (1) };
-    std::array<std::atomic<bool>, numDecks> separating {};
-    std::array<std::atomic<float>, numDecks> separationProgress {};
+
+    // After the decks and the separator, which it reaches until it is shut down.
+    StemQueue stemQueue;
+
+    StemQueue::Config makeStemQueueConfig();
+    void giveStemsToDecks (const juce::File& track);
 
     std::array<juce::AudioBuffer<float>, numDecks> deckBuffers;
     juce::AudioBuffer<float> masterBuffer;
     juce::AudioBuffer<float> cueBuffer;
 
-    // The mix to record and broadcast when the mic is kept out of the speakers,
-    // and the mic's inputs, copied before the outputs are cleared.
+    // The mix to record and broadcast when the mic or aux is kept out of the
+    // speakers, and the device's inputs, copied before the outputs are cleared.
     juce::AudioBuffer<float> recordingBuffer;
     juce::AudioBuffer<float> inputBuffer;
 
@@ -332,6 +394,7 @@ private:
 
     Sampler sampler;
     MicInput mic;
+    MicInput aux { MicInput::Source::stereo };
     SetRecorder recorder;
     Broadcaster broadcaster;
     RtmpBroadcaster rtmpBroadcaster;

@@ -5,6 +5,7 @@
 
 #include "control/MidiMapping.h"
 
+#include <algorithm>
 #include <optional>
 
 namespace opendj
@@ -44,8 +45,36 @@ namespace
         if (text == "relative_offset")   return ValueMode::relativeOffset;
         if (text == "relative_twos")     return ValueMode::relativeTwosComplement;
         if (text == "position14")        return ValueMode::absolutePosition14;
+        if (text == "pitch14")           return ValueMode::pitchBend14;
 
         return fallback;
+    }
+
+    juce::String modeName (ValueMode mode)
+    {
+        switch (mode)
+        {
+            case ValueMode::button:                 return "button";
+            case ValueMode::absolute:               return "absolute";
+            case ValueMode::absolute14Bit:          return "absolute14";
+            case ValueMode::relativeOffset:         return "relative_offset";
+            case ValueMode::relativeTwosComplement: return "relative_twos";
+            case ValueMode::absolutePosition14:     return "position14";
+            case ValueMode::pitchBend14:            return "pitch14";
+        }
+
+        return "button";
+    }
+
+    juce::String hex (int value)
+    {
+        return "0x" + juce::String::toHexString (value).paddedLeft ('0', 2).toUpperCase();
+    }
+
+    /** The other way from parseRawMessage below. */
+    juce::String rawMessageText (const juce::MidiMessage& message)
+    {
+        return juce::String::toHexString (message.getRawData(), message.getRawDataSize(), 1).toUpperCase();
     }
 
     /** A raw MIDI message written as hex bytes, for example "F0 00 20 7F 00 F7"
@@ -240,6 +269,114 @@ juce::Result MidiMapping::loadFromJson (const juce::var& json,
         return juce::Result::fail ("Mapping defined no usable controls.");
 
     return juce::Result::ok();
+}
+
+juce::var MidiMapping::toJson() const
+{
+    const auto messagesOf = [] (const std::vector<juce::MidiMessage>& messages)
+    {
+        juce::Array<juce::var> list;
+
+        for (const auto& message : messages)
+            list.add (rawMessageText (message));
+
+        return list;
+    };
+
+    auto* root = new juce::DynamicObject();
+    juce::var result (root);
+
+    root->setProperty ("name", name);
+    root->setProperty ("author", author);
+    root->setProperty ("description", description);
+    root->setProperty ("deviceNameHints", deviceNameHints);
+    root->setProperty ("jogTicksPerRevolution", jogTicksPerRevolution);
+
+    if (! initMessages.empty())
+        root->setProperty ("initMessages", messagesOf (initMessages));
+
+    if (! keepAliveMessages.empty())
+    {
+        auto* keepAlive = new juce::DynamicObject();
+        keepAlive->setProperty ("message", messagesOf (keepAliveMessages));
+        keepAlive->setProperty ("intervalMs", keepAliveIntervalMs);
+        root->setProperty ("keepAlive", juce::var (keepAlive));
+    }
+
+    juce::Array<juce::var> list;
+
+    for (const auto& control : controls)
+    {
+        auto* entry = new juce::DynamicObject();
+        entry->setProperty ("name", control.name);
+        entry->setProperty ("status", hex (control.status));
+        entry->setProperty ("number", hex (control.number));
+        entry->setProperty ("action", toString (control.action));
+        entry->setProperty ("deck", control.deck);
+        entry->setProperty ("slot", control.slot);
+        entry->setProperty ("mode", modeName (control.mode));
+
+        // Whatever a hand-written file would leave out is left out, so that a
+        // saved mapping can still be read and edited as one.
+        if (control.fineNumber >= 0)        entry->setProperty ("fineNumber", hex (control.fineNumber));
+        if (control.inverted)               entry->setProperty ("inverted", true);
+        if (control.requiresShift)          entry->setProperty ("shift", true);
+        if (control.ticksPerRevolution > 0) entry->setProperty ("ticksPerRevolution", control.ticksPerRevolution);
+
+        if (control.feedbackNumber >= 0)
+        {
+            entry->setProperty ("feedbackNumber", hex (control.feedbackNumber));
+            entry->setProperty ("feedbackOnVelocity", hex (control.feedbackOnVelocity));
+            entry->setProperty ("feedbackOffVelocity", hex (control.feedbackOffVelocity));
+        }
+
+        list.add (juce::var (entry));
+    }
+
+    root->setProperty ("controls", list);
+    return result;
+}
+
+juce::Result MidiMapping::saveToFile (const juce::File& file) const
+{
+    if (const auto made = file.getParentDirectory().createDirectory(); made.failed())
+        return made;
+
+    juce::TemporaryFile temporary (file);
+
+    if (! temporary.getFile().replaceWithText (juce::JSON::toString (toJson()), false, false, "\n"))
+        return juce::Result::fail ("Could not write " + temporary.getFile().getFullPathName());
+
+    if (! temporary.overwriteTargetFileWithTemporary())
+        return juce::Result::fail ("Could not write " + file.getFullPathName());
+
+    return juce::Result::ok();
+}
+
+juce::String MidiMapping::addOrReplace (const MidiControl& control)
+{
+    juce::String replaced;
+
+    const auto sameMessage = [&control, &replaced] (const MidiControl& existing)
+    {
+        const auto answersTheSame = existing.status == control.status
+                                 && existing.requiresShift == control.requiresShift
+                                 && (existing.number == control.number
+                                     || existing.fineNumber == control.number
+                                     || (control.fineNumber >= 0
+                                         && (existing.number == control.fineNumber
+                                             || existing.fineNumber == control.fineNumber)));
+
+        if (answersTheSame && replaced.isEmpty())
+            replaced = existing.name;
+
+        return answersTheSame;
+    };
+
+    controls.erase (std::remove_if (controls.begin(), controls.end(), sameMessage), controls.end());
+    controls.push_back (control);
+
+    return replaced;
 }
 
 const MidiControl* MidiMapping::findControl (int status, int number, bool shiftHeld) const

@@ -9,6 +9,7 @@
 
 #include "library/Library.h"
 #include "library/LibraryScanner.h"
+#include "ui/StemPrepareMenu.h"
 
 #include <functional>
 #include <vector>
@@ -40,12 +41,31 @@ public:
         playlist tab can show it. */
     std::function<void()> onPlaylistsChanged;
 
+    /** Offers stems in the right-click menu, for the selection. */
+    StemPrepareMenu stemPrepareMenu;
+
+    /** The stem queue's line for the status, empty when it has nothing to say. */
+    std::function<juce::String()> stemStatus;
+
+    /** Every selected track. Message thread. */
+    std::vector<juce::File> getSelectedFiles() const;
+
     /** The highlighted track, or an invalid file. Safe from any thread, so the
         controller's load button can ask on the MIDI thread. */
     juce::File getSelectedFile() const;
 
     /** Moves the highlight by a number of rows, negative for up. Message thread. */
     void moveSelection (int rows);
+
+    /** Shows keys as Camelot numbers, 8A, or as notes, Am. */
+    void setKeyNotation (bool camelot);
+
+    /** Told when the Camelot button is pressed, so the decks can follow. */
+    std::function<void (bool camelot)> onKeyNotationChanged;
+
+    /** Colours each row's key by how it would mix with this one. An invalid key
+        means nothing is playing, and the colours go. */
+    void setHarmonicReference (const MusicalKey& key);
 
     void paint (juce::Graphics& g) override;
     void resized() override;
@@ -59,6 +79,7 @@ private:
     void cellDoubleClicked (int row, int columnId, const juce::MouseEvent&) override;
     void cellClicked (int row, int columnId, const juce::MouseEvent&) override;
     void selectedRowsChanged (int lastRowSelected) override;
+    juce::String getCellTooltip (int row, int columnId) override;
     juce::var getDragSourceDescription (const juce::SparseSet<int>& selectedRows) override;
 
     // Folder list. Its own model object, because ListBoxModel and
@@ -83,6 +104,7 @@ private:
     void refreshStatus();
     void addFolderClicked();
     void removeFolderClicked();
+    void importClicked();
     juce::File folderForRow (int row) const;
 
     Library& library;
@@ -92,7 +114,17 @@ private:
     juce::TextButton addFolderButton { "Add folder..." };
     juce::TextButton removeFolderButton { "Remove" };
     juce::TextButton rescanButton { "Rescan" };
+    juce::TextButton importButton { "Import..." };
+    juce::TextButton camelotButton { "Camelot" };
     juce::Label statusLabel;
+
+    bool camelotKeys = false;
+    MusicalKey harmonicReference;
+
+    // The library has the key as text, and the wheel's order is not that of any
+    // text, so this sort is done here rather than in the query.
+    bool sortByKey = false;
+    bool keySortForwards = true;
 
     FolderListModel folderModel { *this };
     juce::ListBox folderList;
@@ -103,7 +135,7 @@ private:
     LibraryQuery query;
 
     bool refreshPending = false;
-    std::unique_ptr<juce::FileChooser> folderChooser;
+    std::unique_ptr<juce::FileChooser> folderChooser, importChooser;
 
     mutable juce::CriticalSection selectionLock;
     juce::File selectedFile;

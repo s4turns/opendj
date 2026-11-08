@@ -66,6 +66,8 @@ MainComponent::MainComponent()
         });
     };
 
+    midi.setUserMappingFolder (userDataFolder ("mappings"));
+
     for (const auto& folder : findDataFolders ("mappings"))
     {
         const auto loaded = midi.loadMappingsFromFolder (folder);
@@ -92,6 +94,9 @@ MainComponent::MainComponent()
         SessionState::defaultFile().getSiblingFile ("audio-device.xml"));
 
     startupError = engine.initialise (midi.getDeviceNameHints(), savedDevice.get());
+
+    // What a separation killed last time left behind, before any new one starts.
+    engine.getStemSeparator().sweepLeftovers();
 
     if (juce::SystemStats::getEnvironmentVariable ("OPENDJ_MIDI_TRACE", {}).getIntValue() != 0)
         std::cerr << "[opendj audio] "
@@ -175,12 +180,19 @@ MainComponent::MainComponent()
     };
     addAndMakeVisible (*samplerView);
 
-    micView = std::make_unique<MicComponent> (engine);
+    micView = std::make_unique<MicComponent> (engine, engine.getMic(), "Mic");
     micView->onMessage = [this] (const juce::String& message)
     {
         statusLabel.setText (message, juce::dontSendNotification);
     };
     addAndMakeVisible (*micView);
+
+    auxView = std::make_unique<MicComponent> (engine, engine.getAux(), "Aux");
+    auxView->onMessage = [this] (const juce::String& message)
+    {
+        statusLabel.setText (message, juce::dontSendNotification);
+    };
+    addAndMakeVisible (*auxView);
 
     restoreSettings();
 
@@ -191,6 +203,43 @@ MainComponent::MainComponent()
                                                         [this] { return browser->getSelectedFile(); });
 
     browser->onPlaylistsChanged = [this] { playlistView->refresh(); };
+
+    // Both lists offer the same thing the same way: through the dispatcher, like
+    // anything else a person can do, so a controller's button means the same.
+    StemPrepareMenu stemMenu;
+    stemMenu.isAvailable = [this] { return engine.getStemSeparator().isAvailable(); };
+    stemMenu.isBusy = [this] { return engine.isPreparingStems(); };
+    stemMenu.hasStatus = [this]
+    {
+        const auto progress = engine.getStemQueueProgress();
+        return progress.halt != StemQueue::Halt::none || progress.total > 0;
+    };
+    stemMenu.prepare = [safe = juce::Component::SafePointer<MainComponent> (this)]
+    {
+        if (safe != nullptr)
+            safe->dispatcher.dispatch ({ Action::stemsPrepareSelected, 0, 0, 1.0f });
+    };
+    stemMenu.cancel = [safe = juce::Component::SafePointer<MainComponent> (this)]
+    {
+        if (safe != nullptr)
+            safe->dispatcher.dispatch ({ Action::stemsPrepareCancel, 0, 0, 1.0f });
+    };
+
+    browser->stemPrepareMenu = stemMenu;
+    playlistView->stemPrepareMenu = stemMenu;
+    browser->stemStatus = [this] { return engine.getStemQueueProgress().describe(); };
+    playlistView->stemStatus = browser->stemStatus;
+
+    // Here rather than with the rest of the settings, which are restored before
+    // the browser exists.
+    browser->setKeyNotation (settings.camelotKeys);
+    browser->onKeyNotationChanged = [this] (bool camelot)
+    {
+        settings.camelotKeys = camelot;
+
+        for (auto& view : deckViews)
+            view->setKeyNotation (camelot);
+    };
 
     browserTabs = std::make_unique<juce::TabbedComponent> (juce::TabbedButtonBar::TabsAtTop);
     browserTabs->setTabBarDepth (26);
@@ -208,6 +257,17 @@ MainComponent::MainComponent()
         {
             if (safe != nullptr)
                 safe->stepWaveformZoom (steps);
+        });
+    };
+
+    // The press can come from the MIDI thread, and a selection cannot be read
+    // from there. Which list it means is whichever is on show.
+    dispatcher.prepareStemsHandler = [safe = juce::Component::SafePointer<MainComponent> (this)]
+    {
+        juce::MessageManager::callAsync ([safe]
+        {
+            if (safe != nullptr)
+                safe->prepareStemsForListOnShow();
         });
     };
 
@@ -291,6 +351,7 @@ MainComponent::~MainComponent()
     dispatcher.onStateChanged = nullptr;
     dispatcher.selectedFileProvider = nullptr;
     dispatcher.browseScrollHandler = nullptr;
+    dispatcher.prepareStemsHandler = nullptr;
     dispatcher.waveformZoomHandler = nullptr;
     removeKeyListener (this);
 
@@ -326,6 +387,21 @@ void MainComponent::loadOntoDeck (const juce::File& file, int deckIndex)
         deckViews[(size_t) deckIndex]->load (file);
 }
 
+juce::File MainComponent::userDataFolder (const juce::String& name) const
+{
+   #if JUCE_LINUX || JUCE_BSD
+    const auto dataHome = juce::SystemStats::getEnvironmentVariable ("XDG_DATA_HOME", {});
+
+    return (dataHome.isNotEmpty() ? juce::File (dataHome)
+                                  : juce::File::getSpecialLocation (juce::File::userHomeDirectory)
+                                        .getChildFile (".local/share"))
+               .getChildFile ("opendj/" + name);
+   #else
+    return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+               .getChildFile ("OpenDJ").getChildFile (name);
+   #endif
+}
+
 juce::Array<juce::File> MainComponent::findDataFolders (const juce::String& name) const
 {
     juce::Array<juce::File> folders;
@@ -349,12 +425,10 @@ juce::Array<juce::File> MainComponent::findDataFolders (const juce::String& name
                               .getChildFile (".local/share")));
    #endif
 
-   #if JUCE_WINDOWS
-    // The same idea as the XDG block above, in the one place a Windows user
-    // can write to without being an administrator, and where the settings and
-    // the library already are. "OpenDJ" rather than "opendj" so these sit
-    // beside settings.json instead of in a second folder differing from it
-    // only in case; scripts/get-presets.ps1 installs here.
+   #if JUCE_WINDOWS || JUCE_MAC
+    // User mappings and presets live beside the settings and library on
+    // Windows and macOS. "OpenDJ" matches the existing settings folder;
+    // scripts/get-presets.ps1 also installs here on Windows.
     add (juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
             .getChildFile ("OpenDJ").getChildFile (name));
    #endif
@@ -363,6 +437,11 @@ juce::Array<juce::File> MainComponent::findDataFolders (const juce::String& name
     // the mappings in the source tree, and under the prefix once installed,
     // where /usr/local/bin/opendj must reach /usr/local/share/opendj/mappings.
     const auto executable = juce::File::getSpecialLocation (juce::File::currentExecutableFile);
+
+   #if JUCE_MAC
+    add (executable.getParentDirectory().getParentDirectory()
+             .getChildFile ("Resources").getChildFile (name));
+   #endif
 
     for (auto directory = executable.getParentDirectory();
          directory.exists() && directory != directory.getParentDirectory();
@@ -420,6 +499,23 @@ void MainComponent::timerCallback()
 
     for (auto& view : deckViews)
         view->refresh();
+
+    // The key the room is hearing is what the browser's hints are measured from.
+    // With every fader down, whatever is playing: that is somebody finding the
+    // next track in the headphones, who wants to know what goes with it.
+    if (browser != nullptr)
+    {
+        auto reference = MusicalKey();
+
+        if (const auto heard = engine.findMasterTempoDeck(); heard >= 0)
+            reference = engine.getDeck (heard).getEffectiveKey();
+
+        for (int i = 0; i < AudioEngine::numDecks && ! reference.isValid(); ++i)
+            if (engine.getDeck (i).isPlaying())
+                reference = engine.getDeck (i).getEffectiveKey();
+
+        browser->setHarmonicReference (reference);
+    }
 
     beatStrip->refresh();
     mixerView->refresh();
@@ -535,6 +631,28 @@ void MainComponent::timerCallback()
 
 bool MainComponent::keyPressed (const juce::KeyPress& key, juce::Component*)
 {
+    // F11 toggles a true, borderless full screen. Kiosk mode is used rather than
+    // ResizableWindow::setFullScreen, which on Windows with a native title bar
+    // only maximises the window and leaves the title bar in place.
+    if (key.isKeyCode (juce::KeyPress::F11Key))
+    {
+        auto& desktop = juce::Desktop::getInstance();
+        desktop.setKioskModeComponent (desktop.getKioskModeComponent() == nullptr
+                                           ? getTopLevelComponent()
+                                           : nullptr,
+                                       false);
+        return true;
+    }
+
+    // Escape leaves full screen, but only while in it, so it stays free for
+    // everything else the rest of the time.
+    if (key.isKeyCode (juce::KeyPress::escapeKey)
+        && juce::Desktop::getInstance().getKioskModeComponent() != nullptr)
+    {
+        juce::Desktop::getInstance().setKioskModeComponent (nullptr, false);
+        return true;
+    }
+
     for (const auto& binding : keyBindings)
     {
         if (! key.isKeyCode (binding.keyCode))
@@ -556,13 +674,13 @@ bool MainComponent::keyPressed (const juce::KeyPress& key, juce::Component*)
         return true;
     }
 
-    // The number row fires the sampler pads, so a machine with no controller on
-    // it still has eight sounds under one hand.
-    for (int slot = 0; slot < Sampler::numSlots; ++slot)
+    // The number row fires the sampler pads of the bank on show, so a machine
+    // with no controller on it still has eight sounds under one hand.
+    for (int pad = 0; pad < Sampler::numPads; ++pad)
     {
-        if (key.isKeyCode ('1' + slot))
+        if (key.isKeyCode ('1' + pad))
         {
-            dispatcher.dispatch ({ Action::samplerTrigger, 0, slot, 1.0f });
+            dispatcher.dispatch ({ Action::samplerTrigger, 0, pad, 1.0f });
             return true;
         }
     }
@@ -626,15 +744,24 @@ void MainComponent::restoreSettings()
 {
     settings.applyTo (engine.getMixer(), engine.getSampler());
     settings.applyTo (engine.getMic());
+    settings.applyAuxTo (engine.getAux());
 
     for (int deck = 0; deck < AudioEngine::numDecks; ++deck)
+    {
         dispatcher.setTempoRange (deck, settings.tempoRanges[(size_t) deck]);
+        engine.getDeck (deck).setQuantize (settings.quantize[(size_t) deck]);
+    }
 
     showDeck (settings.visibleDecks[0]);
     showDeck (settings.visibleDecks[1]);
 
     settings.waveformZoomSeconds = waveform::nearestZoom (settings.waveformZoomSeconds);
     applyWaveformZoom();
+
+    for (auto& view : deckViews)
+        view->setKeyNotation (settings.camelotKeys);
+
+    engine.setAutoGainEnabled (settings.autoGain);
 
     updateRecordingTooltip();
 
@@ -646,7 +773,13 @@ void MainComponent::restoreSettings()
         const juce::File file (settings.samplerFiles[(size_t) slot]);
 
         if (file.existsAsFile())
-            engine.loadSampleAsync (slot, file);
+            engine.loadSampleAsync (slot, file, [this, slot, bpm = settings.samplerBpms[(size_t) slot]] (juce::String error)
+            {
+                // A tempo kept from before outranks one found again from the
+                // file: it may have been set by hand or taken from a deck.
+                if (error.isEmpty() && bpm > 0.0)
+                    engine.getSampler().setSlotBpm (slot, bpm);
+            });
     }
 
     // Plugins last, and never the one the previous run died loading: a plugin
@@ -676,13 +809,19 @@ void MainComponent::saveSettings()
     auto state = settings;
     state.captureFrom (engine.getMixer(), engine.getSampler());
     state.captureFrom (engine.getMic());
+    state.captureAuxFrom (engine.getAux());
     state.outputMode = engine.getOutputMode();
 
     for (int deck = 0; deck < AudioEngine::numDecks; ++deck)
+    {
         state.tempoRanges[(size_t) deck] = dispatcher.getTempoRange (deck);
+        state.quantize[(size_t) deck] = engine.getDeck (deck).isQuantizeEnabled();
+    }
 
     state.visibleDecks = visibleDecks;
     state.waveformZoomSeconds = settings.waveformZoomSeconds;
+    state.camelotKeys = settings.camelotKeys;
+    state.autoGain = engine.isAutoGainEnabled();
 
     if (masterFxView != nullptr)
         state.vstPluginDirectory = masterFxView->getPluginDirectory();
@@ -717,6 +856,15 @@ void MainComponent::showDeck (int deckIndex)
         beatStrip->setDecks (visibleDecks[0], visibleDecks[1]);
 
     deckRow.resized();
+}
+
+void MainComponent::prepareStemsForListOnShow()
+{
+    // By which component is on show rather than by its tab's place, which can
+    // change without anyone thinking of this.
+    const auto selection = browser->getSelectedFiles();
+    engine.prepareStems (stemListOnShow (browserTabs->getCurrentContentComponent() == playlistView.get(),
+                                         playlistView->getFiles(), selection));
 }
 
 void MainComponent::stepWaveformZoom (int steps)
@@ -763,7 +911,7 @@ void MainComponent::showAudioSettings()
         {
             selector = std::make_unique<juce::AudioDeviceSelectorComponent> (
                 engine.getDeviceManager(),
-                0, 2,      // a mic, from one input or a pair
+                0, AudioEngine::maxInputChannels,   // a pair for the mic, another for the aux
                 2, 8,      // enough outputs for a master pair plus a cue pair
                 false,     // MIDI has its own panel
                 false,
@@ -1635,7 +1783,9 @@ void MainComponent::resized()
     // height whatever else is on screen, and taking it from the browser is
     // cheaper than taking it from a waveform.
     auto samplerRow = area.removeFromBottom (58);
-    micView->setBounds (samplerRow.removeFromRight (300));
+    micView->setBounds (samplerRow.removeFromRight (micView->getPreferredWidth()));
+    samplerRow.removeFromRight (6);
+    auxView->setBounds (samplerRow.removeFromRight (auxView->getPreferredWidth()));
     samplerRow.removeFromRight (8);
     samplerView->setBounds (samplerRow);
     area.removeFromBottom (8);

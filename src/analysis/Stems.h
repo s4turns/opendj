@@ -28,6 +28,35 @@ enum class Stem
 
 inline constexpr int numStems = 4;
 
+/** What the performance pads leave playing, one row per pad and a column per
+    stem in the order above.
+
+    A pad is a mask, multiplied with the knobs rather than written over them. The
+    knobs belong to whoever last turned them, and that can be automix walking the
+    vocals down a handoff: it reads what it finds as the DJ's setting and puts it
+    back afterwards, so a pad written there would be baked in or trodden on.
+
+    Vocals off and an instrumental are the same four gains, so they are one pad. */
+inline constexpr int numStemPads = 4;
+
+inline constexpr float stemPadMasks[numStemPads][numStems]
+{
+    { 1.0f, 1.0f, 1.0f, 0.0f },     // no vocals
+    { 0.0f, 0.0f, 0.0f, 1.0f },     // acapella
+    { 1.0f, 0.0f, 0.0f, 0.0f },     // drums only
+    { 0.0f, 1.0f, 1.0f, 1.0f }      // no drums
+};
+
+/** How one go at separating a track ended. Stopped and failed are different
+    facts: a job stopped to make way for a deck says nothing about the track or
+    the machine, and is simply run again. */
+enum class StemOutcome
+{
+    ready,      ///< the stems are in the cache
+    stopped,    ///< somebody asked it to stop, and it did
+    failed      ///< it could not be done
+};
+
 inline const char* toString (Stem stem)
 {
     switch (stem)

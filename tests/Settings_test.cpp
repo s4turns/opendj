@@ -34,8 +34,11 @@ namespace
                                     Mixer::CrossfaderAssign::a };
 
         state.tempoRanges = { 16.0, 50.0, 6.0, 100.0 };
+        state.quantize = { true, false, true, false };
         state.visibleDecks = { 2, 3 };
         state.waveformZoomSeconds = 8.0;
+        state.camelotKeys = true;
+        state.autoGain = true;
 
         state.samplerGain = 0.55f;
         state.samplerCue = true;
@@ -44,6 +47,10 @@ namespace
         state.micGain = 1.4f;
         state.micTalkover = true;
         state.micRouting = MicInput::Routing::recordingOnly;
+        state.micInputPair = 2;
+        state.auxGain = 0.6f;
+        state.auxRouting = MicInput::Routing::recordingOnly;
+        state.auxInputPair = 3;
 
         state.recording.format = RecordingFormat::flac;
         state.recording.mp3Bitrate = 192;
@@ -69,18 +76,22 @@ namespace
         for (size_t fx = 0; fx < MasterEffects::numSlots; ++fx)
             for (size_t t = 0; t < MasterEffects::numTypes; ++t)
             {
-                state.masterFx[fx].wet[t] = 0.11f + 0.1f * (float) (fx * 3 + t);
+                state.masterFx[fx].wet[t] = 0.11f + 0.03f * (float) (fx * MasterEffects::numTypes + t);
 
                 for (size_t p = 0; p < MasterEffects::numParams; ++p)
-                    state.masterFx[fx].params[t][p] = 0.07f + 0.05f * (float) (fx * 6 + t * 2 + p);
+                    state.masterFx[fx].params[t][p] = 0.07f + 0.02f * (float) (fx * MasterEffects::numTypes * 2 + t * 2 + p);
             }
 
         for (int slot = 0; slot < Sampler::numSlots; ++slot)
         {
             state.samplerFiles[(size_t) slot] = "/music/stab" + juce::String (slot) + ".wav";
             state.samplerLooping[(size_t) slot] = slot % 2 == 0;
-            state.samplerGains[(size_t) slot] = 0.2f + 0.1f * (float) slot;
+            state.samplerGains[(size_t) slot] = 0.2f + 0.05f * (float) slot;
+            state.samplerSync[(size_t) slot] = slot % 3 == 0;
+            state.samplerBpms[(size_t) slot] = slot % 4 == 0 ? 120.0 + slot : 0.0;
         }
+
+        state.samplerBank = 2;
 
         return state;
     }
@@ -93,8 +104,11 @@ namespace
         REQUIRE (a.crossfaderCurve == b.crossfaderCurve);
         REQUIRE (a.crossfaderAssigns == b.crossfaderAssigns);
         REQUIRE (a.tempoRanges == b.tempoRanges);
+        REQUIRE (a.quantize == b.quantize);
         REQUIRE (a.visibleDecks == b.visibleDecks);
         REQUIRE_THAT (a.waveformZoomSeconds, WithinAbs (b.waveformZoomSeconds, 1.0e-9));
+        REQUIRE (a.camelotKeys == b.camelotKeys);
+        REQUIRE (a.autoGain == b.autoGain);
         REQUIRE_THAT (a.samplerGain, WithinAbs (b.samplerGain, 1.0e-4f));
         REQUIRE (a.samplerCue == b.samplerCue);
         REQUIRE (a.samplerFiles == b.samplerFiles);
@@ -103,6 +117,10 @@ namespace
         REQUIRE_THAT (a.micGain, WithinAbs (b.micGain, 1.0e-4f));
         REQUIRE (a.micTalkover == b.micTalkover);
         REQUIRE (a.micRouting == b.micRouting);
+        REQUIRE (a.micInputPair == b.micInputPair);
+        REQUIRE_THAT (a.auxGain, WithinAbs (b.auxGain, 1.0e-4f));
+        REQUIRE (a.auxRouting == b.auxRouting);
+        REQUIRE (a.auxInputPair == b.auxInputPair);
 
         REQUIRE (a.recording.format == b.recording.format);
         REQUIRE (a.recording.mp3Bitrate == b.recording.mp3Bitrate);
@@ -124,7 +142,13 @@ namespace
         REQUIRE_FALSE (a.rtmp.liveVideo);
 
         for (size_t slot = 0; slot < Sampler::numSlots; ++slot)
+        {
             REQUIRE_THAT (a.samplerGains[slot], WithinAbs (b.samplerGains[slot], 1.0e-4f));
+            REQUIRE (a.samplerSync[slot] == b.samplerSync[slot]);
+            REQUIRE_THAT (a.samplerBpms[slot], WithinAbs (b.samplerBpms[slot], 1.0e-9));
+        }
+
+        REQUIRE (a.samplerBank == b.samplerBank);
 
         for (size_t fx = 0; fx < MasterEffects::numSlots; ++fx)
         {

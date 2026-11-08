@@ -11,9 +11,12 @@
 #include "analysis/AnalysisCache.h"
 #include "analysis/Stems.h"
 #include "analysis/TrackAnalysis.h"
+#include "analysis/TapTempo.h"
+#include "core/StemEffect.h"
 
 #include <array>
 #include <atomic>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <vector>
@@ -59,7 +62,13 @@ public:
         a timer on the message thread. */
     void cleanUp();
 
+    /** The file of the track on the deck. Only on the message thread, which is
+        where retired tracks are freed; anywhere else, ask holdsFile(). */
     juce::File getLoadedFile() const;
+
+    /** Whether this file is the one on the deck. Safe from any thread. */
+    bool holdsFile (const juce::File& file) const;
+
     juce::String getTrackTitle() const;
 
     /** Why the last loadFile() returned false, in words a user can act on.
@@ -90,6 +99,67 @@ public:
     void seekToSeconds (double seconds);
     void seekToFraction (double proportion);
 
+    /** Moves the playhead a whole number of beats, forward for positive and
+        back for negative, so the deck stays in phase with whatever it was
+        synced to. A running loop moves with it, so the jump is not undone by
+        the loop pulling the playhead back. Returns false when the track has
+        no beat grid. */
+    bool beatJump (double beats);
+
+    /** With quantize on, the cue point, a newly set hot cue and the ends of
+        a manual loop land on the nearest beat rather than wherever the
+        finger was. Needs a beat grid; without one nothing is snapped. */
+    //==========================================================================
+    // Beat grid editing. Message or MIDI thread; never the audio thread.
+    //==========================================================================
+
+    /** The slowest and fastest tempo a grid can be given by hand. */
+    static constexpr double minimumGridBpm = 40.0;
+    static constexpr double maximumGridBpm = 300.0;
+
+    /** Replaces the loaded track's beat grid. The first beat is kept within
+        the first bar, which keeps which beat of the bar is the downbeat.
+        Returns false with nothing loaded or a tempo out of range. Fires
+        onBeatGridChanged so the grid can be kept with the track. */
+    bool setBeatGrid (double bpm, double firstBeatSeconds);
+
+    /** Changes the tempo by `deltaBpm`, keeping the beat nearest the playhead
+        where it is, so the part of the grid being looked at does not slide
+        away. The rest of the grid stretches from there. */
+    bool adjustGridBpm (double deltaBpm);
+
+    /** Multiplies the tempo, for a track detected at half or double speed.
+        The beat nearest the playhead stays put. */
+    bool scaleGridBpm (double factor);
+
+    /** Slides the whole grid later (positive) or earlier, in seconds. */
+    bool shiftGrid (double seconds);
+
+    /** Makes the playhead a downbeat, the first beat of a bar, keeping the
+        tempo. A track with no grid yet needs a tempo first. */
+    bool setDownbeatHere();
+
+    /** One tap of tap tempo at `nowSeconds` on a steady clock. Once there are
+        enough taps the tempo is set from them, around the playhead as
+        adjustGridBpm does, and refined with every further tap. Works on a
+        track with no grid too, starting one at the playhead. Returns the
+        tapped tempo, or 0 while there are too few taps. */
+    double tapTempo (double nowSeconds);
+
+    /** Puts back the grid the track had when it was loaded. */
+    bool revertBeatGrid();
+
+    /** Whether the grid has been changed since the track was loaded. */
+    bool isBeatGridEdited() const;
+
+    /** Called with the loaded file and the new grid after an edit, from
+        whichever thread made it. Set once, before the deck is used. */
+    std::function<void (const juce::File&, double bpm, double firstBeatSeconds)> onBeatGridChanged;
+
+    void setQuantize (bool shouldQuantize) { quantize.store (shouldQuantize, std::memory_order_relaxed); }
+    void toggleQuantize() { setQuantize (! isQuantizeEnabled()); }
+    bool isQuantizeEnabled() const noexcept { return quantize.load (std::memory_order_relaxed); }
+
     /** 1.0 plays at the recorded speed. Pitch follows tempo unless key lock is on. */
     void setTempoRatio (double ratio);
     double getTempoRatio() const noexcept { return tempoRatio.load (std::memory_order_relaxed); }
@@ -102,8 +172,33 @@ public:
     void toggleKeyLock();
     bool isKeyLockEnabled() const noexcept { return keyLock.load (std::memory_order_relaxed); }
 
+    /** Moves the pitch by whole semitones through the same stretcher key lock
+        uses, leaving the tempo alone. Added to whatever the tempo fader is doing
+        to the pitch, which is nothing with key lock on. Goes back to zero when a
+        track loads, as the tempo does. */
+    static constexpr int maximumKeyShift = 12;
+    void setKeyShift (int semitones);
+    int getKeyShift() const noexcept { return keyShift.load (std::memory_order_relaxed); }
+
+    /** The key the deck is playing in now: the track's own, moved by the key
+        shift and, with key lock off, by however far the tempo has taken it to
+        the nearest semitone. Invalid when the track's key is not known. */
+    MusicalKey getEffectiveKey() const;
+
     void setTrim (float linearGain);
     float getTrim() const noexcept { return trimGain.load (std::memory_order_relaxed); }
+
+    /** Levels each track by its measured loudness. A gain of its own rather than
+        a move of the trim, which stays the DJ's: a controller's knob sends where
+        it physically is, and would otherwise take this straight back off. */
+    void setAutoGainEnabled (bool shouldLevel);
+    bool isAutoGainEnabled() const noexcept { return autoGainEnabled.load (std::memory_order_relaxed); }
+
+    /** What the loaded track would be given, whether the level is on or not. */
+    float getTrackAutoGain() const noexcept { return trackAutoGain.load (std::memory_order_relaxed); }
+
+    /** What is being applied now: the above with auto gain on, otherwise 1. */
+    float getAutoGain() const noexcept { return isAutoGainEnabled() ? getTrackAutoGain() : 1.0f; }
 
     //==========================================================================
     // Stems
@@ -116,16 +211,62 @@ public:
 
     bool hasStems() const noexcept { return activeSeparation.load (std::memory_order_acquire) != nullptr; }
 
+    /** The stems themselves, for reading off the audio thread: automix looks
+        at the vocals to keep two singers apart. Null when there are none. */
+    std::shared_ptr<const SeparatedTrack> getSeparation() const;
+
     /** 1 is the stem as recorded, 0 removes it. Takes effect on the next block,
         smoothed, so a pad does not click. */
     void setStemGain (Stem stem, float gain);
     float getStemGain (Stem stem) const;
 
+    /** The stem pads, from any thread. A press with no stems, or of a pad that
+        does not exist, does nothing: it does not start a separation, which is
+        minutes of work nobody asked for. Only one pad plays at a time, and a
+        new one replaces the last. They multiply with the knobs and leave them
+        where they are, so getStemGain() does not see them.
+
+        Toggling latches a pad until it is pressed again. Holding wins over a
+        latched pad for as long as it is down and letting go returns to it. A
+        track loading clears both. */
+    void toggleStemPad (int slot);
+    void holdStemPad (int slot, bool down);
+
+    /** The pad playing now, or -1 with none on or no stems to apply one to. */
+    int getStemPad() const noexcept;
+
+    /** One effect on one stem, from any thread. Switching on with no stems does
+        nothing, like a pad. Off stops feeding it and lets what is in it ring out.
+        A track loading switches it off and clears it, and leaves the choices
+        below as they were, since those are how the DJ likes it. */
+    void setStemFxEnabled (bool shouldBeOn);
+    void toggleStemFx();
+    bool isStemFxEnabled() const noexcept;
+
+    void setStemFxTarget (Stem stem);
+    Stem getStemFxTarget() const noexcept { return static_cast<Stem> (stemFxTarget.load (std::memory_order_relaxed)); }
+
+    void setStemFxType (StemEffect::Type type);
+    StemEffect::Type getStemFxType() const noexcept { return stemFxType.load (std::memory_order_relaxed); }
+
+    /** An index into StemEffect::beatDivisions. One past the end does nothing. */
+    void setStemFxBeats (int division);
+    int getStemFxBeats() const noexcept { return stemFxDivision.load (std::memory_order_relaxed); }
+
+    /** 0 to 1: how much of the echo or reverb, and how far the low pass closes. */
+    void setStemFxAmount (float amount);
+    float getStemFxAmount() const noexcept { return stemFxAmount.load (std::memory_order_relaxed); }
+
+    /** One beat of the loaded track at its recorded speed, kept up to date by the
+        engine, which can read the grid. The audio thread cannot. */
+    void setStemFxBeatSeconds (double seconds);
+    double getStemFxBeatSeconds() const noexcept { return stemFxBeatSeconds.load (std::memory_order_relaxed); }
+
     //==========================================================================
     // Hot cues
     //==========================================================================
 
-    static constexpr int numHotCues = 8;
+    static constexpr int numHotCues = opendj::numHotCues;
 
     /** Sets the hot cue to the current position if it is empty, or jumps to it
         if it is not. This is the one-button behaviour pads want. */
@@ -133,6 +274,12 @@ public:
     void clearHotCue (int slot);
     double getHotCueSeconds (int slot) const;
     bool hasHotCue (int slot) const;
+    HotCues getHotCues() const;
+
+    /** Called with the loaded file and every pad after one is set or cleared,
+        from whichever thread pressed it, so the cues can be kept. Set once,
+        before the deck is used. */
+    std::function<void (const juce::File&, const HotCues&)> onHotCuesChanged;
 
     //==========================================================================
     // Loops
@@ -206,6 +353,43 @@ public:
         seconds, or a negative number when it is on the timeline. For drawing
         the ghost playhead. */
     double getSlipPositionSeconds() const noexcept { return slipPositionSeconds.load (std::memory_order_relaxed); }
+
+    //==========================================================================
+    // Brake, backspin, reverse and censor
+    //==========================================================================
+
+    static constexpr double brakeSeconds = 1.0;
+    static constexpr double backspinSeconds = 1.5;
+    static constexpr double backspinSpeed = 4.0;    ///< how fast it starts, against the tempo
+
+    /** The platter's power cut: the deck slows to a stop over brakeSeconds and
+        the pitch falls with it. Only a playing deck can be braked. With slip on
+        the music runs on underneath, and the deck drops back in on time instead
+        of stopping. */
+    void brake();
+
+    /** A hand flinging the record backwards: it starts backspinSpeed times as
+        fast the wrong way and dies away over backspinSeconds. Slip treats it
+        as it treats a brake. */
+    void backspin();
+
+    /** True while a brake or a backspin is running. Pressing play ends one and
+        puts the deck back at its tempo; a hand on the platter or a pause ends
+        one too. */
+    bool isSpinningDown() const noexcept { return spinActive.load (std::memory_order_relaxed); }
+
+    /** Plays backwards at the tempo until turned off. Running off the front of
+        the track stops the deck and turns this off. With slip on the music
+        carries on forwards underneath, and turning it off lands there. */
+    void setReverse (bool shouldReverse);
+    void toggleReverse();
+    bool isReverseEnabled() const noexcept { return reverseEnabled.load (std::memory_order_relaxed); }
+
+    /** The button radio DJs use for a word that cannot go out: backwards for as
+        long as it is held, always with the music running on underneath, so
+        letting go lands exactly where the track would have been. */
+    void setCensor (bool shouldCensor);
+    bool isCensorHeld() const noexcept { return censorHeld.load (std::memory_order_relaxed); }
 
     //==========================================================================
     // Jog wheel
@@ -288,11 +472,73 @@ private:
     std::shared_ptr<const SeparatedTrack> ownedSeparation;
     std::vector<std::pair<std::shared_ptr<const SeparatedTrack>, juce::uint32>> retiredSeparations;
 
+    // A separation arrives on its own worker, a track on the loader and the
+    // cleaning up on the timer, and they can all be at this together. It covers
+    // both retired lists, and a separation's check that it still belongs to the
+    // loaded track along with the swap that acts on the answer, so that stems
+    // cannot land on the track that replaced theirs. The audio thread never takes
+    // it, and needs nothing it protects.
+    mutable std::mutex separationMutex;
+
     std::array<std::atomic<float>, numStems> stemGains;
     std::array<juce::SmoothedValue<float>, numStems> stemGainRamps;   // audio thread
-    std::atomic<std::shared_ptr<const TrackAnalysis>> analysisData;
+
+    std::atomic<int> latchedStemPad { -1 };
+    std::atomic<int> heldStemPad { -1 };
+
+    int currentStemPad() const noexcept;
+
+    /** A stem's knob with the pad applied: what the stem should be playing at. */
+    float effectiveStemGain (size_t stem, int pad) const noexcept;
+
+    // Stems never quite sum to the mix a real model started from, so moving from
+    // one to the other is a step in the waveform, and a held pad crosses it
+    // twice. This fades between them: 0 is the mix, 1 is the stems. Key lock
+    // reads ahead of the audible head, so it has a fade of its own, moved as it
+    // is fed rather than as it is heard.
+    juce::SmoothedValue<float> stemPathRamp { 0.0f };   // audio thread
+    float feedStemPath = 0.0f;                          // audio thread
+    std::array<float, numStems> feedStemGains;          // audio thread
+
+    /** Puts every stem fade where it is heading, with no fade. For when nothing
+        is being heard, or what was being heard is gone. Audio thread. */
+    void settleStemRamps (const SeparatedTrack* separation) noexcept;
+
+    // publish() cannot touch the fades or the stem effect, which belong to the
+    // audio thread, and a deck started straight after a load may never pass
+    // through silence on its way, so this asks for them to be settled at the top
+    // of the next block.
+    std::atomic<bool> stemSettleAsked { false };
+
+    // Built in prepare() and then the audio thread's alone.
+    std::unique_ptr<StemEffect> stemEffect;
+    bool stemEffectLive = false;                        // audio thread: running this block
+
+    // Leaving the stretcher, the effect is ahead of the room by what the
+    // stretcher had been fed and not yet played. It sits out that many samples,
+    // and then fades back up. Audio thread.
+    juce::int64 stemEffectHold = 0;
+    float stemEffectReturn = 1.0f;
+    float stemReturnStep = 1.0f;
+
+    std::atomic<bool> stemFxEnabled { false };
+    std::atomic<int> stemFxTarget { static_cast<int> (Stem::vocals) };
+    std::atomic<StemEffect::Type> stemFxType { StemEffect::Type::echo };
+    std::atomic<int> stemFxDivision { 2 };              // one beat
+    std::atomic<float> stemFxAmount { 0.5f };
+    std::atomic<double> stemFxBeatSeconds { 0.5 };
+
+    /** Tells the effect what is wanted this block and whether it is to run. */
+    void startStemEffect (const SeparatedTrack* separation, bool stretching) noexcept;
+
+    /** Forgets the effect's tail, if it has one. */
+    void silenceStemEffect();
+
+    // Apple's libc++ lacks atomic<shared_ptr>. Access this only through the
+    // portable shared_ptr atomic free functions, which provide the same safety.
+    std::shared_ptr<const TrackAnalysis> analysisData;
     std::unique_ptr<Track> owned;                       // the live track
-    std::vector<std::unique_ptr<Track>> retired;        // message thread only
+    std::vector<std::unique_ptr<Track>> retired;        // under separationMutex
 
     std::atomic<bool> playing { false };
     std::atomic<double> tempoRatio { 1.0 };
@@ -300,6 +546,9 @@ private:
     std::atomic<double> positionSeconds { 0.0 };
     std::atomic<double> lengthSeconds { 0.0 };
     std::atomic<float> trimGain { 1.0f };
+    std::atomic<bool> autoGainEnabled { false };
+    std::atomic<float> trackAutoGain { 1.0f };
+    juce::SmoothedValue<float> autoGainRamp { 1.0f };   // audio thread, so turning it on mid-track cannot click
     std::atomic<float> peakLevel { 0.0f };
     std::atomic<juce::uint32> blocksProcessed { 0 };
 
@@ -328,6 +577,18 @@ private:
     bool slipValid = false;                                // audio thread only
     std::atomic<double> slipPositionSeconds { -1.0 };      // for the interface
 
+    // A brake or backspin is asked for through `spinRequest` and then belongs to
+    // the audio thread, which walks the playback rate to zero a sample at a time.
+    enum SpinRequest : int { spinNone, spinBrake, spinBackspin, spinCancel };
+    std::atomic<int> spinRequest { spinNone };
+    std::atomic<bool> spinActive { false };
+    std::atomic<bool> reverseEnabled { false };
+    std::atomic<bool> censorHeld { false };
+    double spinRate = 0.0;                                 // audio thread, file samples per device sample
+    double spinRateStep = 0.0;                             // audio thread
+    juce::int64 spinSamplesLeft = 0;                       // audio thread
+    bool motionSlip = false;                               // audio thread: the shadow head is running for one of these
+
     /** Wraps a read head back to the loop start when it runs past the end.
         Returns true when it moved. Audio thread only. */
     bool wrapIntoLoop (double& position, double rate, const Track& track) const;
@@ -343,6 +604,22 @@ private:
     // ever uses it and never allocates it. It is fed from feedPosition, which
     // runs ahead of the audible readPosition by the stretcher's own delay.
     std::atomic<bool> keyLock { false };
+    std::atomic<int> keyShift { 0 };
+    std::atomic<bool> quantize { false };
+
+    // The grid as loaded, for revert. Written by whichever thread loads.
+    std::atomic<double> loadedBpm { 0.0 };
+    std::atomic<double> loadedFirstBeatSeconds { 0.0 };
+
+    TapTempo taps;                                         // message or MIDI thread
+    std::mutex tapMutex;                                   // the two can both tap
+
+    /** Moves the tempo to `bpm` around the beat nearest the playhead. */
+    bool retempoAroundPlayhead (double bpm);
+
+    /** A position snapped to the nearest beat when quantize is on and there
+        is a grid, or left alone otherwise. Not for the audio thread. */
+    double quantized (double seconds) const;
     std::unique_ptr<RubberBand::RubberBandStretcher> stretcher;
     juce::AudioBuffer<float> stretchInput;                 // one chunk fed to the stretcher
     juce::AudioBuffer<float> stretchDiscard;               // where its warm-up output goes
@@ -350,10 +627,12 @@ private:
     bool stretchPrimed = false;                            // audio thread only
 
     void renderStretched (const Track& track, juce::AudioBuffer<float>& destination,
-                          double rate, double fileToDevice,
-                          const SeparatedTrack* separation, const float* stemGains);
+                          double rate, double fileToDevice, double pitchScale,
+                          const SeparatedTrack* separation, const float* stemGainTargets,
+                          float stemPathTarget);
     void feedStretcher (const Track& track, double fileToDevice,
-                        const SeparatedTrack* separation, const float* stemGains);
+                        const SeparatedTrack* separation, const float* stemGainTargets,
+                        float stemPathTarget);
 
     double readPosition = 0.0;                          // audio thread, in file samples
     double deviceSampleRate = 44100.0;

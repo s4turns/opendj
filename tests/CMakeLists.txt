@@ -34,15 +34,20 @@ target_sources(opendj-tests PRIVATE
     TrackAnalyser_test.cpp
     KeyDetector_test.cpp
     MidiMapping_test.cpp
+    MidiLearn_test.cpp
     AngleMath_test.cpp
     OverlayMath_test.cpp
     AutoMix_test.cpp
     MixPoints_test.cpp
+    Loudness_test.cpp
     TempoMath_test.cpp
+    TapTempo_test.cpp
     StemModel_test.cpp
+    StemQueue_test.cpp
     WaveformMath_test.cpp
     StemDsp_test.cpp
     Library_test.cpp
+    RekordboxImport_test.cpp
     LibraryScanner_test.cpp
     TagReader_test.cpp
     ${OPENDJ_ENGINE_SOURCES})
@@ -64,6 +69,10 @@ if(OpenVINO_FOUND)
     if(WIN32)
         opendj_copy_openvino_dlls(opendj-tests)
     endif()
+endif()
+
+if(OPENDJ_HAVE_ONNXRUNTIME)
+    opendj_use_onnxruntime(opendj-tests)
 endif()
 
 if(OPENDJ_VISUALIZER_AVAILABLE)

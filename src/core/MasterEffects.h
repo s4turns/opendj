@@ -46,10 +46,24 @@ public:
         echo,
         reverb,
         filter,
-        plugin
+        plugin,
+        flanger,
+        phaser,
+        gate,
+        bitcrusher,
+        stutter
     };
 
-    static constexpr int numTypes = 4;
+    static constexpr int numTypes = 9;
+
+    /** The order effects are offered in, and stepped through. The numbers above
+        stay as they are because a mapping file can name one (master_fx.type),
+        and settings files name them in words, so neither cares about this. */
+    static constexpr std::array<Type, numTypes> menuOrder
+    {
+        Type::echo, Type::reverb, Type::filter, Type::flanger, Type::phaser,
+        Type::gate, Type::bitcrusher, Type::stutter, Type::plugin
+    };
 
     static juce::String getTypeName (Type type);
 
@@ -62,6 +76,14 @@ public:
     static int echoDivisionIndexFor (float normalised) noexcept;
     static float normalisedForEchoDivision (int index) noexcept;
     static juce::String echoDivisionName (int index);
+
+    /** How long one sweep of the flanger or phaser lasts, in beats. */
+    static constexpr std::array<double, 6> sweepDivisions { 1.0, 2.0, 4.0, 8.0, 16.0, 32.0 };
+
+    /** The musical length a parameter stands for at this position, for a label:
+        "1/4" for the echo, the gate and the stutter, "8" for a sweep. Empty for
+        a parameter that is not a length. */
+    static juce::String getDivisionText (Type type, int param, float normalised);
 
     MasterEffects();
     ~MasterEffects();
@@ -97,6 +119,19 @@ public:
         room is hearing, since nothing here knows about tempo. */
     void setBeatSeconds (double seconds);
     double getBeatSeconds() const noexcept { return beatSeconds.load (std::memory_order_relaxed); }
+
+    /** Where the mix is, in beats since the track's first. The gate and the
+        sweeps run on a clock of their own between calls, so this only has to
+        arrive now and then; the engine's timer sends it. A small difference is
+        eased out and a large one, from a seek, is jumped to. */
+    void setBeatPosition (double beats);
+
+    /** The clock itself, in beats, wrapped at beatCycle. */
+    double getBeatClock() const noexcept { return beatClockForUi.load (std::memory_order_relaxed); }
+
+    /** Every division above fits into this many beats a whole number of times,
+        so wrapping the clock never moves a gate or a sweep. */
+    static constexpr double beatCycle = 64.0;
 
     /** One echo repeat in the slot, in seconds: the beat times the division. */
     double getEchoSeconds (int slot) const noexcept;
@@ -158,13 +193,19 @@ private:
         // Written on the message thread.
         std::atomic<Type> requestedType { Type::echo };
         std::atomic<bool> enabled { false };
-        std::atomic<float> wet[numTypes] { { 0.5f }, { 0.4f }, { 1.0f }, { 1.0f } };
+        std::atomic<float> wet[numTypes] { { 0.5f }, { 0.4f }, { 1.0f }, { 1.0f },
+                                           { 1.0f }, { 1.0f }, { 1.0f }, { 1.0f }, { 1.0f } };
         std::atomic<float> params[numTypes][numParams]
         {
             { { 0.6f }, { 0.5f } },     // one beat, moderate feedback
             { { 0.6f }, { 0.4f } },     // a medium room
             { { 0.5f }, { 0.3f } },     // open, a little resonance
-            { { 0.5f }, { 0.5f } }      // replaced by the plugin's own values
+            { { 0.5f }, { 0.5f } },     // replaced by the plugin's own values
+            { { 0.4f }, { 0.4f } },     // flanger: four beats, some feedback
+            { { 0.4f }, { 0.5f } },     // phaser: four beats, moderate depth
+            { { 0.4f }, { 0.5f } },     // gate: half beats, open half the time
+            { { 0.5f }, { 0.3f } },     // bitcrusher: nine bits, a little aliasing
+            { { 0.2f }, { 0.0f } }      // stutter: quarter beats that do not fade
         };
         std::atomic<int> pluginParamIndex[numParams] { { 0 }, { 1 } };
 
@@ -192,6 +233,27 @@ private:
         juce::dsp::StateVariableTPTFilter<float> filterLow, filterHigh;
         juce::SmoothedValue<float> filterLowCutoff, filterHighCutoff, filterResonance;
 
+        juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Linear> flangerLine { 1 };
+        float flangerDelayNow[2] { 0.0f, 0.0f };
+
+        static constexpr int phaserStages = 6;
+        float phaserIn[2][phaserStages] {}, phaserOut[2][phaserStages] {};
+        float phaserLast[2] { 0.0f, 0.0f }, phaserCoefficient[2] { 0.0f, 0.0f };
+        int phaserCountdown = 0;
+
+        juce::SmoothedValue<float> gateGain;
+
+        float crushHeld[2] { 0.0f, 0.0f };
+        double crushCounter = 0.0;
+
+        // The last few seconds of the mix, which a stutter repeats the end of.
+        // It stops being written while a slice is held, so a long hold cannot
+        // overwrite what it is playing.
+        juce::AudioBuffer<float> stutterRing;
+        int stutterWrite = 0, stutterStart = 0, stutterLength = 0, stutterOffset = 0;
+        float stutterGain = 1.0f;
+        bool stutterHeld = false;
+
         PluginHolder* active = nullptr;
         float lastSentParam[numParams] { -1.0f, -1.0f };
         juce::MidiBuffer midi;
@@ -208,6 +270,9 @@ private:
 
     std::array<Slot, numSlots> slots;
     std::atomic<double> beatSeconds { 0.5 };
+    std::atomic<double> beatPositionHint { -1.0 };
+    std::atomic<double> beatClockForUi { 0.0 };
+    double beatClock = 0.0;                                // audio thread
     double sampleRate = 44100.0;
 
     // What a plugin is prepared with, and a lock kept by setPlugin and

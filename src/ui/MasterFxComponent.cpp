@@ -82,8 +82,8 @@ MasterFxComponent::MasterFxComponent (MasterEffects& effectsToControl, PluginHos
         unit.heading.setColour (juce::Label::textColourId, juce::Colours::white);
         addAndMakeVisible (unit.heading);
 
-        for (int t = 0; t < MasterEffects::numTypes; ++t)
-            unit.type.addItem (MasterEffects::getTypeName ((MasterEffects::Type) t), t + 1);
+        for (const auto type : MasterEffects::menuOrder)
+            unit.type.addItem (MasterEffects::getTypeName (type), idFor (type));
 
         unit.type.setSelectedId (idFor (effects.getType (slot)), juce::dontSendNotification);
         unit.previousTypeId = unit.type.getSelectedId();
@@ -109,7 +109,8 @@ MasterFxComponent::MasterFxComponent (MasterEffects& effectsToControl, PluginHos
 
         unit.onButton.setClickingTogglesState (true);
         unit.onButton.setColour (juce::TextButton::buttonOnColourId, accentColour.darker (0.3f));
-        unit.onButton.setTooltip ("Echo and reverb ring out when switched off; the filter and plugins return to dry");
+        unit.onButton.setTooltip ("Echo and reverb ring out when switched off; everything else returns to dry. "
+                                 "A stutter repeats what has just played for as long as it is on");
         unit.onButton.onClick = [this, slot, &unit]
         {
             effects.setEnabled (slot, unit.onButton.getToggleState());
@@ -179,9 +180,9 @@ void MasterFxComponent::updateCaptions (int slot)
 
         // The division is the one value worth reading exactly: a knob's angle
         // does not say whether it is on a half beat or a whole one.
-        if (type == MasterEffects::Type::echo && p == 0)
-            text << " " << MasterEffects::echoDivisionName (
-                               MasterEffects::echoDivisionIndexFor (effects.getParam (slot, 0)));
+        if (const auto division = MasterEffects::getDivisionText (type, p, effects.getParam (slot, p));
+            division.isNotEmpty())
+            text << " " << division;
 
         unit.paramCaptions[(size_t) p].setText (text, juce::dontSendNotification);
         unit.params[(size_t) p].setTooltip (MasterEffects::getTypeName (type) + ": " + text);

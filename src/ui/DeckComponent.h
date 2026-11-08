@@ -53,6 +53,7 @@ public:
 
     std::function<void()> onPress;
     std::function<void()> onClear;
+    std::function<void()> onRename;
 
     void mouseDown (const juce::MouseEvent& e) override
     {
@@ -68,6 +69,12 @@ public:
 
         if (onPress != nullptr)
             onPress();
+    }
+
+    void mouseDoubleClick (const juce::MouseEvent&) override
+    {
+        if (onRename != nullptr)
+            onRename();
     }
 };
 
@@ -100,6 +107,9 @@ public:
         every deck rather than something a deck decides for itself. */
     void setWaveformZoom (double seconds);
 
+    /** Shows the deck's key as a Camelot number, 8A, or as a note, Am. */
+    void setKeyNotation (bool camelot);
+
     /** Asked for when the wheel is turned over this deck's scrolling waveform,
         with a number of rungs, positive to zoom in. */
     std::function<void (int steps)> onZoomRequested;
@@ -115,7 +125,10 @@ public:
 private:
     void loadButtonClicked();
     void refreshLoopControls();
+    void updateSeparateTooltip();
     void refreshHotCues();
+    void beginHotCueRename (int slot);
+    void finishHotCueRename (bool keep);
     void applyTempoFromSlider();
     double rangePercent() const;
     void updateTempoReadout();
@@ -129,6 +142,19 @@ private:
     juce::Label titleLabel;
     juce::Label timeLabel;
     juce::Label bpmLabel;
+
+    /** Opens the beat grid editor when the BPM readout is clicked. */
+    struct BpmClick final : public juce::MouseListener
+    {
+        std::function<void()> onClick;
+        void mouseUp (const juce::MouseEvent& e) override
+        {
+            if (e.mouseWasClicked() && onClick != nullptr)
+                onClick();
+        }
+    };
+
+    BpmClick bpmClick;
     juce::TextButton swapButton;
     juce::TextButton loadButton { "Load" };
     juce::TextButton playButton { "Play" };
@@ -136,18 +162,41 @@ private:
     juce::TextButton keyLockButton { "Key" };
     juce::TextButton slipButton { "Slip" };
 
-    /** One knob per part of the track, and the button that asks for them. The
-        knobs stay dead until a separation exists, since turning down a stem
-        that is not there would do nothing and look broken. */
+    // The deck's performance effects, a row of their own under the hot cues.
+    juce::TextButton brakeButton { "Brake" };
+    juce::TextButton backspinButton { "Spin" };
+    juce::TextButton reverseButton { "Rev" };
+    MomentaryButton censorButton { "Censor" };
+    juce::TextButton echoOutButton { "Echo out" };
+
+    // The key the deck is in, with a semitone either way. Clicking the key
+    // offers a match to another deck.
+    juce::Label keyLabel;
+    BpmClick keyClick;
+    juce::TextButton keyDownButton { "-" };
+    juce::TextButton keyUpButton { "+" };
+    bool camelotKeys = false;
+    void updateKeyReadout();
+    void showKeyMenu();
+
+    /** One knob per part of the track, the pads that take whole parts away, and
+        the button that asks for them. All of it stays dead until a separation
+        exists, since turning down a stem that is not there would do nothing and
+        look broken. */
     struct StemControls
     {
         juce::TextButton separate { "Stems" };
         std::array<juce::Slider, numStems> knobs;
         std::array<juce::Label, numStems> labels;
+        std::array<juce::TextButton, numStemPads> pads;
+        juce::Slider fxAmount;
+        PadButton fxButton { "FX" };
     };
 
+    void showStemFxMenu();
+    void updateStemFxTooltip();
+
     StemControls stemControls;
-    bool stemsWereAvailable = false;
     MomentaryButton cueButton { "Cue" };
     juce::Slider tempoSlider;
     juce::Label tempoLabel;
@@ -165,12 +214,32 @@ private:
         rather than a click. Below this it leaves a loop running. */
     static constexpr juce::uint32 holdIsARollMs = 350;
 
+    // Beat jump: back, the size (click to step through 1 to 32 beats), and
+    // forward. Quantize sits beside them, since it changes where the loop
+    // and cue buttons land.
+    juce::TextButton beatJumpBackButton { juce::String::fromUTF8 ("\xe2\x97\x80") };
+    juce::TextButton beatJumpSizeButton;
+    juce::TextButton beatJumpForwardButton { juce::String::fromUTF8 ("\xe2\x96\xb6") };
+    juce::TextButton quantizeButton { "Q" };
+    int beatJumpSlot = 4;   // into loopBeatsForSlot: 4 beats, a bar
+
+    void updateBeatJumpSize();
+
     std::array<juce::uint32, numLoopButtons> loopButtonPressedAt {};
     std::array<bool, numLoopButtons> loopButtonRolling { };
 
     // Hot cue pads, in the same colours as their markers on the waveforms.
     std::array<PadButton, Deck::numHotCues> hotCueButtons;
     std::array<double, Deck::numHotCues> shownHotCues {};
+
+    // Names live with the track in the library, not on the deck; these are what
+    // was last read for the loaded file, shown on the waveform tabs. A rename
+    // sets the dirty flag so the next refresh reloads them even though no
+    // position moved. The editor floats over the pad row while a name is typed.
+    std::array<juce::String, Deck::numHotCues> hotCueNames;
+    bool hotCueNamesDirty = true;
+    int editingHotCue = -1;
+    juce::TextEditor hotCueNameEditor;
 
     WaveformComponent scrollingWave { WaveformComponent::Mode::scrolling };
     WaveformComponent overviewWave { WaveformComponent::Mode::overview };

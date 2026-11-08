@@ -58,6 +58,7 @@ struct TrackAnalysis
     float confidence = 0.0f;         ///< 0 to 1, how clear the tempo peak was
 
     MusicalKey key;                  ///< invalid when nothing tonal was found
+    double loudnessLufs = 0.0;       ///< integrated loudness; 0 when there was nothing to measure
 
     bool hasTempo() const noexcept { return bpm > 0.0; }
     bool hasKey() const noexcept { return key.isValid(); }
@@ -65,6 +66,10 @@ struct TrackAnalysis
     /** The beat nearest a position, in seconds. Returns the position unchanged
         when there is no grid. */
     double nearestBeatSeconds (double seconds) const noexcept;
+
+    /** The beat at or behind a position, in seconds, never below zero. Returns the
+        position unchanged when there is no grid. */
+    double beatAtOrBehindSeconds (double seconds) const noexcept;
 
     double secondsPerBeat() const noexcept { return bpm > 0.0 ? 60.0 / bpm : 0.0; }
 };
