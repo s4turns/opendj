@@ -1,0 +1,1185 @@
+{
+  "name": "Hercules DJControl Inpulse 300",
+  "author": "The OpenDJ contributors, from the Mixxx mapping by DJ Phatso for Hercules Technical Support",
+  "description": "Translated from the Mixxx mapping by DJ Phatso for Hercules Technical Support (https://github.com/mixxxdj/mixxx/tree/64c1cbec91a86bf72fdbaedd5cf750275b29a729/res/controllers), which is GPLv2 or later and so compatible with this project, by scripts/import-mixxx-mapping.py. Not yet tried on the hardware. Touching the platter always scratches: OpenDJ has no separate vinyl mode, so the button that switches one is left alone. Mixxx controls with nothing to reach in OpenDJ, and so not mapped: beatlooproll_0.125_activate, beats_translate_curpos, changeMode, enabled, group_[Channel1]_enable, group_[Channel2]_enable, input, meta, MoveFocus, MoveHorizontal, next_effect, play_stutter, show_maximized_library, start_play, sync_leader, toneplay, vinylButton.",
+  "deviceNameHints": [
+    "DJControl Inpulse 300"
+  ],
+  "jogTicksPerRevolution": 248,
+  "initMessages": [
+    "B0 7F 7F"
+  ],
+  "controls": [
+    {
+      "name": "Deck A play",
+      "status": "0x91",
+      "number": "0x07",
+      "action": "deck.play_toggle",
+      "deck": 0,
+      "feedbackNumber": "0x07"
+    },
+    {
+      "name": "Deck A cue",
+      "status": "0x91",
+      "number": "0x06",
+      "action": "deck.cue",
+      "deck": 0,
+      "feedbackNumber": "0x06"
+    },
+    {
+      "name": "Deck A sync",
+      "status": "0x91",
+      "number": "0x05",
+      "action": "deck.sync",
+      "deck": 0,
+      "feedbackNumber": "0x05"
+    },
+    {
+      "name": "Deck A headphone cue",
+      "status": "0x91",
+      "number": "0x0C",
+      "action": "mixer.cue_toggle",
+      "deck": 0,
+      "feedbackNumber": "0x0C"
+    },
+    {
+      "name": "Deck A load",
+      "status": "0x91",
+      "number": "0x0D",
+      "action": "deck.load",
+      "deck": 0
+    },
+    {
+      "name": "Deck A slip",
+      "status": "0x91",
+      "number": "0x01",
+      "action": "deck.slip_toggle",
+      "deck": 0
+    },
+    {
+      "name": "Deck A quantize",
+      "status": "0x91",
+      "number": "0x02",
+      "action": "deck.quantize_toggle",
+      "deck": 0,
+      "feedbackNumber": "0x02"
+    },
+    {
+      "name": "Deck A platter touch",
+      "status": "0x91",
+      "number": "0x08",
+      "action": "jog.touch",
+      "deck": 0
+    },
+    {
+      "name": "Deck A loop in",
+      "status": "0x91",
+      "number": "0x09",
+      "action": "loop.in",
+      "deck": 0
+    },
+    {
+      "name": "Deck A loop out",
+      "status": "0x91",
+      "number": "0x0A",
+      "action": "loop.out",
+      "deck": 0
+    },
+    {
+      "name": "Deck B play",
+      "status": "0x92",
+      "number": "0x07",
+      "action": "deck.play_toggle",
+      "deck": 1,
+      "feedbackNumber": "0x07"
+    },
+    {
+      "name": "Deck B cue",
+      "status": "0x92",
+      "number": "0x06",
+      "action": "deck.cue",
+      "deck": 1,
+      "feedbackNumber": "0x06"
+    },
+    {
+      "name": "Deck B sync",
+      "status": "0x92",
+      "number": "0x05",
+      "action": "deck.sync",
+      "deck": 1,
+      "feedbackNumber": "0x05"
+    },
+    {
+      "name": "Deck B headphone cue",
+      "status": "0x92",
+      "number": "0x0C",
+      "action": "mixer.cue_toggle",
+      "deck": 1,
+      "feedbackNumber": "0x0C"
+    },
+    {
+      "name": "Deck B load",
+      "status": "0x92",
+      "number": "0x0D",
+      "action": "deck.load",
+      "deck": 1
+    },
+    {
+      "name": "Deck B slip",
+      "status": "0x92",
+      "number": "0x01",
+      "action": "deck.slip_toggle",
+      "deck": 1
+    },
+    {
+      "name": "Deck B quantize",
+      "status": "0x92",
+      "number": "0x02",
+      "action": "deck.quantize_toggle",
+      "deck": 1,
+      "feedbackNumber": "0x02"
+    },
+    {
+      "name": "Deck B platter touch",
+      "status": "0x92",
+      "number": "0x08",
+      "action": "jog.touch",
+      "deck": 1
+    },
+    {
+      "name": "Deck B loop in",
+      "status": "0x92",
+      "number": "0x09",
+      "action": "loop.in",
+      "deck": 1
+    },
+    {
+      "name": "Deck B loop out",
+      "status": "0x92",
+      "number": "0x0A",
+      "action": "loop.out",
+      "deck": 1
+    },
+    {
+      "name": "Deck A platter touch",
+      "status": "0x94",
+      "number": "0x08",
+      "action": "jog.touch",
+      "deck": 0
+    },
+    {
+      "name": "Deck A loop halve",
+      "status": "0x94",
+      "number": "0x09",
+      "action": "loop.halve",
+      "deck": 0
+    },
+    {
+      "name": "Deck A loop double",
+      "status": "0x94",
+      "number": "0x0A",
+      "action": "loop.double",
+      "deck": 0
+    },
+    {
+      "name": "Deck B platter touch",
+      "status": "0x95",
+      "number": "0x08",
+      "action": "jog.touch",
+      "deck": 1
+    },
+    {
+      "name": "Deck B loop halve",
+      "status": "0x95",
+      "number": "0x09",
+      "action": "loop.halve",
+      "deck": 1
+    },
+    {
+      "name": "Deck B loop double",
+      "status": "0x95",
+      "number": "0x0A",
+      "action": "loop.double",
+      "deck": 1
+    },
+    {
+      "name": "Deck A hot cue 1",
+      "status": "0x96",
+      "number": "0x00",
+      "action": "pad.hotcue",
+      "deck": 0,
+      "slot": 0,
+      "feedbackNumber": "0x00",
+      "feedbackOnVelocity": "0x7E"
+    },
+    {
+      "name": "Deck A hot cue 2",
+      "status": "0x96",
+      "number": "0x01",
+      "action": "pad.hotcue",
+      "deck": 0,
+      "slot": 1,
+      "feedbackNumber": "0x01",
+      "feedbackOnVelocity": "0x7E"
+    },
+    {
+      "name": "Deck A hot cue 3",
+      "status": "0x96",
+      "number": "0x02",
+      "action": "pad.hotcue",
+      "deck": 0,
+      "slot": 2,
+      "feedbackNumber": "0x02",
+      "feedbackOnVelocity": "0x7E"
+    },
+    {
+      "name": "Deck A hot cue 4",
+      "status": "0x96",
+      "number": "0x03",
+      "action": "pad.hotcue",
+      "deck": 0,
+      "slot": 3,
+      "feedbackNumber": "0x03",
+      "feedbackOnVelocity": "0x7E"
+    },
+    {
+      "name": "Deck A hot cue 5",
+      "status": "0x96",
+      "number": "0x04",
+      "action": "pad.hotcue",
+      "deck": 0,
+      "slot": 4,
+      "feedbackNumber": "0x04",
+      "feedbackOnVelocity": "0x7E"
+    },
+    {
+      "name": "Deck A hot cue 6",
+      "status": "0x96",
+      "number": "0x05",
+      "action": "pad.hotcue",
+      "deck": 0,
+      "slot": 5,
+      "feedbackNumber": "0x05",
+      "feedbackOnVelocity": "0x7E"
+    },
+    {
+      "name": "Deck A hot cue 7",
+      "status": "0x96",
+      "number": "0x06",
+      "action": "pad.hotcue",
+      "deck": 0,
+      "slot": 6,
+      "feedbackNumber": "0x06",
+      "feedbackOnVelocity": "0x7E"
+    },
+    {
+      "name": "Deck A hot cue 8",
+      "status": "0x96",
+      "number": "0x07",
+      "action": "pad.hotcue",
+      "deck": 0,
+      "slot": 7,
+      "feedbackNumber": "0x07",
+      "feedbackOnVelocity": "0x7E"
+    },
+    {
+      "name": "Deck A clear hot cue 1",
+      "status": "0x96",
+      "number": "0x08",
+      "action": "pad.hotcue_clear",
+      "deck": 0,
+      "slot": 0
+    },
+    {
+      "name": "Deck A clear hot cue 2",
+      "status": "0x96",
+      "number": "0x09",
+      "action": "pad.hotcue_clear",
+      "deck": 0,
+      "slot": 1
+    },
+    {
+      "name": "Deck A clear hot cue 3",
+      "status": "0x96",
+      "number": "0x0A",
+      "action": "pad.hotcue_clear",
+      "deck": 0,
+      "slot": 2
+    },
+    {
+      "name": "Deck A clear hot cue 4",
+      "status": "0x96",
+      "number": "0x0B",
+      "action": "pad.hotcue_clear",
+      "deck": 0,
+      "slot": 3
+    },
+    {
+      "name": "Deck A clear hot cue 5",
+      "status": "0x96",
+      "number": "0x0C",
+      "action": "pad.hotcue_clear",
+      "deck": 0,
+      "slot": 4
+    },
+    {
+      "name": "Deck A clear hot cue 6",
+      "status": "0x96",
+      "number": "0x0D",
+      "action": "pad.hotcue_clear",
+      "deck": 0,
+      "slot": 5
+    },
+    {
+      "name": "Deck A clear hot cue 7",
+      "status": "0x96",
+      "number": "0x0E",
+      "action": "pad.hotcue_clear",
+      "deck": 0,
+      "slot": 6
+    },
+    {
+      "name": "Deck A clear hot cue 8",
+      "status": "0x96",
+      "number": "0x0F",
+      "action": "pad.hotcue_clear",
+      "deck": 0,
+      "slot": 7
+    },
+    {
+      "name": "FX 1 on/off",
+      "status": "0x96",
+      "number": "0x50",
+      "action": "master_fx.toggle",
+      "deck": 0
+    },
+    {
+      "name": "FX 1 next",
+      "status": "0x96",
+      "number": "0x54",
+      "action": "master_fx.next_type",
+      "deck": 0
+    },
+    {
+      "name": "Deck A roll 0.25",
+      "status": "0x96",
+      "number": "0x11",
+      "action": "loop.roll",
+      "deck": 0,
+      "slot": 0
+    },
+    {
+      "name": "Deck A roll 0.5",
+      "status": "0x96",
+      "number": "0x12",
+      "action": "loop.roll",
+      "deck": 0,
+      "slot": 1
+    },
+    {
+      "name": "Deck A roll 1",
+      "status": "0x96",
+      "number": "0x13",
+      "action": "loop.roll",
+      "deck": 0,
+      "slot": 2
+    },
+    {
+      "name": "Deck A roll 2",
+      "status": "0x96",
+      "number": "0x14",
+      "action": "loop.roll",
+      "deck": 0,
+      "slot": 3
+    },
+    {
+      "name": "Deck A roll 4",
+      "status": "0x96",
+      "number": "0x15",
+      "action": "loop.roll",
+      "deck": 0,
+      "slot": 4
+    },
+    {
+      "name": "Deck A roll 8",
+      "status": "0x96",
+      "number": "0x16",
+      "action": "loop.roll",
+      "deck": 0,
+      "slot": 5
+    },
+    {
+      "name": "Deck A roll 16",
+      "status": "0x96",
+      "number": "0x17",
+      "action": "loop.roll",
+      "deck": 0,
+      "slot": 6
+    },
+    {
+      "name": "Sampler 1",
+      "status": "0x96",
+      "number": "0x30",
+      "action": "sampler.trigger",
+      "slot": 0
+    },
+    {
+      "name": "Sampler 2",
+      "status": "0x96",
+      "number": "0x31",
+      "action": "sampler.trigger",
+      "slot": 1
+    },
+    {
+      "name": "Sampler 3",
+      "status": "0x96",
+      "number": "0x32",
+      "action": "sampler.trigger",
+      "slot": 2
+    },
+    {
+      "name": "Sampler 4",
+      "status": "0x96",
+      "number": "0x33",
+      "action": "sampler.trigger",
+      "slot": 3
+    },
+    {
+      "name": "Sampler 5",
+      "status": "0x96",
+      "number": "0x34",
+      "action": "sampler.trigger",
+      "slot": 4
+    },
+    {
+      "name": "Sampler 6",
+      "status": "0x96",
+      "number": "0x35",
+      "action": "sampler.trigger",
+      "slot": 5
+    },
+    {
+      "name": "Sampler 7",
+      "status": "0x96",
+      "number": "0x36",
+      "action": "sampler.trigger",
+      "slot": 6
+    },
+    {
+      "name": "Sampler 8",
+      "status": "0x96",
+      "number": "0x37",
+      "action": "sampler.trigger",
+      "slot": 7
+    },
+    {
+      "name": "Sampler 1 stop",
+      "status": "0x96",
+      "number": "0x38",
+      "action": "sampler.stop",
+      "slot": 0
+    },
+    {
+      "name": "Sampler 2 stop",
+      "status": "0x96",
+      "number": "0x39",
+      "action": "sampler.stop",
+      "slot": 1
+    },
+    {
+      "name": "Sampler 3 stop",
+      "status": "0x96",
+      "number": "0x3A",
+      "action": "sampler.stop",
+      "slot": 2
+    },
+    {
+      "name": "Sampler 4 stop",
+      "status": "0x96",
+      "number": "0x3B",
+      "action": "sampler.stop",
+      "slot": 3
+    },
+    {
+      "name": "Sampler 5 stop",
+      "status": "0x96",
+      "number": "0x3C",
+      "action": "sampler.stop",
+      "slot": 4
+    },
+    {
+      "name": "Sampler 6 stop",
+      "status": "0x96",
+      "number": "0x3D",
+      "action": "sampler.stop",
+      "slot": 5
+    },
+    {
+      "name": "Sampler 7 stop",
+      "status": "0x96",
+      "number": "0x3E",
+      "action": "sampler.stop",
+      "slot": 6
+    },
+    {
+      "name": "Sampler 8 stop",
+      "status": "0x96",
+      "number": "0x3F",
+      "action": "sampler.stop",
+      "slot": 7
+    },
+    {
+      "name": "Deck A jump back 1",
+      "status": "0x96",
+      "number": "0x70",
+      "action": "deck.beatjump_back",
+      "deck": 0,
+      "slot": 2
+    },
+    {
+      "name": "Deck A jump forward 1",
+      "status": "0x96",
+      "number": "0x71",
+      "action": "deck.beatjump_forward",
+      "deck": 0,
+      "slot": 2
+    },
+    {
+      "name": "Deck A jump back 2",
+      "status": "0x96",
+      "number": "0x72",
+      "action": "deck.beatjump_back",
+      "deck": 0,
+      "slot": 3
+    },
+    {
+      "name": "Deck A jump forward 2",
+      "status": "0x96",
+      "number": "0x73",
+      "action": "deck.beatjump_forward",
+      "deck": 0,
+      "slot": 3
+    },
+    {
+      "name": "Deck A jump back 4",
+      "status": "0x96",
+      "number": "0x74",
+      "action": "deck.beatjump_back",
+      "deck": 0,
+      "slot": 4
+    },
+    {
+      "name": "Deck A jump forward 4",
+      "status": "0x96",
+      "number": "0x75",
+      "action": "deck.beatjump_forward",
+      "deck": 0,
+      "slot": 4
+    },
+    {
+      "name": "Deck A jump back 8",
+      "status": "0x96",
+      "number": "0x76",
+      "action": "deck.beatjump_back",
+      "deck": 0,
+      "slot": 5
+    },
+    {
+      "name": "Deck A jump forward 8",
+      "status": "0x96",
+      "number": "0x77",
+      "action": "deck.beatjump_forward",
+      "deck": 0,
+      "slot": 5
+    },
+    {
+      "name": "Deck B hot cue 1",
+      "status": "0x97",
+      "number": "0x00",
+      "action": "pad.hotcue",
+      "deck": 1,
+      "slot": 0,
+      "feedbackNumber": "0x00",
+      "feedbackOnVelocity": "0x7E"
+    },
+    {
+      "name": "Deck B hot cue 2",
+      "status": "0x97",
+      "number": "0x01",
+      "action": "pad.hotcue",
+      "deck": 1,
+      "slot": 1,
+      "feedbackNumber": "0x01",
+      "feedbackOnVelocity": "0x7E"
+    },
+    {
+      "name": "Deck B hot cue 3",
+      "status": "0x97",
+      "number": "0x02",
+      "action": "pad.hotcue",
+      "deck": 1,
+      "slot": 2,
+      "feedbackNumber": "0x02",
+      "feedbackOnVelocity": "0x7E"
+    },
+    {
+      "name": "Deck B hot cue 4",
+      "status": "0x97",
+      "number": "0x03",
+      "action": "pad.hotcue",
+      "deck": 1,
+      "slot": 3,
+      "feedbackNumber": "0x03",
+      "feedbackOnVelocity": "0x7E"
+    },
+    {
+      "name": "Deck B hot cue 5",
+      "status": "0x97",
+      "number": "0x04",
+      "action": "pad.hotcue",
+      "deck": 1,
+      "slot": 4,
+      "feedbackNumber": "0x04",
+      "feedbackOnVelocity": "0x7E"
+    },
+    {
+      "name": "Deck B hot cue 6",
+      "status": "0x97",
+      "number": "0x05",
+      "action": "pad.hotcue",
+      "deck": 1,
+      "slot": 5,
+      "feedbackNumber": "0x05",
+      "feedbackOnVelocity": "0x7E"
+    },
+    {
+      "name": "Deck B hot cue 7",
+      "status": "0x97",
+      "number": "0x06",
+      "action": "pad.hotcue",
+      "deck": 1,
+      "slot": 6,
+      "feedbackNumber": "0x06",
+      "feedbackOnVelocity": "0x7E"
+    },
+    {
+      "name": "Deck B hot cue 8",
+      "status": "0x97",
+      "number": "0x07",
+      "action": "pad.hotcue",
+      "deck": 1,
+      "slot": 7,
+      "feedbackNumber": "0x07",
+      "feedbackOnVelocity": "0x7E"
+    },
+    {
+      "name": "Deck B clear hot cue 1",
+      "status": "0x97",
+      "number": "0x08",
+      "action": "pad.hotcue_clear",
+      "deck": 1,
+      "slot": 0
+    },
+    {
+      "name": "Deck B clear hot cue 2",
+      "status": "0x97",
+      "number": "0x09",
+      "action": "pad.hotcue_clear",
+      "deck": 1,
+      "slot": 1
+    },
+    {
+      "name": "Deck B clear hot cue 3",
+      "status": "0x97",
+      "number": "0x0A",
+      "action": "pad.hotcue_clear",
+      "deck": 1,
+      "slot": 2
+    },
+    {
+      "name": "Deck B clear hot cue 4",
+      "status": "0x97",
+      "number": "0x0B",
+      "action": "pad.hotcue_clear",
+      "deck": 1,
+      "slot": 3
+    },
+    {
+      "name": "Deck B clear hot cue 5",
+      "status": "0x97",
+      "number": "0x0C",
+      "action": "pad.hotcue_clear",
+      "deck": 1,
+      "slot": 4
+    },
+    {
+      "name": "Deck B clear hot cue 6",
+      "status": "0x97",
+      "number": "0x0D",
+      "action": "pad.hotcue_clear",
+      "deck": 1,
+      "slot": 5
+    },
+    {
+      "name": "Deck B clear hot cue 7",
+      "status": "0x97",
+      "number": "0x0E",
+      "action": "pad.hotcue_clear",
+      "deck": 1,
+      "slot": 6
+    },
+    {
+      "name": "Deck B clear hot cue 8",
+      "status": "0x97",
+      "number": "0x0F",
+      "action": "pad.hotcue_clear",
+      "deck": 1,
+      "slot": 7
+    },
+    {
+      "name": "FX 2 on/off",
+      "status": "0x97",
+      "number": "0x50",
+      "action": "master_fx.toggle",
+      "deck": 1
+    },
+    {
+      "name": "FX 2 next",
+      "status": "0x97",
+      "number": "0x54",
+      "action": "master_fx.next_type",
+      "deck": 1
+    },
+    {
+      "name": "Deck B roll 0.25",
+      "status": "0x97",
+      "number": "0x11",
+      "action": "loop.roll",
+      "deck": 1,
+      "slot": 0
+    },
+    {
+      "name": "Deck B roll 0.5",
+      "status": "0x97",
+      "number": "0x12",
+      "action": "loop.roll",
+      "deck": 1,
+      "slot": 1
+    },
+    {
+      "name": "Deck B roll 1",
+      "status": "0x97",
+      "number": "0x13",
+      "action": "loop.roll",
+      "deck": 1,
+      "slot": 2
+    },
+    {
+      "name": "Deck B roll 2",
+      "status": "0x97",
+      "number": "0x14",
+      "action": "loop.roll",
+      "deck": 1,
+      "slot": 3
+    },
+    {
+      "name": "Deck B roll 4",
+      "status": "0x97",
+      "number": "0x15",
+      "action": "loop.roll",
+      "deck": 1,
+      "slot": 4
+    },
+    {
+      "name": "Deck B roll 8",
+      "status": "0x97",
+      "number": "0x16",
+      "action": "loop.roll",
+      "deck": 1,
+      "slot": 5
+    },
+    {
+      "name": "Deck B roll 16",
+      "status": "0x97",
+      "number": "0x17",
+      "action": "loop.roll",
+      "deck": 1,
+      "slot": 6
+    },
+    {
+      "name": "Sampler 1",
+      "status": "0x97",
+      "number": "0x30",
+      "action": "sampler.trigger",
+      "slot": 0
+    },
+    {
+      "name": "Sampler 2",
+      "status": "0x97",
+      "number": "0x31",
+      "action": "sampler.trigger",
+      "slot": 1
+    },
+    {
+      "name": "Sampler 3",
+      "status": "0x97",
+      "number": "0x32",
+      "action": "sampler.trigger",
+      "slot": 2
+    },
+    {
+      "name": "Sampler 4",
+      "status": "0x97",
+      "number": "0x33",
+      "action": "sampler.trigger",
+      "slot": 3
+    },
+    {
+      "name": "Sampler 5",
+      "status": "0x97",
+      "number": "0x34",
+      "action": "sampler.trigger",
+      "slot": 4
+    },
+    {
+      "name": "Sampler 6",
+      "status": "0x97",
+      "number": "0x35",
+      "action": "sampler.trigger",
+      "slot": 5
+    },
+    {
+      "name": "Sampler 7",
+      "status": "0x97",
+      "number": "0x36",
+      "action": "sampler.trigger",
+      "slot": 6
+    },
+    {
+      "name": "Sampler 8",
+      "status": "0x97",
+      "number": "0x37",
+      "action": "sampler.trigger",
+      "slot": 7
+    },
+    {
+      "name": "Sampler 1 stop",
+      "status": "0x97",
+      "number": "0x38",
+      "action": "sampler.stop",
+      "slot": 0
+    },
+    {
+      "name": "Sampler 2 stop",
+      "status": "0x97",
+      "number": "0x39",
+      "action": "sampler.stop",
+      "slot": 1
+    },
+    {
+      "name": "Sampler 3 stop",
+      "status": "0x97",
+      "number": "0x3A",
+      "action": "sampler.stop",
+      "slot": 2
+    },
+    {
+      "name": "Sampler 4 stop",
+      "status": "0x97",
+      "number": "0x3B",
+      "action": "sampler.stop",
+      "slot": 3
+    },
+    {
+      "name": "Sampler 5 stop",
+      "status": "0x97",
+      "number": "0x3C",
+      "action": "sampler.stop",
+      "slot": 4
+    },
+    {
+      "name": "Sampler 6 stop",
+      "status": "0x97",
+      "number": "0x3D",
+      "action": "sampler.stop",
+      "slot": 5
+    },
+    {
+      "name": "Sampler 7 stop",
+      "status": "0x97",
+      "number": "0x3E",
+      "action": "sampler.stop",
+      "slot": 6
+    },
+    {
+      "name": "Sampler 8 stop",
+      "status": "0x97",
+      "number": "0x3F",
+      "action": "sampler.stop",
+      "slot": 7
+    },
+    {
+      "name": "Deck B jump back 1",
+      "status": "0x97",
+      "number": "0x70",
+      "action": "deck.beatjump_back",
+      "deck": 1,
+      "slot": 2
+    },
+    {
+      "name": "Deck B jump forward 1",
+      "status": "0x97",
+      "number": "0x71",
+      "action": "deck.beatjump_forward",
+      "deck": 1,
+      "slot": 2
+    },
+    {
+      "name": "Deck B jump back 2",
+      "status": "0x97",
+      "number": "0x72",
+      "action": "deck.beatjump_back",
+      "deck": 1,
+      "slot": 3
+    },
+    {
+      "name": "Deck B jump forward 2",
+      "status": "0x97",
+      "number": "0x73",
+      "action": "deck.beatjump_forward",
+      "deck": 1,
+      "slot": 3
+    },
+    {
+      "name": "Deck B jump back 4",
+      "status": "0x97",
+      "number": "0x74",
+      "action": "deck.beatjump_back",
+      "deck": 1,
+      "slot": 4
+    },
+    {
+      "name": "Deck B jump forward 4",
+      "status": "0x97",
+      "number": "0x75",
+      "action": "deck.beatjump_forward",
+      "deck": 1,
+      "slot": 4
+    },
+    {
+      "name": "Deck B jump back 8",
+      "status": "0x97",
+      "number": "0x76",
+      "action": "deck.beatjump_back",
+      "deck": 1,
+      "slot": 5
+    },
+    {
+      "name": "Deck B jump forward 8",
+      "status": "0x97",
+      "number": "0x77",
+      "action": "deck.beatjump_forward",
+      "deck": 1,
+      "slot": 5
+    },
+    {
+      "name": "Crossfader",
+      "status": "0xB0",
+      "number": "0x00",
+      "action": "mixer.crossfader"
+    },
+    {
+      "name": "Browse",
+      "status": "0xB0",
+      "number": "0x01",
+      "action": "browse.scroll",
+      "mode": "relative_twos"
+    },
+    {
+      "name": "Deck A fader",
+      "status": "0xB1",
+      "number": "0x00",
+      "action": "mixer.fader",
+      "deck": 0
+    },
+    {
+      "name": "Deck A EQ low",
+      "status": "0xB1",
+      "number": "0x02",
+      "action": "mixer.eq",
+      "deck": 0,
+      "slot": 0
+    },
+    {
+      "name": "Deck A EQ mid",
+      "status": "0xB1",
+      "number": "0x03",
+      "action": "mixer.eq",
+      "deck": 0,
+      "slot": 1
+    },
+    {
+      "name": "Deck A EQ high",
+      "status": "0xB1",
+      "number": "0x04",
+      "action": "mixer.eq",
+      "deck": 0,
+      "slot": 2
+    },
+    {
+      "name": "Deck A trim",
+      "status": "0xB1",
+      "number": "0x05",
+      "action": "deck.trim",
+      "deck": 0
+    },
+    {
+      "name": "Deck A filter",
+      "status": "0xB1",
+      "number": "0x01",
+      "action": "mixer.filter",
+      "deck": 0
+    },
+    {
+      "name": "Deck A tempo fader",
+      "status": "0xB1",
+      "number": "0x08",
+      "fineNumber": "0x28",
+      "action": "deck.tempo",
+      "deck": 0,
+      "mode": "absolute14"
+    },
+    {
+      "name": "Deck A platter",
+      "status": "0xB1",
+      "number": "0x0A",
+      "action": "jog.turn",
+      "deck": 0,
+      "mode": "relative_twos"
+    },
+    {
+      "name": "Deck A platter",
+      "status": "0xB1",
+      "number": "0x09",
+      "action": "jog.turn",
+      "deck": 0,
+      "mode": "relative_twos"
+    },
+    {
+      "name": "FX 1 wet",
+      "status": "0xB1",
+      "number": "0x07",
+      "action": "master_fx.wet",
+      "deck": 0
+    },
+    {
+      "name": "Deck B fader",
+      "status": "0xB2",
+      "number": "0x00",
+      "action": "mixer.fader",
+      "deck": 1
+    },
+    {
+      "name": "Deck B EQ low",
+      "status": "0xB2",
+      "number": "0x02",
+      "action": "mixer.eq",
+      "deck": 1,
+      "slot": 0
+    },
+    {
+      "name": "Deck B EQ mid",
+      "status": "0xB2",
+      "number": "0x03",
+      "action": "mixer.eq",
+      "deck": 1,
+      "slot": 1
+    },
+    {
+      "name": "Deck B EQ high",
+      "status": "0xB2",
+      "number": "0x04",
+      "action": "mixer.eq",
+      "deck": 1,
+      "slot": 2
+    },
+    {
+      "name": "Deck B trim",
+      "status": "0xB2",
+      "number": "0x05",
+      "action": "deck.trim",
+      "deck": 1
+    },
+    {
+      "name": "Deck B filter",
+      "status": "0xB2",
+      "number": "0x01",
+      "action": "mixer.filter",
+      "deck": 1
+    },
+    {
+      "name": "Deck B tempo fader",
+      "status": "0xB2",
+      "number": "0x08",
+      "fineNumber": "0x28",
+      "action": "deck.tempo",
+      "deck": 1,
+      "mode": "absolute14"
+    },
+    {
+      "name": "Deck B platter",
+      "status": "0xB2",
+      "number": "0x0A",
+      "action": "jog.turn",
+      "deck": 1,
+      "mode": "relative_twos"
+    },
+    {
+      "name": "Deck B platter",
+      "status": "0xB2",
+      "number": "0x09",
+      "action": "jog.turn",
+      "deck": 1,
+      "mode": "relative_twos"
+    },
+    {
+      "name": "FX 2 wet",
+      "status": "0xB2",
+      "number": "0x07",
+      "action": "master_fx.wet",
+      "deck": 1
+    },
+    {
+      "name": "Deck A platter",
+      "status": "0xB4",
+      "number": "0x09",
+      "action": "jog.turn",
+      "deck": 0,
+      "mode": "relative_twos"
+    },
+    {
+      "name": "Deck A platter",
+      "status": "0xB4",
+      "number": "0x0A",
+      "action": "jog.turn",
+      "deck": 0,
+      "mode": "relative_twos"
+    },
+    {
+      "name": "Deck B platter",
+      "status": "0xB5",
+      "number": "0x09",
+      "action": "jog.turn",
+      "deck": 1,
+      "mode": "relative_twos"
+    },
+    {
+      "name": "Deck B platter",
+      "status": "0xB5",
+      "number": "0x0A",
+      "action": "jog.turn",
+      "deck": 1,
+      "mode": "relative_twos"
+    }
+  ]
+}

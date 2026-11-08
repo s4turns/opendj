@@ -73,7 +73,7 @@ namespace
 
             surface.setUserMappingFolder (user);
             REQUIRE (surface.loadMappingsFromFolder (shipped) == 1);
-            REQUIRE (surface.getSelectedMappingName() == "Test Controller");
+            REQUIRE (surface.selectMapping ("Test Controller"));
         }
 
         ~Harness()
@@ -500,10 +500,29 @@ TEST_CASE ("a saved mapping takes the shipped one's place next time", "[learn][s
     // In the order the application looks: the user's folder first.
     REQUIRE (again.loadMappingsFromFolder (h.user) == 1);
     REQUIRE (again.loadMappingsFromFolder (h.shipped) == 0);
-    REQUIRE (again.getSelectedMappingName() == "Test Controller");
+    REQUIRE (again.selectMapping ("Test Controller"));
 
     again.injectMessage (juce::MidiMessage (0x90, 0x21, 127));
     REQUIRE (engine.getDeck (0).getKeyShift() == 1);
+}
+
+TEST_CASE ("a device gets the mapping that recognises it, or none", "[learn][surface]")
+{
+    Harness h;
+
+    // Loading alone chooses nothing, however many mappings there are.
+    AudioEngine engine;
+    ActionDispatcher dispatcher (engine);
+    MidiControlSurface fresh (engine, dispatcher);
+    REQUIRE (fresh.loadMappingsFromFolder (h.shipped) == 1);
+    REQUIRE (fresh.getSelectedMappingName().isEmpty());
+
+    fresh.chooseMappingFor ("Test Controller MIDI 1");
+    REQUIRE (fresh.getSelectedMappingName() == "Test Controller");
+
+    // An unknown controller must not inherit the last one's mapping.
+    fresh.chooseMappingFor ("Some Unknown Box");
+    REQUIRE (fresh.getSelectedMappingName().isEmpty());
 }
 
 TEST_CASE ("learning over a control replaces it", "[learn][surface]")

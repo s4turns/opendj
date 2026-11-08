@@ -24,7 +24,7 @@ backspin, reverse and censor, named hot cues, a sampler with four banks that can
 a mic and an aux input, playlists and automix with smart crossfades, rekordbox import, a searchable
 track library, set recording to WAV, FLAC or MP3 with a tracklist, broadcasting to Icecast and RTMP,
 MilkDrop visuals, MIDI learn, and Roland DJ-202 support including its own audio interface and its
-platters.
+platters, with seven more controllers mapped from Mixxx's work and waiting to be tried.
 
 ## Design goals
 
@@ -365,7 +365,25 @@ Mappings are JSON files in `mappings/`, not code. Copy one, change the numbers, 
 controller works without rebuilding anything. A control with a mistake in it is skipped with a
 warning shown in that panel, so one typo costs you one button rather than the whole device.
 
-A recognised controller is opened automatically at startup.
+A recognised controller is opened automatically at startup. A controller nothing recognises starts
+with no mapping, so pick one in that panel or teach it with Learn.
+
+Mappings ship for these:
+
+| Controller | Tried on the hardware |
+| --- | --- |
+| Roland DJ-202 | Yes |
+| Pioneer DDJ-FLX4, DDJ-400 | Not yet |
+| Hercules DJControl Inpulse 200, Inpulse 300, Starlight | Not yet |
+| Denon MC4000 | Not yet |
+| Reloop Mixage | Not yet |
+
+All but the DJ-202 are translated from [Mixxx](https://mixxx.org)'s community mappings, with credit
+in each file, and each file's description lists what it leaves out. If you own one, the monitor in the
+Controller panel will show how close it is, and an issue saying so would help. Controllers that speak
+HID rather than MIDI, such as Traktor's S2 and S4, are not supported.
+
+To bring in another from Mixxx, add it to the table in `scripts/import-mixxx-mapping.py`.
 
 **Learn** teaches a mapping from the hardware. With the controller open, choose an action, the deck
 and slot if it uses them, press Learn, and press or move the control. A button is taken at once. A

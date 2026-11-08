@@ -61,6 +61,7 @@ that was listed after it except video.
 | Stem separation | ✅ | `src/analysis/StemSeparator.*`, `StemDsp.*`, a knob per stem |
 | Stem pads, an effect on one stem, preparing ahead (#22) | 🚧 | `Deck::setStemFxEnabled` and friends, `src/ui/StemPrepareMenu.h`. Tested with hand-built stems and a stand-in separator; not yet run with a real separation model |
 | MIDI learn (#19) | 🚧 | `src/control/MidiLearn.*`, in the Controller panel. Tested with messages fed in where a device delivers them; not yet on a controller |
+| Controllers beyond the DJ-202 (#4) | 🚧 | Seven mappings in `mappings/`, translated from Mixxx's by `scripts/import-mixxx-mapping.py`. Tested by reading them back, not yet on any of the hardware. See Controllers below |
 | rekordbox import (#23) | ✅ | `src/library/RekordboxImport.*`: grids, hot cues, playlists, colours, ratings and comments |
 | Stems on the GPU (#36) | ✅ | `src/analysis/StemModel.*`: ONNX Runtime with CUDA on an NVIDIA card, OpenVINO on Intel graphics or the CPU. A five minute track takes 27 s on an RTX 4070 against 118 s on the CPU. Core ML on a Mac: a six minute track takes about 26 s on an M5 Pro, 2.5 times as fast as its CPU |
 | Record the master output | ✅ | `src/core/SetRecorder.*`: WAV, FLAC or MP3, with a tracklist |
@@ -78,6 +79,8 @@ that was listed after it except video.
 | History and smart folders (#11) | The biggest gap left in the VirtualDJ comparison below. `tracks.last_played_at` exists but nothing writes it |
 | Hands-on checks of recent work | Stem pads and stem FX with a real separation model, MIDI learn on a real controller, the new effects and key tools heard in a set, auto gain across a real collection, the aux input with a real source. All are tested by measurement; none has been used in anger |
 | DJ-202 pad modes on the hardware, then the rest (#6) | Loop, roll and sampler modes are mapped from Mixxx's DJ-202 script and need pressing on the controller. Cue loop, pitch play, slicer, the parameter buttons and the TR-S sequencer are not mapped |
+| The controllers from Mixxx, on the hardware (#4) | None of the seven has been touched by anyone yet. Device name hints, tempo direction, platter feel and the lights all need someone with the controller |
+| More controllers (#4) | Next are the popular ones that live almost entirely in Mixxx's JavaScript and need translating by hand: Numark Mixtrack Platinum FX, Party Mix and DJ2GO2 Touch, Hercules Inpulse 500, Roland DJ-505, Denon MC7000, Pioneer DDJ-SB3. HID and bulk USB controllers, such as Traktor's S2 and S4, need a layer OpenDJ does not have |
 | Arch | `scripts/build.sh` knows the Arch packages but has never been run there |
 | macOS hardware coverage | Apple Silicon builds, tests and opens with CoreAudio. Intel hardware and the DJ-202 on macOS still need checking; see Platforms below |
 | Video (#8) | Playing video files is unstarted, and probably its own project. The visualiser is separate and built |
@@ -103,7 +106,7 @@ Some of it is partly there already: pitch bend through the jog wheel's nudge.
 | Key tools (#16) | Key shift in semitones, key match between decks, Camelot display, harmonic hints in the browser | Done: all four. Hints are colours on the Key column rather than a filter. Measured by counting the pitch that comes out on test tones; not yet heard on music |
 | Auto gain (#17) | Tracks levelled by measured loudness | Done. Readings agree with ffmpeg's `ebur128` to within 0.05 LU on three test tracks, not yet tried across a real collection |
 | Vocal-aware automix (#37) | Transitions that keep two vocals from overlapping | Vocals are kept apart, levels matched, and sections read from energy and vocals; not yet heard through a whole set. Sections come from energy, not from recognising repeated material, so a verse and a chorus of the same fullness look alike without stems |
-| MIDI learn and more controllers (#19, #4) | Hundreds of controllers mapped out of the box, and a mapper that learns a control from the hardware | Learn is done, from the Controller panel, tested with messages fed in at the point a device delivers them and not yet on a controller. One mapping ships, written by hand |
+| MIDI learn and more controllers (#19, #4) | Hundreds of controllers mapped out of the box, and a mapper that learns a control from the hardware | Learn is done, from the Controller panel, tested with messages fed in at the point a device delivers them and not yet on a controller. Eight mappings ship: the DJ-202, written by hand, and seven translated from Mixxx, not yet tried on their hardware |
 
 ### Expected by regular users
 
@@ -794,6 +797,34 @@ audio device in JUCE's own `audio-device.xml` next to it.
 | Pads reload from their files | A file that moved leaves its pad empty, which is the truth, rather than a pad that looks loaded and plays nothing |
 | Written to a temporary file and moved into place | An interrupted write leaves the previous settings, not half of the new ones |
 | Plain JSON | A setting can be corrected by hand before an interface for it exists |
+
+## Controllers
+
+| Controller | Status | Platter ticks | Starts by | Worth knowing |
+| --- | --- | --- | --- | --- |
+| Roland DJ-202 | ✅ | 800 | A handshake, repeated | Written by hand, and the one that has been played. Details below |
+| Pioneer DDJ-FLX4 | 🚧 | 720 | A sysex, repeated every 200 ms | From Mixxx's mapping, not tried on the hardware |
+| Pioneer DDJ-400 | 🚧 | 720 | A sysex asking where the knobs are | From Mixxx's mapping, not tried on the hardware |
+| Hercules DJControl Inpulse 200 | 🚧 | 248 | A request for the knob positions | From Mixxx's mapping, not tried on the hardware |
+| Hercules DJControl Inpulse 300 | 🚧 | 248 | A request for the knob positions | From Mixxx's mapping, not tried on the hardware |
+| Hercules DJControl Starlight | 🚧 | 248 | A request for the knob positions | From Mixxx's mapping, not tried on the hardware. Mixxx binds no browse or load, so neither does this |
+| Denon MC4000 | 🚧 | 605 | A sysex asking where the knobs are | From Mixxx's mapping, not tried on the hardware |
+| Reloop Mixage | 🚧 | 620 | Nothing | From Mixxx's mapping, not tried on the hardware. Touching the platter scratches, where Mixxx waits for the disc button |
+
+A Mixxx mapping is XML that binds messages to Mixxx's controls, and JavaScript for what a binding
+cannot do. `scripts/import-mixxx-mapping.py` translates the XML mechanically. For the JavaScript it has
+a table per model saying what each function amounts to here, written by reading that script. It reads
+one pinned Mixxx commit, so the output can be reproduced, and generated files should be changed by
+changing the script. Whatever has no equivalent is named in the mapping's own description.
+
+| Decision | Why |
+| --- | --- |
+| No script engine | A mapping stays something a person can read and send to someone else. The cost is that a model living entirely in JavaScript is a translation by hand |
+| A device nothing recognises gets no mapping | With one mapping, falling back to it was harmless. With eight, an unknown controller would have been sent some other model's handshake |
+| Hints name the model exactly | They are substrings and the first match wins. A test keeps any one from catching another's device |
+| Mixxx's three-effect racks reach the first effect only | OpenDJ has one effect in each of two master units, so that is what lines up |
+| A shifted platter message stays mapped | If Shift goes down while a hand is on the platter, the release arrives on the shifted note. Unmapped, the deck would stay in a scratch |
+| `reloop_toggle` is `loop.toggle`, not `loop.reloop` | The button has to be able to end a loop, and `loop.reloop` only starts one |
 
 ## MIDI learn
 

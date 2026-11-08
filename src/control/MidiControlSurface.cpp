@@ -135,15 +135,7 @@ juce::Result MidiControlSurface::openDevice (const juce::String& inputIdentifier
         }
     }
 
-    // Pick the mapping that recognises this device, if one does.
-    for (size_t i = 0; i < mappings.size(); ++i)
-    {
-        if (mappings[i].matchesDeviceName (openDeviceName))
-        {
-            selectedMapping = static_cast<int> (i);
-            break;
-        }
-    }
+    chooseMappingFor (openDeviceName);
 
     trace (selectedMapping >= 0
             ? "selected mapping \"" + mappings[(size_t) selectedMapping].name + "\""
@@ -289,12 +281,26 @@ int MidiControlSurface::loadMappingsFromFolder (const juce::File& folder)
         ++loaded;
     }
 
+    return loaded;
+}
+
+void MidiControlSurface::chooseMappingFor (const juce::String& deviceName)
+{
     std::lock_guard<std::mutex> lock (mappingMutex);
 
-    if (selectedMapping < 0 && ! mappings.empty())
-        selectedMapping = 0;
+    // If nothing recognises it, it gets nothing: another controller's mapping
+    // would misread it, and that mapping's handshake would be sent to hardware
+    // it was never meant for.
+    selectedMapping = -1;
 
-    return loaded;
+    for (size_t i = 0; i < mappings.size(); ++i)
+    {
+        if (mappings[i].matchesDeviceName (deviceName))
+        {
+            selectedMapping = static_cast<int> (i);
+            return;
+        }
+    }
 }
 
 juce::StringArray MidiControlSurface::getDeviceNameHints() const

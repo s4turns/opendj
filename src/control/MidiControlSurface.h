@@ -67,6 +67,9 @@ public:
     /** Loads every .json mapping in a folder. Returns how many loaded. */
     int loadMappingsFromFolder (const juce::File& folder);
 
+    /** Selects the mapping that recognises a device's name, or none if none does. */
+    void chooseMappingFor (const juce::String& deviceName);
+
     juce::StringArray getMappingNames() const;
 
     /** Every device name the loaded mappings recognise. A controller's audio

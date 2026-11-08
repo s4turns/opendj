@@ -6,6 +6,12 @@
 
 #include "control/MidiMapping.h"
 
+#include <map>
+#include <set>
+#include <tuple>
+#include <utility>
+#include <vector>
+
 namespace
 {
     opendj::MidiMapping parse (const juce::String& json, juce::StringArray& warnings)
@@ -38,6 +44,62 @@ namespace
         }
 
         return {};
+    }
+
+    /** Every mapping in the shipped folder, each already required to load clean. */
+    std::vector<std::pair<juce::String, opendj::MidiMapping>> shippedMappings()
+    {
+        const auto anchor = findShippedMapping();
+        REQUIRE (anchor.existsAsFile());
+
+        std::vector<std::pair<juce::String, opendj::MidiMapping>> all;
+
+        for (const auto& entry : juce::RangedDirectoryIterator (anchor.getParentDirectory(), false, "*.json"))
+        {
+            opendj::MidiMapping mapping;
+            juce::StringArray warnings;
+            const auto result = opendj::MidiMapping::loadFromFile (entry.getFile(), mapping, warnings);
+
+            INFO (entry.getFile().getFileName() << ": " << result.getErrorMessage()
+                  << " " << warnings.joinIntoString ("; "));
+            REQUIRE (result.wasOk());
+            REQUIRE (warnings.isEmpty());
+
+            all.emplace_back (entry.getFile().getFileName(), std::move (mapping));
+        }
+
+        return all;
+    }
+
+    opendj::MidiMapping shippedMapping (const juce::String& fileName)
+    {
+        const auto file = findShippedMapping().getParentDirectory().getChildFile (fileName);
+
+        opendj::MidiMapping mapping;
+        juce::StringArray warnings;
+        const auto result = opendj::MidiMapping::loadFromFile (file, mapping, warnings);
+
+        INFO (fileName << ": " << result.getErrorMessage());
+        REQUIRE (result.wasOk());
+        return mapping;
+    }
+
+    struct Message
+    {
+        int status = 0;
+        int number = 0;
+    };
+
+    const opendj::MidiControl& requireControl (const opendj::MidiMapping& mapping, Message message,
+                                               opendj::Action action, int deck)
+    {
+        const auto* control = mapping.findControl (message.status, message.number, false);
+
+        INFO ("status " << message.status << " number " << message.number);
+        REQUIRE (control != nullptr);
+        REQUIRE (control->action == action);
+        REQUIRE (control->deck == deck);
+        return *control;
     }
 }
 
@@ -643,4 +705,203 @@ TEST_CASE ("the shipped DJ-202 mapping reaches the FX section", "[midi][mapping]
             REQUIRE (mapping.findControl (status, 0x02, false) == nullptr);
         }
     }
+}
+
+TEST_CASE ("every shipped mapping loads without warnings", "[midi][mapping][shipped]")
+{
+    // At least the DJ-202 and the seven taken from Mixxx.
+    REQUIRE (shippedMappings().size() >= 8);
+}
+
+TEST_CASE ("no shipped mapping gives one message two meanings", "[midi][mapping][shipped]")
+{
+    for (const auto& [file, mapping] : shippedMappings())
+    {
+        std::set<std::tuple<int, int, bool>> seen;
+
+        for (const auto& control : mapping.controls)
+        {
+            INFO (file << ": " << control.name);
+            REQUIRE (seen.insert ({ control.status, control.number, control.requiresShift }).second);
+
+            if (control.fineNumber >= 0)
+                REQUIRE (seen.insert ({ control.status, control.fineNumber, control.requiresShift }).second);
+        }
+    }
+}
+
+TEST_CASE ("no shipped mapping drives one light from two controls", "[midi][mapping][shipped]")
+{
+    // Two controls on one light that disagree would flip it every feedback tick.
+    for (const auto& [file, mapping] : shippedMappings())
+    {
+        std::map<std::pair<int, int>, juce::String> lights;
+
+        for (const auto& control : mapping.controls)
+        {
+            if (control.feedbackNumber < 0)
+                continue;
+
+            auto& holder = lights[{ control.status & 0x0F, control.feedbackNumber }];
+
+            INFO (file << ": " << control.name << " and " << holder);
+            REQUIRE (holder.isEmpty());
+            holder = control.name;
+        }
+    }
+}
+
+TEST_CASE ("a shipped mapping's device hints cannot catch another controller", "[midi][mapping][shipped]")
+{
+    // Hints are substrings and the first match wins, so a loose one would take
+    // over a model it was not written for.
+    const auto all = shippedMappings();
+
+    for (const auto& [file, mapping] : all)
+    {
+        REQUIRE_FALSE (mapping.deviceNameHints.isEmpty());
+
+        for (const auto& hint : mapping.deviceNameHints)
+        {
+            for (const auto& [otherFile, other] : all)
+            {
+                if (otherFile == file)
+                    continue;
+
+                INFO (file << " hint " << hint << " against " << otherFile);
+                REQUIRE_FALSE (other.matchesDeviceName (hint));
+            }
+        }
+    }
+}
+
+TEST_CASE ("the mappings taken from Mixxx reach the essentials of each controller", "[midi][mapping][imported]")
+{
+    using opendj::Action;
+    using opendj::ValueMode;
+
+    struct Expected
+    {
+        const char* file;
+        int ticks;
+        Message playA, playB, touchA, touchB, turnA, turnB, tempoA, tempoB;
+        ValueMode jogMode, tempoMode;
+        bool tempoInverted;
+        size_t initMessages;
+    };
+
+    const Expected models[] = {
+        { "pioneer-ddj-flx4.json", 720, { 0x90, 0x0B }, { 0x91, 0x0B }, { 0x90, 0x36 }, { 0x91, 0x36 },
+          { 0xB0, 0x22 }, { 0xB1, 0x22 }, { 0xB0, 0x00 }, { 0xB1, 0x00 },
+          ValueMode::relativeOffset, ValueMode::absolute14Bit, true, 1 },
+        { "pioneer-ddj-400.json", 720, { 0x90, 0x0B }, { 0x91, 0x0B }, { 0x90, 0x36 }, { 0x91, 0x36 },
+          { 0xB0, 0x22 }, { 0xB1, 0x22 }, { 0xB0, 0x00 }, { 0xB1, 0x00 },
+          ValueMode::relativeOffset, ValueMode::absolute14Bit, true, 1 },
+        { "hercules-djcontrol-inpulse-200.json", 248, { 0x91, 0x07 }, { 0x92, 0x07 }, { 0x91, 0x08 }, { 0x92, 0x08 },
+          { 0xB1, 0x0A }, { 0xB2, 0x0A }, { 0xB1, 0x08 }, { 0xB2, 0x08 },
+          ValueMode::relativeTwosComplement, ValueMode::absolute14Bit, false, 1 },
+        { "hercules-djcontrol-inpulse-300.json", 248, { 0x91, 0x07 }, { 0x92, 0x07 }, { 0x91, 0x08 }, { 0x92, 0x08 },
+          { 0xB1, 0x0A }, { 0xB2, 0x0A }, { 0xB1, 0x08 }, { 0xB2, 0x08 },
+          ValueMode::relativeTwosComplement, ValueMode::absolute14Bit, false, 1 },
+        { "hercules-djcontrol-starlight.json", 248, { 0x91, 0x07 }, { 0x92, 0x07 }, { 0x91, 0x08 }, { 0x92, 0x08 },
+          { 0xB1, 0x0A }, { 0xB2, 0x0A }, { 0xB1, 0x08 }, { 0xB2, 0x08 },
+          ValueMode::relativeTwosComplement, ValueMode::absolute14Bit, false, 1 },
+        { "denon-mc4000.json", 605, { 0x90, 0x00 }, { 0x91, 0x00 }, { 0x90, 0x06 }, { 0x91, 0x06 },
+          { 0xB0, 0x06 }, { 0xB1, 0x06 }, { 0xB0, 0x09 }, { 0xB1, 0x09 },
+          ValueMode::relativeTwosComplement, ValueMode::absolute14Bit, false, 1 },
+        { "reloop-mixage.json", 620, { 0x90, 0x0C }, { 0x90, 0x1A }, { 0x90, 0x24 }, { 0x90, 0x25 },
+          { 0xB0, 0x24 }, { 0xB0, 0x25 }, { 0xE0, 0x00 }, { 0xE1, 0x00 },
+          ValueMode::relativeOffset, ValueMode::pitchBend14, false, 0 },
+    };
+
+    for (const auto& model : models)
+    {
+        INFO (model.file);
+        const auto mapping = shippedMapping (model.file);
+
+        REQUIRE (mapping.jogTicksPerRevolution == model.ticks);
+        REQUIRE (mapping.initMessages.size() == model.initMessages);
+
+        REQUIRE (requireControl (mapping, model.playA, Action::deckPlayToggle, 0).feedbackNumber == model.playA.number);
+        requireControl (mapping, model.playB, Action::deckPlayToggle, 1);
+
+        requireControl (mapping, model.touchA, Action::jogTouch, 0);
+        requireControl (mapping, model.touchB, Action::jogTouch, 1);
+
+        REQUIRE (requireControl (mapping, model.turnA, Action::jogTurn, 0).mode == model.jogMode);
+        REQUIRE (requireControl (mapping, model.turnB, Action::jogTurn, 1).mode == model.jogMode);
+
+        const auto& tempoA = requireControl (mapping, model.tempoA, Action::deckTempo, 0);
+        const auto& tempoB = requireControl (mapping, model.tempoB, Action::deckTempo, 1);
+
+        REQUIRE (tempoA.mode == model.tempoMode);
+        REQUIRE (tempoB.mode == model.tempoMode);
+        REQUIRE (tempoA.inverted == model.tempoInverted);
+        REQUIRE (tempoB.inverted == model.tempoInverted);
+    }
+}
+
+TEST_CASE ("only the FLX4 needs reminding to keep talking", "[midi][mapping][imported]")
+{
+    const auto flx4 = shippedMapping ("pioneer-ddj-flx4.json");
+    REQUIRE (flx4.keepAliveIntervalMs == 200);
+    REQUIRE (flx4.keepAliveMessages.size() == 1);
+
+    REQUIRE (shippedMapping ("pioneer-ddj-400.json").keepAliveIntervalMs == 0);
+}
+
+TEST_CASE ("a Hercules platter stays on its deck while Shift is held", "[midi][mapping][imported]")
+{
+    using opendj::Action;
+
+    // Shift moves these onto MIDI channels of their own, and a hand that lifts
+    // after Shift went down has to be heard as released all the same.
+    const auto mapping = shippedMapping ("hercules-djcontrol-inpulse-200.json");
+
+    requireControl (mapping, { 0x94, 0x08 }, Action::jogTouch, 0);
+    requireControl (mapping, { 0x95, 0x08 }, Action::jogTouch, 1);
+    requireControl (mapping, { 0xB4, 0x0A }, Action::jogTurn, 0);
+    requireControl (mapping, { 0xB5, 0x0A }, Action::jogTurn, 1);
+}
+
+TEST_CASE ("the Pioneer pads reach what their script would have", "[midi][mapping][imported]")
+{
+    using opendj::Action;
+
+    for (const auto* file : { "pioneer-ddj-flx4.json", "pioneer-ddj-400.json" })
+    {
+        INFO (file);
+        const auto mapping = shippedMapping (file);
+
+        REQUIRE (requireControl (mapping, { 0x97, 0x00 }, Action::hotCue, 0).slot == 0);
+        REQUIRE (requireControl (mapping, { 0x99, 0x07 }, Action::hotCue, 1).slot == 7);
+        REQUIRE (requireControl (mapping, { 0x98, 0x00 }, Action::hotCueClear, 0).slot == 0);
+
+        // Pads run back 1, forward 1, back 2, forward 2 and so on. Slot 2 is one beat.
+        REQUIRE (requireControl (mapping, { 0x97, 0x20 }, Action::beatJumpBack, 0).slot == 2);
+        REQUIRE (requireControl (mapping, { 0x97, 0x21 }, Action::beatJumpForward, 0).slot == 2);
+        REQUIRE (requireControl (mapping, { 0x99, 0x27 }, Action::beatJumpForward, 1).slot == 5);
+
+        // The right hand's pads reach the same eight slots as the left's.
+        const auto* left = mapping.findControl (0x97, 0x30, false);
+        const auto* right = mapping.findControl (0x99, 0x37, false);
+
+        REQUIRE (left != nullptr);
+        REQUIRE (right != nullptr);
+        REQUIRE (left->action == Action::samplerTrigger);
+        REQUIRE (left->slot == 0);
+        REQUIRE (right->slot == 7);
+
+        requireControl (mapping, { 0x90, 0x67 }, Action::jogTouch, 0);
+    }
+}
+
+TEST_CASE ("the Mixage's lights come from its script's table", "[midi][mapping][imported]")
+{
+    using opendj::Action;
+
+    const auto mapping = shippedMapping ("reloop-mixage.json");
+
+    REQUIRE (requireControl (mapping, { 0x90, 0x1A }, Action::deckPlayToggle, 1).feedbackNumber == 0x1A);
+    REQUIRE (requireControl (mapping, { 0x90, 0x0E }, Action::channelCueToggle, 0).feedbackNumber == 0x0E);
 }
